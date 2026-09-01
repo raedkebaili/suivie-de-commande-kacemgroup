@@ -1,4 +1,4 @@
-export type Role = "superadmin" | "commercial" | "technique" | "planification" | "consultant_prod";
+export type Role = "superadmin" | "commercial" | "technique" | "planification" | "consultant_prod" | "recouvrement";
 export type Priority = "PREVISION" | "NORMALE" | "URGENTE" | "TRES_URGENTE";
 export type OrderStatus = "SUR_STOCK" | "BON_COMMANDE" | "PREVISION" | "EN_INSTANCE" | "EN_PRODUCTION" | "LIVREE" | "ANNULEE";
 
@@ -55,4 +55,8 @@ export const STATUS_LABELS: Record<string, string> = { SUR_STOCK: "Sur Stock", B
 export const STATUS_COLORS: Record<string, string> = { SUR_STOCK: "bg-cyan-500", BON_COMMANDE: "bg-blue-500", PREVISION: "bg-orange-500", EN_INSTANCE: "bg-violet-500", EN_PRODUCTION: "bg-yellow-500", LIVREE: "bg-green-500", ANNULEE: "bg-[#FF2C2C]" };
 export const STATUS_BG: Record<string, string> = { SUR_STOCK: "bg-cyan-100 dark:bg-cyan-900/30 border-cyan-300 dark:border-cyan-700", BON_COMMANDE: "bg-blue-100 dark:bg-blue-900/30 border-blue-300 dark:border-blue-700", PREVISION: "bg-orange-100 dark:bg-orange-900/30 border-orange-300 dark:border-orange-700", EN_INSTANCE: "bg-violet-100 dark:bg-violet-900/30 border-violet-300 dark:border-violet-700", EN_PRODUCTION: "bg-yellow-100 dark:bg-yellow-900/30 border-yellow-300 dark:border-yellow-700", LIVREE: "bg-green-100 dark:bg-green-900/30 border-green-300 dark:border-green-700", ANNULEE: "bg-[#FF2C2C]/30 dark:bg-[#FF2C2C]/20 border-[#FF2C2C] dark:border-[#B81F1F]" };
 export const PRIORITY_LABELS: Record<string, string> = { PREVISION: "Prévision", NORMALE: "Normale", URGENTE: "Urgente", TRES_URGENTE: "Très Urgente" };
-export const ROLE_LABELS: Record<string, string> = { superadmin: "Super Admin", commercial: "Commercial", technique: "Technique", planification: "Planification", consultant_prod: "Consultant Prod" };
+export const ROLE_LABELS: Record<string, string> = { superadmin: "Super Admin", commercial: "Commercial", technique: "Technique", planification: "Planification", consultant_prod: "Consultant Prod", recouvrement: "Recouvrement" };
+
+// ── Recouvrement ──
+export type RecouvrementState = { id: number; key: string; label: string; description: string | null; colorKey: string; sortOrder: number; active: boolean };
+export type ClientRecouvrementAssignment = { clientId: number; clientName: string; stateId: number; stateKey: string; label: string; colorKey: string; note: string | null; updatedByName: string | null; updatedAt: string | null };

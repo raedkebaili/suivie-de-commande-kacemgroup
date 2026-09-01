@@ -190,4 +190,5 @@ export const COLOR_CATEGORIES: Record<string, string> = {
   priority: "Priorités",
   tracking: "Suivi des Modifications",
   etude: "Études Photométriques",
+  recouvrement: "États de Recouvrement",
 };

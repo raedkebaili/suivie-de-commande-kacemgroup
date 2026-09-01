@@ -278,3 +278,43 @@ export const photometricStudyItems = pgTable("photometric_study_items", {
   note: text("note"),                                      // Note par article
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
 });
+
+// ── Recouvrement (ajout) ────────────────────────────────────────────
+// Catalogue dynamique des états de recouvrement.
+// colorKey référence une clé de app_colors (catégorie "recouvrement") afin que
+// la couleur reste personnalisable depuis l'onglet Couleurs de l'admin.
+export const recouvrementStates = pgTable("recouvrement_states", {
+  id: serial("id").primaryKey(),
+  key: text("key").notNull().unique(),                     // Ex: "EN_RETARD", "RELANCE_1"
+  label: text("label").notNull(),                          // Ex: "En retard"
+  description: text("description"),
+  colorKey: text("color_key").notNull().default("RECOUVREMENT_GRAY"), // clé app_colors
+  sortOrder: integer("sort_order").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
+});
+
+// État de recouvrement courant d'un client (1 état max par client)
+export const clientRecouvrementStates = pgTable("client_recouvrement_states", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().unique().references(() => clients.id, { onDelete: "cascade" }),
+  stateId: integer("state_id").notNull().references(() => recouvrementStates.id, { onDelete: "restrict" }),
+  note: text("note"),
+  updatedById: integer("updated_by_id").references(() => users.id, { onDelete: "set null" }),
+  updatedByName: text("updated_by_name"),
+  createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
+});
+
+// Historique des changements d'état de recouvrement (traçabilité, style activity_logs)
+export const clientRecouvrementLogs = pgTable("client_recouvrement_logs", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  stateId: integer("state_id").references(() => recouvrementStates.id, { onDelete: "set null" }),
+  stateLabel: text("state_label"),                         // Copie du libellé pour historique
+  note: text("note"),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  username: text("username").notNull(),
+  createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+});

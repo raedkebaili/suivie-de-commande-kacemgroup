@@ -5,6 +5,7 @@ import {
   users, agencies, clients, orders, orderItems, productionBatches, expeditionBatches,
   productionUnitLib, articleLibrary, techLibrary, materialCategories, matieres, itemTechnicalComponents,
   activityLogs, modificationLogs, notifications, backupHistory, photometricStudies, photometricStudyItems,
+  recouvrementStates, clientRecouvrementStates, clientRecouvrementLogs,
 } from "@/db/schema";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 
@@ -37,6 +38,9 @@ export async function GET(request: NextRequest) {
       notifications: await db.select().from(notifications),
       photometricStudies: await db.select().from(photometricStudies),
       photometricStudyItems: await db.select().from(photometricStudyItems),
+      recouvrementStates: await db.select().from(recouvrementStates),
+      clientRecouvrementStates: await db.select().from(clientRecouvrementStates),
+      clientRecouvrementLogs: await db.select().from(clientRecouvrementLogs),
     };
 
     const totalRecords = Object.values(data).reduce((sum, rows) => sum + rows.length, 0);
@@ -125,6 +129,9 @@ export async function POST(request: NextRequest) {
   const notificationsRows = arr<typeof notifications.$inferInsert>("notifications");
   const photometricStudiesRows = arr<typeof photometricStudies.$inferInsert>("photometricStudies");
   const photometricStudyItemsRows = arr<typeof photometricStudyItems.$inferInsert>("photometricStudyItems");
+  const recouvrementStatesRows = arr<typeof recouvrementStates.$inferInsert>("recouvrementStates");
+  const clientRecouvrementStatesRows = arr<typeof clientRecouvrementStates.$inferInsert>("clientRecouvrementStates");
+  const clientRecouvrementLogsRows = arr<typeof clientRecouvrementLogs.$inferInsert>("clientRecouvrementLogs");
 
   const insertChunked = async <T extends Record<string, unknown>>(
     tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
@@ -142,6 +149,8 @@ export async function POST(request: NextRequest) {
   try {
     await db.transaction(async (tx) => {
       // Delete in reverse FK-dependency order
+      await tx.delete(clientRecouvrementLogs);
+      await tx.delete(clientRecouvrementStates);
       await tx.delete(notifications);
       await tx.delete(modificationLogs);
       await tx.delete(activityLogs);
@@ -158,6 +167,7 @@ export async function POST(request: NextRequest) {
       await tx.delete(articleLibrary);
       await tx.delete(productionUnitLib);
       await tx.delete(clients);
+      await tx.delete(recouvrementStates);
       await tx.delete(agencies);
       await tx.delete(users);
 
@@ -165,6 +175,9 @@ export async function POST(request: NextRequest) {
       await insertChunked(tx, users, usersRows);
       await insertChunked(tx, agencies, agenciesRows);
       await insertChunked(tx, clients, clientsRows);
+      await insertChunked(tx, recouvrementStates, recouvrementStatesRows);
+      await insertChunked(tx, clientRecouvrementStates, clientRecouvrementStatesRows);
+      await insertChunked(tx, clientRecouvrementLogs, clientRecouvrementLogsRows);
       await insertChunked(tx, orders, ordersRows);
       await insertChunked(tx, orderItems, orderItemsRows);
       await insertChunked(tx, materialCategories, materialCategoriesRows);
@@ -187,6 +200,7 @@ export async function POST(request: NextRequest) {
         "expedition_batches", "production_unit_lib", "article_library", "tech_library",
         "material_categories", "matieres", "item_technical_components", "activity_logs", "modification_logs", "notifications",
         "photometric_studies", "photometric_study_items",
+        "recouvrement_states", "client_recouvrement_states", "client_recouvrement_logs",
       ];
       for (const t of tableNames) {
         await tx.execute(
@@ -204,7 +218,8 @@ export async function POST(request: NextRequest) {
     productionUnitLibRows.length + articleLibraryRows.length + techLibraryRows.length +
     materialCategoriesRows.length + matieresRows.length + itemTechnicalComponentsRows.length +
     activityLogsRows.length + modificationLogsRows.length + notificationsRows.length +
-    photometricStudiesRows.length + photometricStudyItemsRows.length;
+    photometricStudiesRows.length + photometricStudyItemsRows.length +
+    recouvrementStatesRows.length + clientRecouvrementStatesRows.length + clientRecouvrementLogsRows.length;
 
   await logActivity(user.id, user.username, "BACKUP_RESTORE", `Restauration effectuée: ${totalRestored} enregistrements`);
 

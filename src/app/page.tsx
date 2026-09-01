@@ -16,12 +16,13 @@ import ExpeditionView from "@/components/ExpeditionView";
 import MatiereView from "@/components/MatiereView";
 import BackupView from "@/components/BackupView";
 import ColorsView from "@/components/ColorsView";
+import RecouvrementView from "@/components/RecouvrementView";
 import type { Notification } from "@/lib/types";
 import { startBackupScheduler, stopBackupScheduler } from "@/lib/backup-scheduler";
 
 function formatNotifDate(d: string) { if (!d) return ""; const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(d); if (m) return `${m[3]}/${m[2]} ${m[4]}:${m[5]}`; return d.substring(0,16); }
 
-type Tab = "dashboard" | "orders" | "production" | "expedition" | "matieres" | "agencies" | "clients" | "users" | "watchdog" | "backup" | "colors";
+type Tab = "dashboard" | "orders" | "production" | "expedition" | "matieres" | "agencies" | "clients" | "users" | "watchdog" | "backup" | "colors" | "recouvrement";
 
 // Hoisted outside the component: this list is static and doesn't need to be
 // recreated on every render. Also reused by the Electron shortcut handler to
@@ -33,7 +34,8 @@ const TABS: { key: Tab; label: string; roles: string[] }[] = [
   { key: "expedition", label: "Expédition", roles: ["superadmin", "planification"] },
   { key: "matieres", label: "Matières", roles: ["superadmin", "technique"] },
   { key: "agencies", label: "Agences", roles: ["superadmin", "commercial"] },
-  { key: "clients", label: "Clients", roles: ["superadmin", "commercial"] },
+  { key: "clients", label: "Clients", roles: ["superadmin", "commercial", "recouvrement"] },
+  { key: "recouvrement", label: "Recouvrement", roles: ["superadmin", "recouvrement"] },
   { key: "users", label: "Utilisateurs", roles: ["superadmin"] },
   { key: "watchdog", label: "Watchdog", roles: ["superadmin"] },
   { key: "backup", label: "Sauvegarde", roles: ["superadmin"] },
@@ -267,6 +269,7 @@ export default function HomePage() {
           {activeTab === "matieres" && <MatiereView user={user} />}
           {activeTab === "agencies" && <AgenciesView user={user} />}
           {activeTab === "clients" && <ClientsView user={user} />}
+          {activeTab === "recouvrement" && <RecouvrementView user={user} />}
           {activeTab === "users" && <UsersView user={user} />}
           {activeTab === "watchdog" && <WatchdogView user={user} />}
           {activeTab === "backup" && <BackupView user={user} />}
