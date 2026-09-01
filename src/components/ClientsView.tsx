@@ -4,6 +4,7 @@ import { apiFetch } from "@/lib/api";
 import type { Client, User, RecouvrementState, ClientRecouvrementAssignment } from "@/lib/types";
 import { useColors } from "@/lib/color-context";
 import { getContrastTextColor } from "@/lib/color-utils";
+import RecouvrementAlertCell from "@/components/RecouvrementAlertCell";
 import { HandCoins, X } from "lucide-react";
 
 export default function ClientsView({ user }: { user: User }) {
@@ -112,10 +113,13 @@ export default function ClientsView({ user }: { user: User }) {
           const asg = assignments.get(c.id);
           return <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
             <td className="px-4 py-3 font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">{highlight(c.code)}</td>
-            <td className={`px-4 py-3 font-medium text-gray-800 dark:text-white ${asg ? "recouv-alert" : ""} ${canRecouv ? "cursor-pointer" : ""}`}
-              style={asg ? alertStyle(asg.colorKey) : undefined}
-              title={asg ? `${asg.label}${asg.note ? ` — ${asg.note}` : ""}${asg.updatedByName ? ` (par ${asg.updatedByName})` : ""}` : undefined}
-              onClick={canRecouv ? () => openRecouvModal(c) : undefined}>{highlight(c.name)}</td>
+            <td className="px-4 py-3 font-medium text-gray-800 dark:text-white">
+              <RecouvrementAlertCell
+                name={highlight(c.name)}
+                assignment={asg}
+                onClick={canRecouv ? () => openRecouvModal(c) : undefined}
+              />
+            </td>
             <td className="px-4 py-3 text-gray-500">{highlight(c.contactName || "-")}</td>
             <td className="px-4 py-3 text-gray-500">{c.phone || "-"}</td>
             <td className="px-4 py-3 text-gray-500">{c.email || "-"}</td>

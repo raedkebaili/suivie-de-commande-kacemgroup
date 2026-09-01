@@ -1,7 +1,8 @@
 "use client";
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { apiFetch, getToken } from "@/lib/api";
-import type { Order, OrderItem, Agency, Client, User, ExpeditionBatch, MaterialCategory, Material } from "@/lib/types";
+import type { Order, OrderItem, Agency, Client, User, ExpeditionBatch, MaterialCategory, Material, ClientRecouvrementAssignment } from "@/lib/types";
+import RecouvrementAlertCell from "@/components/RecouvrementAlertCell";
 import AutocompleteInput from "@/components/AutocompleteInput";
 import CategoryMaterialSelect from "@/components/CategoryMaterialSelect";
 import { PRIORITY_LABELS } from "@/lib/types";
@@ -28,6 +29,25 @@ const ORDER_TABLE_COLUMNS: { key: string; label: string }[] = [
 ];
 // Nombre total de colonnes du tableau principal (toggle + 10 data + actions)
 const ORDER_TABLE_TOTAL_COLS = 12;
+
+// États de production masquables individuellement dans la colonne « État Prod. ».
+// Masquer un état n'enlève ni la colonne ni la ligne : seul le badge est remplacé
+// par un tiret. Les couleurs de ligne et les calculs restent inchangés.
+const PRODUCTION_STATE_OPTIONS: { key: string; label: string }[] = [
+  { key: "EN_INSTANCE", label: "En instance" },
+  { key: "EN_PRODUCTION", label: "En production" },
+  { key: "AWAITING_DELIVERY", label: "En attente de livraison" },
+  { key: "LIVREE", label: "Livrée" },
+  { key: "ANNULEE", label: "Annulée" },
+];
+
+/** Clé de l'état de production réellement affiché pour une ligne */
+function productionStateKey(visualState: string, productionStatus?: string | null): string {
+  if (visualState === "cancelled") return "ANNULEE";
+  if (visualState === "delivered") return "LIVREE";
+  if (visualState === "awaiting-delivery") return "AWAITING_DELIVERY";
+  return productionStatus === "EN_PRODUCTION" ? "EN_PRODUCTION" : "EN_INSTANCE";
+}
 
 // Extract the leading numeric part of an order number like "12-2026" -> 12.
 // Falls back to +Infinity so unparsable numbers sort last regardless of direction intent.
@@ -62,7 +82,10 @@ export default function OrdersView({ user }: { user: User }) {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   // Visibilité des colonnes (admin) — défaut : toutes visibles (comportement historique)
   const [hiddenCols, setHiddenCols] = useState<string[]>([]);
+  const [hiddenProdStates, setHiddenProdStates] = useState<string[]>([]);
   const [showColMenu, setShowColMenu] = useState(false);
+  // Alertes de recouvrement par client (affichées sur la colonne Client)
+  const [recouvByClient, setRecouvByClient] = useState<Map<number, ClientRecouvrementAssignment>>(new Map());
 
   const [form, setForm] = useState({ orderNumber:"", orderDate:new Date().toISOString().split("T")[0], priority:"NORMALE" as string, clientId:"", agencyId:"", affaire:"", commercialStatus:"PREVISION" as string, productionStatus:"EN_INSTANCE" as string, cancelReason:"", statusReason:"" });
   const [formItems, setFormItems] = useState<OrderItem[]>([]);
@@ -104,6 +127,15 @@ export default function OrdersView({ user }: { user: User }) {
     try { await apiFetch("/api/orders/column-visibility", { method:"PUT", body: JSON.stringify({ hiddenColumns: next }) }); }
     catch (err) { setHiddenCols(prev); alert(err instanceof Error ? err.message : "Erreur d'enregistrement"); }
   };
+  // Masquage d'un état de production précis (le badge seulement, pas la colonne)
+  const isProdStateVisible = (k:string):boolean => !hiddenProdStates.includes(k);
+  const toggleProdState = async (key:string) => {
+    const next = hiddenProdStates.includes(key) ? hiddenProdStates.filter(k=>k!==key) : [...hiddenProdStates, key];
+    const prev = hiddenProdStates;
+    setHiddenProdStates(next); // mise à jour optimiste
+    try { await apiFetch("/api/orders/column-visibility", { method:"PUT", body: JSON.stringify({ hiddenProductionStates: next }) }); }
+    catch (err) { setHiddenProdStates(prev); alert(err instanceof Error ? err.message : "Erreur d'enregistrement"); }
+  };
 
   const fetchOrders = useCallback(async()=>{const p=new URLSearchParams();if(fs)p.set("status",fs);if(fa)p.set("agencyId",fa);if(fp)p.set("priority",fp);setOrders((await apiFetch<{orders:FullOrder[]}>(`/api/orders?${p}`)).orders)},[fs,fa,fp]);
   useEffect(()=>{setLoading(true);Promise.all([
@@ -112,7 +144,8 @@ export default function OrdersView({ user }: { user: User }) {
     apiFetch<{clients:Client[]}>("/api/clients").then(d=>setClients(d.clients)).catch(()=>{}),
     apiFetch<{categories:MaterialCategory[]}>("/api/material-categories").then(d=>setMaterialCategories(d.categories.filter(category=>category.active))).catch(()=>{}),
     apiFetch<{matieres:Material[]}>("/api/matieres").then(d=>setMaterials(d.matieres)).catch(()=>{}),
-    apiFetch<{hiddenColumns:string[]}>("/api/orders/column-visibility").then(d=>setHiddenCols(d.hiddenColumns||[])).catch(()=>{}),
+    apiFetch<{hiddenColumns:string[];hiddenProductionStates?:string[]}>("/api/orders/column-visibility").then(d=>{setHiddenCols(d.hiddenColumns||[]);setHiddenProdStates(d.hiddenProductionStates||[])}).catch(()=>{}),
+    apiFetch<{assignments:ClientRecouvrementAssignment[]}>("/api/recouvrement/client-states").then(d=>setRecouvByClient(new Map(d.assignments.map(a=>[a.clientId,a])))).catch(()=>{}),
   ]).finally(()=>setLoading(false))},[fetchOrders]);
   // Watch live auto-refresh
   useEffect(()=>{if(!watchLive)return;const iv=setInterval(fetchOrders,10000);return()=>clearInterval(iv)},[watchLive,fetchOrders]);
@@ -413,7 +446,7 @@ export default function OrdersView({ user }: { user: User }) {
         </button>
         {showColMenu&&<>
           <div className="fixed inset-0 z-40" onClick={()=>setShowColMenu(false)} />
-          <div className="absolute right-0 z-50 mt-1 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl p-2">
+          <div className="absolute right-0 z-50 mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl p-2 max-h-[70vh] overflow-y-auto">
             <div className="px-2 py-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Colonnes visibles</div>
             {ORDER_TABLE_COLUMNS.map(c=>(
               <label key={c.key} className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200">
@@ -421,7 +454,14 @@ export default function OrdersView({ user }: { user: User }) {
                 {c.label}
               </label>
             ))}
-            <div className="px-2 pt-1.5 pb-1 text-[10px] text-gray-400 border-t border-gray-100 dark:border-gray-700 mt-1">Configuration appliquée à tous les utilisateurs.</div>
+            <div className="px-2 py-1.5 mt-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide border-t border-gray-100 dark:border-gray-700 pt-2">États de production affichés</div>
+            {PRODUCTION_STATE_OPTIONS.map(s=>(
+              <label key={s.key} className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200">
+                <input type="checkbox" checked={isProdStateVisible(s.key)} onChange={()=>toggleProdState(s.key)} className="accent-blue-600" />
+                {s.label}
+              </label>
+            ))}
+            <div className="px-2 pt-1.5 pb-1 text-[10px] text-gray-400 border-t border-gray-100 dark:border-gray-700 mt-1">Masquer un état cache uniquement son badge, pas la ligne ni la colonne. Configuration appliquée à tous les utilisateurs.</div>
           </div>
         </>}
       </div>}
@@ -448,12 +488,12 @@ export default function OrdersView({ user }: { user: User }) {
         <td className="px-2 py-1.5 text-center font-bold">{expanded?"▾":"▸"}</td>
         <td className="px-2 py-1.5 font-medium">{highlight(o.orderNumber)}</td>
         {isColVisible("date")&&<td className="px-2 py-1.5 text-[10px]">{o.orderDate}</td>}
-        <td className="px-2 py-1.5">{highlight(o.clientName||"")}</td>
+        <td className="px-2 py-1.5"><RecouvrementAlertCell name={highlight(o.clientName||"")} assignment={recouvByClient.get(o.clientId)} /></td>
         {isColVisible("agence")&&<td className="px-2 py-1.5 text-[10px]">{o.agencyName}</td>}
         {isColVisible("affaire")&&<td className="px-2 py-1.5 text-[10px] font-medium">{highlight(o.affaire||"-")}</td>}
         {isColVisible("priorite")&&<td className="px-2 py-1.5"><span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${pc(o.priority)}`}>{PRIORITY_LABELS[o.priority]}</span></td>}
         {isColVisible("etatComm")&&<td className="px-2 py-1.5"><span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${commercialBadge(o.status)}`}>{o.status==="SUR_STOCK"?"Stock":o.status==="BON_COMMANDE"?"Bon de commande":"Prévision"}</span></td>}
-        <td className="px-2 py-1.5" title={o.statusReason||""}><span className={`inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded border ${productionBadge(visualState,o.productionStatus)}`}>{operationalLabel}</span>{o.statusReason&&<span className="text-[8px] ml-1 cursor-help">💬</span>}{visualState==="cancelled"&&o.cancelReason&&<span className="text-[9px] ml-1">({o.cancelReason})</span>}</td>
+        <td className="px-2 py-1.5" title={o.statusReason||""}>{isProdStateVisible(productionStateKey(visualState,o.productionStatus))?<><span className={`inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded border ${productionBadge(visualState,o.productionStatus)}`}>{operationalLabel}</span>{o.statusReason&&<span className="text-[8px] ml-1 cursor-help">💬</span>}{visualState==="cancelled"&&o.cancelReason&&<span className="text-[9px] ml-1">({o.cancelReason})</span>}</>:<span className="text-[10px] opacity-40">—</span>}</td>
         {isColVisible("creePar")&&<td className="px-2 py-1.5 text-[10px]">{o.createdByName||"-"}</td>}
         {isColVisible("modifiePar")&&<td className="px-2 py-1.5 text-[10px] flex items-center gap-1">{o.updatedBy||"-"}<button onClick={(e)=>{e.stopPropagation();showModifications(o.id)}} className="text-[11px]" title="Historique des modifications">📝</button></td>}
         <td className="px-2 py-1.5 text-right" onClick={e=>e.stopPropagation()}><button onClick={()=>oe(o)} className="px-2 py-1 text-[10px] bg-white/70 border border-black/30 text-black rounded">Détails</button>{cd&&<button onClick={()=>hd(o.id)} className="ml-1 px-2 py-1 text-[10px] bg-white/70 border border-black/30 text-black rounded">✕</button>}</td>
