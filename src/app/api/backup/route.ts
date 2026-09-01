@@ -6,6 +6,7 @@ import {
   productionUnitLib, articleLibrary, techLibrary, materialCategories, matieres, itemTechnicalComponents,
   activityLogs, modificationLogs, notifications, backupHistory, photometricStudies, photometricStudyItems,
   recouvrementStates, clientRecouvrementStates, clientRecouvrementLogs,
+  systemSettings, appColors, orderCounters,
 } from "@/db/schema";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 
@@ -41,6 +42,11 @@ export async function GET(request: NextRequest) {
       recouvrementStates: await db.select().from(recouvrementStates),
       clientRecouvrementStates: await db.select().from(clientRecouvrementStates),
       clientRecouvrementLogs: await db.select().from(clientRecouvrementLogs),
+      // Tables de configuration : couleurs, paramètres d'affichage (colonnes,
+      // états de production, ligne TOTAL) et compteurs de numérotation.
+      systemSettings: await db.select().from(systemSettings),
+      appColors: await db.select().from(appColors),
+      orderCounters: await db.select().from(orderCounters),
     };
 
     const totalRecords = Object.values(data).reduce((sum, rows) => sum + rows.length, 0);
@@ -132,6 +138,16 @@ export async function POST(request: NextRequest) {
   const recouvrementStatesRows = arr<typeof recouvrementStates.$inferInsert>("recouvrementStates");
   const clientRecouvrementStatesRows = arr<typeof clientRecouvrementStates.$inferInsert>("clientRecouvrementStates");
   const clientRecouvrementLogsRows = arr<typeof clientRecouvrementLogs.$inferInsert>("clientRecouvrementLogs");
+  // Tables de configuration — RÉTROCOMPATIBILITÉ : les sauvegardes générées
+  // avant l'ajout de ces tables ne les contiennent pas. Dans ce cas on NE
+  // touche pas à la configuration en place (pas de purge), afin de ne jamais
+  // perdre les couleurs / réglages d'affichage lors d'une restauration ancienne.
+  const systemSettingsRows = arr<typeof systemSettings.$inferInsert>("systemSettings");
+  const appColorsRows = arr<typeof appColors.$inferInsert>("appColors");
+  const orderCountersRows = arr<typeof orderCounters.$inferInsert>("orderCounters");
+  const restoreSettings = systemSettingsRows.length > 0;
+  const restoreColors = appColorsRows.length > 0;
+  const restoreCounters = orderCountersRows.length > 0;
 
   const insertChunked = async <T extends Record<string, unknown>>(
     tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
@@ -169,6 +185,9 @@ export async function POST(request: NextRequest) {
       await tx.delete(clients);
       await tx.delete(recouvrementStates);
       await tx.delete(agencies);
+      if (restoreSettings) await tx.delete(systemSettings);
+      if (restoreColors) await tx.delete(appColors);
+      if (restoreCounters) await tx.delete(orderCounters);
       await tx.delete(users);
 
       // Insert in forward FK-dependency order (parents first)
@@ -193,6 +212,9 @@ export async function POST(request: NextRequest) {
       await insertChunked(tx, notifications, notificationsRows);
       await insertChunked(tx, photometricStudies, photometricStudiesRows);
       await insertChunked(tx, photometricStudyItems, photometricStudyItemsRows);
+      if (restoreSettings) await insertChunked(tx, systemSettings, systemSettingsRows);
+      if (restoreColors) await insertChunked(tx, appColors, appColorsRows);
+      if (restoreCounters) await insertChunked(tx, orderCounters, orderCountersRows);
 
       // Resync auto-increment sequences with the restored max ids
       const tableNames = [
@@ -201,6 +223,9 @@ export async function POST(request: NextRequest) {
         "material_categories", "matieres", "item_technical_components", "activity_logs", "modification_logs", "notifications",
         "photometric_studies", "photometric_study_items",
         "recouvrement_states", "client_recouvrement_states", "client_recouvrement_logs",
+        ...(restoreSettings ? ["system_settings"] : []),
+        ...(restoreColors ? ["app_colors"] : []),
+        ...(restoreCounters ? ["order_counters"] : []),
       ];
       for (const t of tableNames) {
         await tx.execute(
@@ -219,7 +244,8 @@ export async function POST(request: NextRequest) {
     materialCategoriesRows.length + matieresRows.length + itemTechnicalComponentsRows.length +
     activityLogsRows.length + modificationLogsRows.length + notificationsRows.length +
     photometricStudiesRows.length + photometricStudyItemsRows.length +
-    recouvrementStatesRows.length + clientRecouvrementStatesRows.length + clientRecouvrementLogsRows.length;
+    recouvrementStatesRows.length + clientRecouvrementStatesRows.length + clientRecouvrementLogsRows.length +
+    systemSettingsRows.length + appColorsRows.length + orderCountersRows.length;
 
   await logActivity(user.id, user.username, "BACKUP_RESTORE", `Restauration effectuée: ${totalRestored} enregistrements`);
 

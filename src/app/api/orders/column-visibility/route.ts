@@ -14,6 +14,7 @@ import { getUserFromHeaders, logActivity } from "@/lib/auth";
 
 const SETTING_KEY = "orders_hidden_columns";
 const PROD_STATES_KEY = "orders_hidden_production_states";
+const HIDE_TOTAL_ROW_KEY = "orders_hide_total_row";
 
 /** Colonnes masquables du tableau principal (les autres restent toujours visibles) */
 export const HIDEABLE_ORDER_COLUMNS = [
@@ -62,9 +63,11 @@ export async function GET(request: NextRequest) {
   try {
     const [colRow] = await db.select().from(systemSettings).where(eq(systemSettings.key, SETTING_KEY)).limit(1);
     const [stateRow] = await db.select().from(systemSettings).where(eq(systemSettings.key, PROD_STATES_KEY)).limit(1);
+    const [totalRow] = await db.select().from(systemSettings).where(eq(systemSettings.key, HIDE_TOTAL_ROW_KEY)).limit(1);
     return NextResponse.json({
       hiddenColumns: parseList(colRow?.value, HIDEABLE_ORDER_COLUMNS),
       hiddenProductionStates: parseList(stateRow?.value, HIDEABLE_PRODUCTION_STATES),
+      hideTotalRow: totalRow?.value === "true",
     });
   } catch (error) {
     console.error("Erreur lecture visibilité colonnes:", error);
@@ -100,8 +103,9 @@ export async function PUT(request: NextRequest) {
     const body = await request.json();
     const hasCols = Array.isArray(body.hiddenColumns);
     const hasStates = Array.isArray(body.hiddenProductionStates);
-    if (!hasCols && !hasStates) {
-      return NextResponse.json({ error: "hiddenColumns et/ou hiddenProductionStates (tableaux) requis" }, { status: 400 });
+    const hasTotal = typeof body.hideTotalRow === "boolean";
+    if (!hasCols && !hasStates && !hasTotal) {
+      return NextResponse.json({ error: "hiddenColumns, hiddenProductionStates et/ou hideTotalRow requis" }, { status: 400 });
     }
 
     if (hasCols) {
@@ -120,11 +124,19 @@ export async function PUT(request: NextRequest) {
       await logActivity(u.id, u.username, "UPDATE_ORDER_PROD_STATES", `États production masqués: ${hiddenStates.length > 0 ? hiddenStates.join(", ") : "(aucun)"}`);
     }
 
+    if (hasTotal) {
+      const hide = body.hideTotalRow === true;
+      await upsertSetting(HIDE_TOTAL_ROW_KEY, hide ? "true" : "false", "Masquer la ligne TOTAL du tableau des commandes", u);
+      await logActivity(u.id, u.username, "UPDATE_ORDER_TOTAL_ROW", `Ligne TOTAL: ${hide ? "masquée" : "affichée"}`);
+    }
+
     const [colRow] = await db.select().from(systemSettings).where(eq(systemSettings.key, SETTING_KEY)).limit(1);
     const [stateRow] = await db.select().from(systemSettings).where(eq(systemSettings.key, PROD_STATES_KEY)).limit(1);
+    const [totalRow] = await db.select().from(systemSettings).where(eq(systemSettings.key, HIDE_TOTAL_ROW_KEY)).limit(1);
     return NextResponse.json({
       hiddenColumns: parseList(colRow?.value, HIDEABLE_ORDER_COLUMNS),
       hiddenProductionStates: parseList(stateRow?.value, HIDEABLE_PRODUCTION_STATES),
+      hideTotalRow: totalRow?.value === "true",
     });
   } catch (error) {
     console.error("Erreur mise à jour visibilité colonnes:", error);

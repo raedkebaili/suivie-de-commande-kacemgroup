@@ -3,6 +3,7 @@ import React, { useEffect, useState, useCallback, useRef, useMemo } from "react"
 import { apiFetch, getToken } from "@/lib/api";
 import type { Order, OrderItem, Agency, Client, User, ExpeditionBatch, MaterialCategory, Material, ClientRecouvrementAssignment } from "@/lib/types";
 import RecouvrementAlertCell from "@/components/RecouvrementAlertCell";
+import ArticleGroupingView from "@/components/ArticleGroupingView";
 import AutocompleteInput from "@/components/AutocompleteInput";
 import CategoryMaterialSelect from "@/components/CategoryMaterialSelect";
 import { PRIORITY_LABELS } from "@/lib/types";
@@ -83,7 +84,10 @@ export default function OrdersView({ user }: { user: User }) {
   // Visibilité des colonnes (admin) — défaut : toutes visibles (comportement historique)
   const [hiddenCols, setHiddenCols] = useState<string[]>([]);
   const [hiddenProdStates, setHiddenProdStates] = useState<string[]>([]);
+  const [hideTotalRow, setHideTotalRow] = useState(false);
   const [showColMenu, setShowColMenu] = useState(false);
+  // Incrémenté à chaque rafraîchissement : garde le regroupement par article à jour
+  const [dataVersion, setDataVersion] = useState(0);
   // Alertes de recouvrement par client (affichées sur la colonne Client)
   const [recouvByClient, setRecouvByClient] = useState<Map<number, ClientRecouvrementAssignment>>(new Map());
 
@@ -127,6 +131,13 @@ export default function OrdersView({ user }: { user: User }) {
     try { await apiFetch("/api/orders/column-visibility", { method:"PUT", body: JSON.stringify({ hiddenColumns: next }) }); }
     catch (err) { setHiddenCols(prev); alert(err instanceof Error ? err.message : "Erreur d'enregistrement"); }
   };
+  // Masquage de la ligne TOTAL des articles (admin)
+  const toggleTotalRow = async () => {
+    const next = !hideTotalRow;
+    setHideTotalRow(next); // mise à jour optimiste
+    try { await apiFetch("/api/orders/column-visibility", { method:"PUT", body: JSON.stringify({ hideTotalRow: next }) }); }
+    catch (err) { setHideTotalRow(!next); alert(err instanceof Error ? err.message : "Erreur d'enregistrement"); }
+  };
   // Masquage d'un état de production précis (le badge seulement, pas la colonne)
   const isProdStateVisible = (k:string):boolean => !hiddenProdStates.includes(k);
   const toggleProdState = async (key:string) => {
@@ -137,14 +148,14 @@ export default function OrdersView({ user }: { user: User }) {
     catch (err) { setHiddenProdStates(prev); alert(err instanceof Error ? err.message : "Erreur d'enregistrement"); }
   };
 
-  const fetchOrders = useCallback(async()=>{const p=new URLSearchParams();if(fs)p.set("status",fs);if(fa)p.set("agencyId",fa);if(fp)p.set("priority",fp);setOrders((await apiFetch<{orders:FullOrder[]}>(`/api/orders?${p}`)).orders)},[fs,fa,fp]);
+  const fetchOrders = useCallback(async()=>{const p=new URLSearchParams();if(fs)p.set("status",fs);if(fa)p.set("agencyId",fa);if(fp)p.set("priority",fp);setOrders((await apiFetch<{orders:FullOrder[]}>(`/api/orders?${p}`)).orders);setDataVersion(v=>v+1)},[fs,fa,fp]);
   useEffect(()=>{setLoading(true);Promise.all([
     fetchOrders(),
     apiFetch<{agencies:Agency[]}>("/api/agencies").then(d=>setAgencies(d.agencies)).catch(()=>{}),
     apiFetch<{clients:Client[]}>("/api/clients").then(d=>setClients(d.clients)).catch(()=>{}),
     apiFetch<{categories:MaterialCategory[]}>("/api/material-categories").then(d=>setMaterialCategories(d.categories.filter(category=>category.active))).catch(()=>{}),
     apiFetch<{matieres:Material[]}>("/api/matieres").then(d=>setMaterials(d.matieres)).catch(()=>{}),
-    apiFetch<{hiddenColumns:string[];hiddenProductionStates?:string[]}>("/api/orders/column-visibility").then(d=>{setHiddenCols(d.hiddenColumns||[]);setHiddenProdStates(d.hiddenProductionStates||[])}).catch(()=>{}),
+    apiFetch<{hiddenColumns:string[];hiddenProductionStates?:string[];hideTotalRow?:boolean}>("/api/orders/column-visibility").then(d=>{setHiddenCols(d.hiddenColumns||[]);setHiddenProdStates(d.hiddenProductionStates||[]);setHideTotalRow(!!d.hideTotalRow)}).catch(()=>{}),
     apiFetch<{assignments:ClientRecouvrementAssignment[]}>("/api/recouvrement/client-states").then(d=>setRecouvByClient(new Map(d.assignments.map(a=>[a.clientId,a])))).catch(()=>{}),
   ]).finally(()=>setLoading(false))},[fetchOrders]);
   // Watch live auto-refresh
@@ -461,6 +472,11 @@ export default function OrdersView({ user }: { user: User }) {
                 {s.label}
               </label>
             ))}
+            <div className="px-2 py-1.5 mt-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide border-t border-gray-100 dark:border-gray-700 pt-2">Affichage du détail</div>
+            <label className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200">
+              <input type="checkbox" checked={!hideTotalRow} onChange={toggleTotalRow} className="accent-blue-600" />
+              Ligne TOTAL des articles
+            </label>
             <div className="px-2 pt-1.5 pb-1 text-[10px] text-gray-400 border-t border-gray-100 dark:border-gray-700 mt-1">Masquer un état cache uniquement son badge, pas la ligne ni la colonne. Configuration appliquée à tous les utilisateurs.</div>
           </div>
         </>}
@@ -515,7 +531,7 @@ export default function OrdersView({ user }: { user: User }) {
             onShowExpeditionHistory={showExpeditionHistory}
           />
         ))}
-        <tr className="bg-white/60 text-[10px] text-black"><td className="px-1 py-1 font-semibold">TOTAL</td><td className="px-1 py-1">{ordered}</td><td className="px-1 py-1"></td><td className="px-1 py-1">{produced}</td><td className="px-1 py-1">{delivered}</td><td className="px-1 py-1">{Math.max(0,produced-delivered)}</td><td className="px-1 py-1"><span className="remaining-to-deliver">{Math.max(0,ordered-delivered)}</span></td><td className="px-1 py-1" colSpan={4}></td></tr>
+        {!hideTotalRow&&<tr className="bg-white/60 text-[10px] text-black"><td className="px-1 py-1 font-semibold">TOTAL</td><td className="px-1 py-1">{ordered}</td><td className="px-1 py-1"></td><td className="px-1 py-1">{produced}</td><td className="px-1 py-1">{delivered}</td><td className="px-1 py-1">{Math.max(0,produced-delivered)}</td><td className="px-1 py-1"><span className="remaining-to-deliver">{Math.max(0,ordered-delivered)}</span></td><td className="px-1 py-1" colSpan={4}></td></tr>}
         {/* Études photométriques de cette commande */}
         {(orderStudies.get(o.id) || []).map(study => (
           <React.Fragment key={`study-${study.id}`}>
@@ -829,6 +845,13 @@ export default function OrdersView({ user }: { user: User }) {
         </div>
       </div>
     )}
+
+    {/* ═══════════════════════════════════════════════════════════════════ */}
+    {/* SECTION 3 : Regroupement par Article (3 premiers caractères)       */}
+    {/* Placé sous les études photométriques, toujours à jour via          */}
+    {/* dataVersion (incrémenté à chaque rafraîchissement des commandes).  */}
+    {/* ═══════════════════════════════════════════════════════════════════ */}
+    <ArticleGroupingView filters={{ status: fs, agency: fa, priority: fp }} refreshKey={dataVersion} />
 </div>);
 }
 function F({l,type="text",v,onChange,disabled}:{l:string;type?:string;v:string;onChange:(v:string)=>void;disabled?:boolean}){return <div><label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">{l}</label><input type={type} value={v} onChange={e=>onChange(e.target.value)} disabled={disabled} className={`w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm ${disabled?"bg-gray-100":"bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200"}`}/></div>}
