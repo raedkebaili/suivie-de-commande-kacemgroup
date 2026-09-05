@@ -7,6 +7,7 @@ import {
   activityLogs, modificationLogs, notifications, backupHistory, photometricStudies, photometricStudyItems,
   recouvrementStates, clientRecouvrementStates, clientRecouvrementLogs,
   systemSettings, appColors, orderCounters,
+  archiveSheets, archiveRows, archiveCellColors,
 } from "@/db/schema";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 
@@ -47,6 +48,10 @@ export async function GET(request: NextRequest) {
       systemSettings: await db.select().from(systemSettings),
       appColors: await db.select().from(appColors),
       orderCounters: await db.select().from(orderCounters),
+      // Module Archive commandes (données historiques + personnalisations)
+      archiveSheets: await db.select().from(archiveSheets),
+      archiveRows: await db.select().from(archiveRows),
+      archiveCellColors: await db.select().from(archiveCellColors),
     };
 
     const totalRecords = Object.values(data).reduce((sum, rows) => sum + rows.length, 0);
@@ -148,6 +153,12 @@ export async function POST(request: NextRequest) {
   const restoreSettings = systemSettingsRows.length > 0;
   const restoreColors = appColorsRows.length > 0;
   const restoreCounters = orderCountersRows.length > 0;
+  // Module Archive — même garde de rétrocompatibilité : une sauvegarde
+  // antérieure à ce module ne doit pas effacer les archives en place.
+  const archiveSheetsRows = arr<typeof archiveSheets.$inferInsert>("archiveSheets");
+  const archiveRowsRows = arr<typeof archiveRows.$inferInsert>("archiveRows");
+  const archiveCellColorsRows = arr<typeof archiveCellColors.$inferInsert>("archiveCellColors");
+  const restoreArchive = archiveSheetsRows.length > 0;
 
   const insertChunked = async <T extends Record<string, unknown>>(
     tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
@@ -165,6 +176,11 @@ export async function POST(request: NextRequest) {
   try {
     await db.transaction(async (tx) => {
       // Delete in reverse FK-dependency order
+      if (restoreArchive) {
+        await tx.delete(archiveCellColors);
+        await tx.delete(archiveRows);
+        await tx.delete(archiveSheets);
+      }
       await tx.delete(clientRecouvrementLogs);
       await tx.delete(clientRecouvrementStates);
       await tx.delete(notifications);
@@ -215,6 +231,11 @@ export async function POST(request: NextRequest) {
       if (restoreSettings) await insertChunked(tx, systemSettings, systemSettingsRows);
       if (restoreColors) await insertChunked(tx, appColors, appColorsRows);
       if (restoreCounters) await insertChunked(tx, orderCounters, orderCountersRows);
+      if (restoreArchive) {
+        await insertChunked(tx, archiveSheets, archiveSheetsRows);
+        await insertChunked(tx, archiveRows, archiveRowsRows);
+        await insertChunked(tx, archiveCellColors, archiveCellColorsRows);
+      }
 
       // Resync auto-increment sequences with the restored max ids
       const tableNames = [
@@ -226,6 +247,7 @@ export async function POST(request: NextRequest) {
         ...(restoreSettings ? ["system_settings"] : []),
         ...(restoreColors ? ["app_colors"] : []),
         ...(restoreCounters ? ["order_counters"] : []),
+        ...(restoreArchive ? ["archive_sheets", "archive_rows", "archive_cell_colors"] : []),
       ];
       for (const t of tableNames) {
         await tx.execute(
@@ -245,7 +267,8 @@ export async function POST(request: NextRequest) {
     activityLogsRows.length + modificationLogsRows.length + notificationsRows.length +
     photometricStudiesRows.length + photometricStudyItemsRows.length +
     recouvrementStatesRows.length + clientRecouvrementStatesRows.length + clientRecouvrementLogsRows.length +
-    systemSettingsRows.length + appColorsRows.length + orderCountersRows.length;
+    systemSettingsRows.length + appColorsRows.length + orderCountersRows.length +
+    archiveSheetsRows.length + archiveRowsRows.length + archiveCellColorsRows.length;
 
   await logActivity(user.id, user.username, "BACKUP_RESTORE", `Restauration effectuée: ${totalRestored} enregistrements`);
 

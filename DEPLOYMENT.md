@@ -213,7 +213,9 @@ Créez un fichier `.env` à la racine du projet avec l'URL Neon :
 
 ```bash
 # Windows (PowerShell)
-echo 'DATABASE_URL=postgresql://neondb_owner:VOTRE_MOT_DE_PASSE@ep-xyz.neon.tech/otp_db?sslmode=require' > .env
+$env:DATABASE_URL="postgresql://neondb_owner:npg_xsPtQV1kuD2i@ep-winter-art-b2tvmbh3-pooler.c-6.eu-central-1.aws.neon.tech/otp_db?sslmode=require&channel_binding=require"
+
+npx drizzle-kit push
 
 # macOS / Linux
 echo 'DATABASE_URL=postgresql://neondb_owner:VOTRE_MOT_DE_PASSE@ep-xyz.neon.tech/otp_db?sslmode=require' > .env

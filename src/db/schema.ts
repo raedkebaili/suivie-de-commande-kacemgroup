@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, boolean, timestamp, doublePrecision } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, boolean, timestamp, doublePrecision, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const users = pgTable("users", {
@@ -306,6 +306,52 @@ export const clientRecouvrementStates = pgTable("client_recouvrement_states", {
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
 });
+
+// ── Archive commandes (module indépendant) ──────────────────────────
+// Données historiques importées depuis Excel. STRICTEMENT SÉPARÉES des
+// commandes actives (tables orders / order_items) : aucune FK vers celles-ci.
+// Une "feuille" = une période du classeur Excel d'origine.
+export const archiveSheets = pgTable("archive_sheets", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),            // Nom de la feuille Excel (= période)
+  sourceFilename: text("source_filename"),          // Nom du fichier importé
+  sheetIndex: integer("sheet_index").notNull().default(0), // Ordre d'origine des feuilles
+  columns: text("columns").notNull(),               // JSON: string[] — en-têtes, ORDRE PRÉSERVÉ
+  preamble: text("preamble"),                       // JSON: string[][] — lignes complémentaires avant l'en-tête
+  resteColumnIndex: integer("reste_column_index"),  // Index de la colonne "Reste à livrer" si détectée
+  rowCount: integer("row_count").notNull().default(0),
+  importedById: integer("imported_by_id").references(() => users.id, { onDelete: "set null" }),
+  importedByName: text("imported_by_name"),
+  createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+});
+
+// Une ligne d'archive = le contenu brut d'une ligne Excel (cellules vides conservées)
+export const archiveRows = pgTable("archive_rows", {
+  id: serial("id").primaryKey(),
+  sheetId: integer("sheet_id").notNull().references(() => archiveSheets.id, { onDelete: "cascade" }),
+  rowIndex: integer("row_index").notNull(),         // Position d'origine dans la feuille
+  cells: text("cells").notNull(),                   // JSON: string[] aligné sur columns
+  // État manuel défini par l'administrateur. NULL = état déduit automatiquement
+  // (Reste à livrer = 0 → LIVRE). Une cellule vide n'est jamais interprétée comme 0.
+  stateOverride: text("state_override"),
+  updatedById: integer("updated_by_id").references(() => users.id, { onDelete: "set null" }),
+  updatedByName: text("updated_by_name"),
+  updatedAt: timestamp("updated_at", { mode: "string" }),
+});
+
+// Couleur personnalisée d'UNE cellule précise (prioritaire sur la couleur de ligne).
+// Unicité garantie par (rowId, columnIndex) : deux cellules identiques de
+// commandes différentes ne partagent jamais leur configuration.
+export const archiveCellColors = pgTable("archive_cell_colors", {
+  id: serial("id").primaryKey(),
+  sheetId: integer("sheet_id").notNull().references(() => archiveSheets.id, { onDelete: "cascade" }),
+  rowId: integer("row_id").notNull().references(() => archiveRows.id, { onDelete: "cascade" }),
+  columnIndex: integer("column_index").notNull(),
+  color: text("color").notNull(),                   // HEX #RRGGBB
+  updatedById: integer("updated_by_id").references(() => users.id, { onDelete: "set null" }),
+  updatedByName: text("updated_by_name"),
+  updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
+}, (table) => [uniqueIndex("archive_cell_colors_row_col_uq").on(table.rowId, table.columnIndex)]);
 
 // Historique des changements d'état de recouvrement (traçabilité, style activity_logs)
 export const clientRecouvrementLogs = pgTable("client_recouvrement_logs", {

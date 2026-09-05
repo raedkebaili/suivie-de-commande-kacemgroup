@@ -191,4 +191,6 @@ export const COLOR_CATEGORIES: Record<string, string> = {
   tracking: "Suivi des Modifications",
   etude: "Études Photométriques",
   recouvrement: "États de Recouvrement",
+  // Sous-module Archive : section dédiée et ISOLÉE du tableau de suivi.
+  archive: "Archive Commandes (module séparé)",
 };

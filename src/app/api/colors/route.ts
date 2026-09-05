@@ -5,14 +5,24 @@ import { appColors } from "@/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 import { DEFAULT_COLORS, isValidHexColor, normalizeHexColor } from "@/lib/color-utils";
+import { ensureArchiveColors } from "@/lib/archive";
 
 /**
- * Initialise les couleurs par défaut si la table est vide
+ * Initialise les couleurs par défaut manquantes.
+ *
+ * Seed IDEMPOTENT PAR CLÉ (et non plus « seulement si la table est vide ») :
+ * d'autres sous-modules (recouvrement, archive) insèrent désormais leurs
+ * propres clés dans app_colors. Avec l'ancien test « table vide », les
+ * couleurs de base n'étaient plus créées dès qu'un sous-module avait déjà
+ * écrit dans la table, et disparaissaient du gestionnaire.
+ *
+ * Les couleurs déjà présentes (donc éventuellement personnalisées par
+ * l'administrateur) ne sont JAMAIS écrasées.
  */
 async function ensureDefaultColors() {
-  const existing = await db.select().from(appColors).limit(1);
-  if (existing.length === 0) {
-    for (const color of DEFAULT_COLORS) {
+  for (const color of DEFAULT_COLORS) {
+    const [existing] = await db.select({ id: appColors.id }).from(appColors).where(eq(appColors.key, color.key)).limit(1);
+    if (!existing) {
       await db.insert(appColors).values({
         key: color.key,
         category: color.category,
@@ -38,6 +48,9 @@ export async function GET(request: NextRequest) {
 
   try {
     await ensureDefaultColors();
+    // Sous-module Archive : ajoute ses propres clés (catégorie "archive")
+    // sans toucher aux couleurs existantes du tableau de suivi.
+    try { await ensureArchiveColors(); } catch (e) { console.error("Seed couleurs archive:", e); }
     const colors = await db
       .select()
       .from(appColors)
