@@ -99,3 +99,17 @@ export function detectResteColumnIndex(columns: string[]): number | null {
   }
   return null;
 }
+
+/** Détecte l'index de la colonne « Clients » (pour la fusion verticale) */
+export function detectClientsColumnIndex(columns: string[]): number | null {
+  const norm = (s: string) =>
+    (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  for (let i = 0; i < columns.length; i++) {
+    const c = norm(columns[i]);
+    if (c === "clients" || c === "client") return i;
+  }
+  for (let i = 0; i < columns.length; i++) {
+    if (norm(columns[i]).includes("client")) return i;
+  }
+  return null;
+}

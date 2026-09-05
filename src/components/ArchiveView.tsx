@@ -23,6 +23,61 @@ type Pagination = { page: number; pageSize: number; total: number; pages: number
  * authentifiés ; import et personnalisation réservés au superadmin
  * (contrôlé côté serveur par les routes /api/archive/*).
  */
+// Un « span » fusionne les lignes successives d'un même Client.
+// span: "first" = rend la cellule fusionnée (rowSpan), "mid" = masquée (couvert par le rowSpan),
+// "single" = cellule normale. groupLen = taille du groupe (pour le rowSpan).
+type Bar = { span: "single" | "first" | "mid"; groupLen: number };
+
+/**
+ * Calcule les fusions verticales de la colonne « Clients ».
+ * Règle spéciale lignes complémentaires : une ligne dont la cellule Clients est
+ * vide mais dont le reste contient des données (ligne complémentaire d'une même
+ * commande) ne casse PAS le groupe. Une ligne entièrement vide, elle, le casse.
+ * Deux groupes distincts portant le même nom ne sont jamais fusionnés.
+ */
+function computeClientBars(rows: Row[], clientsIdx: number | null): Bar[] {
+  const n = rows.length;
+  const bars: Bar[] = Array.from({ length: n }, () => ({ span: "single" as const, groupLen: 1 }));
+  if (clientsIdx === null || clientsIdx === undefined) return bars;
+
+  const isEmptyRow = (r: Row) => r.cells.every((c) => (c || "").trim() === ""); // ligne totalement vide
+  const isEmptyClient = (r: Row) => (r.cells[clientsIdx] || "").trim() === "" && !isEmptyRow(r); // ligne complémentaire
+  const val = (r: Row) => (r.cells[clientsIdx] || "").trim();
+
+  let i = 0;
+  while (i < n) {
+    const v = val(rows[i]);
+    if (v === "") { i++; continue; }
+    // Étendre le groupe tant que valeur identique ou ligne complémentaire,
+    // sans dépasser une valeur DIFFÉRENTE. Un groupe peut contenir des lignes
+    // complémentaires (y compris en fin) tant qu'une ligne « v » existe encore.
+    let end = i;
+    let j = i + 1;
+    while (j < n) {
+      const vj = val(rows[j]);
+      if (vj === v) { end = j; j++; continue; }
+      if (isEmptyClient(rows[j])) {
+        // Ligne complémentaire : ne prolonge le groupe que si « v » réapparaît
+        // plus loin avant toute autre valeur ; sinon le groupe s'arrête ici.
+        let finds = false;
+        for (let k = j + 1; k < n; k++) {
+          const vk = val(rows[k]);
+          if (vk === v) { finds = true; break; }
+          if (vk !== "" || isEmptyRow(rows[k])) break;
+        }
+        if (finds) { end = j; j++; continue; }
+        break;
+      }
+      break;
+    }
+    const groupLen = end - i + 1;
+    bars[i] = { span: groupLen > 1 ? "first" : "single", groupLen };
+    for (let k = i + 1; k <= end; k++) bars[k] = { span: "mid", groupLen };
+    i = end + 1;
+  }
+  return bars;
+}
+
 export default function ArchiveView({ user }: { user: User }) {
   const isAdmin = user.role === "superadmin";
   const { getColor } = useColors();
@@ -30,6 +85,7 @@ export default function ArchiveView({ user }: { user: User }) {
   const [sheets, setSheets] = useState<Sheet[]>([]);
   const [sheetId, setSheetId] = useState<number | null>(null);
   const [columns, setColumns] = useState<string[]>([]);
+  const [clientsColumnIndex, setClientsColumnIndex] = useState<number | null>(null);
   const [preamble, setPreamble] = useState<string[][]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [pagination, setPagination] = useState<Pagination>({ page: 1, pageSize: 100, total: 0, pages: 1 });
@@ -77,8 +133,9 @@ export default function ArchiveView({ user }: { user: User }) {
       const p = new URLSearchParams({ sheetId: String(sheetId), page: String(page), pageSize: "100" });
       if (debounced.trim().length >= 2) p.set("q", debounced.trim());
       if (stateFilter) p.set("state", stateFilter);
-      const d = await apiFetch<{ columns: string[]; preamble: string[][]; rows: Row[]; pagination: Pagination }>(`/api/archive/rows?${p}`);
+      const d = await apiFetch<{ columns: string[]; preamble: string[][]; rows: Row[]; pagination: Pagination; sheet: { clientsColumnIndex: number | null } }>(`/api/archive/rows?${p}`);
       setColumns(d.columns); setPreamble(d.preamble || []); setRows(d.rows); setPagination(d.pagination);
+      setClientsColumnIndex(d.sheet?.clientsColumnIndex ?? null);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur de chargement");
@@ -169,6 +226,9 @@ export default function ArchiveView({ user }: { user: User }) {
   };
 
   const currentSheet = useMemo(() => sheets.find(s => s.id === sheetId) || null, [sheets, sheetId]);
+
+  // Fusions verticales de la colonne « Clients » (recalculées à chaque page de données)
+  const clientBars = useMemo(() => computeClientBars(rows, clientsColumnIndex), [rows, clientsColumnIndex]);
 
   return (
     <div className="space-y-4">
@@ -277,12 +337,27 @@ export default function ArchiveView({ user }: { user: User }) {
                     <tr><td colSpan={columns.length + 2} className="text-center py-10 text-gray-400">Chargement...</td></tr>
                   ) : rows.length === 0 ? (
                     <tr><td colSpan={columns.length + 2} className="text-center py-10 text-gray-400">Aucune ligne pour ces critères</td></tr>
-                  ) : rows.map(r => {
+                  ) : rows.map((r, ri) => {
                     const rs = rowStyle(r.state);
+                    const bar = clientBars[ri] || { span: "single" as const, groupLen: 1 };
                     return (
                       <tr key={r.id} style={rs} className={`border-b border-gray-200 dark:border-gray-700 ${rs ? "" : "hover:bg-gray-50 dark:hover:bg-gray-800/50 text-gray-700 dark:text-gray-200"}`}>
                         <td className="px-2 py-1 text-[10px] opacity-60 whitespace-nowrap">{r.rowIndex + 1}</td>
                         {columns.map((_, ci) => {
+                          // Colonne « Clients » : fusion verticale réelle (rowSpan).
+                          if (clientsColumnIndex !== null && ci === clientsColumnIndex) {
+                            if (bar.span === "mid") return null; // couvert par la cellule fusionnée
+                            const cs = cellStyle(r, ci);
+                            const groupLen = bar.groupLen;
+                            return (
+                              <td key={ci} style={cs} rowSpan={groupLen}
+                                className={`px-2 py-1 border-l border-black/10 dark:border-white/10 align-middle text-center font-bold whitespace-nowrap ${isAdmin ? "cursor-context-menu" : ""}`}
+                                title={r.cells[ci] || ""}
+                                onContextMenu={isAdmin ? (e) => { e.preventDefault(); setCellEditor({ rowId: r.id, columnIndex: ci, current: r.cellColors[ci] }); } : undefined}>
+                                {r.cells[ci] ?? ""}
+                              </td>
+                            );
+                          }
                           const cs = cellStyle(r, ci);
                           return (
                             <td key={ci} style={cs}

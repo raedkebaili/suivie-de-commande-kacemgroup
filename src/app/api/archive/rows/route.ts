@@ -83,6 +83,7 @@ export async function GET(request: NextRequest) {
         importedByName: sheet.importedByName,
         createdAt: sheet.createdAt,
         resteColumnIndex: resteIdx,
+        clientsColumnIndex: sheet.clientsColumnIndex,
       },
       columns,
       preamble,

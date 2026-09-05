@@ -5,8 +5,76 @@ import { db } from "@/db";
 import { archiveRows, archiveSheets } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
-import { detectResteColumnIndex } from "@/lib/archive-constants";
+import { detectClientsColumnIndex, detectResteColumnIndex } from "@/lib/archive-constants";
 import { ensureArchiveColors } from "@/lib/archive";
+
+// ── Détection du véritable header du tableau (module Archive uniquement) ──
+// Mots-clés présents dans la ligne d'en-tête réelle du fichier « Suivi commandes ».
+const HEADER_KEYWORDS = [
+  "priorite", "commande", "date", "qte", "client", "agence", "article",
+  "pcb", "couleur", "lentille", "driver", "classe", "accessoire", "profilet",
+  "specification", "technique", "note", "unite", "production", "chargement",
+  "reste", "livraison", "prix", "affaire",
+];
+
+const normCell = (s: string) =>
+  (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/** Score d'une ligne « candidate » comme en-tête : nb de mots-clés + densité de remplissage */
+function headerScore(row: string[]): number {
+  if (!row || row.length === 0) return -1;
+  let matches = 0;
+  let nonEmpty = 0;
+  for (const cell of row) {
+    const c = normCell(String(cell ?? ""));
+    if (c === "") continue;
+    nonEmpty++;
+    if (HEADER_KEYWORDS.some((k) => c.includes(k))) matches++;
+  }
+  if (matches === 0) return -1;
+  return matches * 100 + nonEmpty;
+}
+
+/** Chaîne vide si null/absent, sinon le texte conservé tel quel */
+const cellText = (v: unknown): string => (v === null || v === undefined ? "" : String(v));
+
+/** Date Excel DateObj → "DD/MM/YYYY". Une cellule vide reste vide (jamais interprétée). */
+function formatDateCell(v: unknown): string {
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    const dd = String(v.getDate()).padStart(2, "0");
+    const mm = String(v.getMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}/${v.getFullYear()}`;
+  }
+  if (typeof v === "number" && v > 59 && v < 100000) {
+    // Serial date Excel : jours depuis le 1899-12-30 (formule standard, pas de libre choix)
+    const ms = Math.round((v - 25569) * 86400 * 1000);
+    const d = new Date(ms);
+    if (!isNaN(d.getTime()) && d.getFullYear() > 1900 && d.getFullYear() < 2200) {
+      const dd = String(d.getUTCDate()).padStart(2, "0");
+      const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+      return `${dd}/${mm}/${d.getUTCFullYear()}`;
+    }
+    return String(v);
+  }
+  return cellText(v);
+}
+
+/** true si la valeur « ressemble » à une date Excel (DateObj ou serial), false sinon */
+function isDateLike(v: unknown): boolean {
+  return (v instanceof Date && !isNaN(v.getTime())) || (typeof v === "number" && v > 59 && v < 100000);
+}
+
+/** Index de la vraie ligne d'en-tête, ou -1 si aucune ligne candidate valide */
+function detectHeaderIndex(matrix: unknown[][]): number {
+  const scanLimit = Math.min(40, matrix.length);
+  let best = -1;
+  let bestScore = 0.5; // seuil minimal : au moins un mot-clé présent
+  for (let i = 0; i < scanLimit; i++) {
+    const score = headerScore(((matrix[i] || []) as unknown[]).map(cellText));
+    if (score > bestScore) { bestScore = score; best = i; }
+  }
+  return best;
+}
 
 /**
  * POST /api/archive/import  (multipart: file)
@@ -44,8 +112,9 @@ export async function POST(request: NextRequest) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const XLSX = await import("xlsx");
-    // raw: false → les valeurs sont lues telles qu'affichées (texte conservé)
-    const wb = XLSX.read(buffer, { type: "buffer", cellDates: false, raw: false });
+    // cellDates: true → les dates Excel deviennent de vrais objets Date, ce qui
+    // permet de les re-formater correctement en DD/MM/YYYY (module Archive).
+    const wb = XLSX.read(buffer, { type: "buffer", cellDates: true, raw: false });
 
     await ensureArchiveColors();
 
@@ -57,40 +126,59 @@ export async function POST(request: NextRequest) {
       const ws = wb.Sheets[sheetName];
       if (!ws) continue;
 
-      // header: 1 + defval: "" → matrice brute, cellules vides préservées
+      // header: 1 + defval: "" → matrice brute, cellules vides préservées.
+      // raw: true (couplé à cellDates:true) → les dates deviennent de vrais
+      // objets Date, re-formatés ensuite en DD/MM/YYYY par formatDateCell.
       const matrix = XLSX.utils.sheet_to_json<string[]>(ws, {
         header: 1,
         defval: "",
         blankrows: true,
-        raw: false,
-      });
+        raw: true,
+      }) as unknown as unknown[][];
       if (matrix.length === 0) continue;
 
-      // Détection de la ligne d'en-tête : parmi les 15 premières lignes,
-      // celle qui contient le plus de cellules non vides.
-      const scanLimit = Math.min(15, matrix.length);
-      let headerIdx = 0;
-      let bestCount = -1;
-      for (let i = 0; i < scanLimit; i++) {
-        const count = (matrix[i] || []).filter((c) => String(c ?? "").trim() !== "").length;
-        if (count > bestCount) { bestCount = count; headerIdx = i; }
-      }
-      if (bestCount <= 0) continue; // feuille vide
+      // ── Vraie ligne d'en-tête : meilleure ligne candidate par mots-clés ──
+      // (corrige l'ancien comportement qui prenait la 1re ligne de données
+      // comme header, et ne garde JAMAIS une commande comme header).
+      const headerIdx = detectHeaderIndex(matrix);
+      if (headerIdx < 0) continue; // pas de tableau exploitable
 
-      const rawHeader = (matrix[headerIdx] || []).map((c) => String(c ?? "").trim());
-      // Largeur = max entre l'en-tête et toutes les lignes de données (aucune colonne perdue)
-      let width = rawHeader.length;
-      for (let i = headerIdx + 1; i < matrix.length; i++) {
-        width = Math.max(width, (matrix[i] || []).length);
+      const rawHeader = (matrix[headerIdx] || []).map((c) => cellText(c).trim());
+
+      // ── Largeur réelle du tableau ──
+      // Dernière colonne RÉELLEMENT utilisée (en-tête nommée OU contenant une
+      // donnée). Les colonnes Excel techniquement présentes mais vides (jusqu'à
+      // la colonne 128+) sont ignorées : « État » vient juste après la dernière
+      // colonne utile. La largeur dépend donc de CHAQUE feuille.
+      let lastUsed = -1;
+      for (let c = rawHeader.length - 1; c >= 0; c--) {
+        if ((rawHeader[c] || "") !== "") { lastUsed = c; break; }
       }
+      for (let i = headerIdx + 1; i < matrix.length; i++) {
+        const row = matrix[i] || [];
+        for (let c = row.length - 1; c >= 0; c--) {
+          if (cellText(row[c]).trim() !== "") { lastUsed = Math.max(lastUsed, c); break; }
+        }
+      }
+      const width = lastUsed + 1;
+      if (width <= 0) continue;
+
       const columns: string[] = [];
       for (let c = 0; c < width; c++) {
         const label = rawHeader[c] ?? "";
         columns.push(label !== "" ? label : `Colonne ${c + 1}`);
       }
 
+      // Détection des colonnes dates (nommées « date … ») pour formatage DD/MM/YYYY
+      const dateColumnIdx: number[] = [];
+      columns.forEach((col, c) => {
+        if (normCell(col).includes("date")) dateColumnIdx.push(c);
+      });
+
       // Lignes complémentaires situées AVANT l'en-tête (titres, périodes, etc.)
-      const preamble = matrix.slice(0, headerIdx).map((r) => (r || []).map((c) => String(c ?? "")));
+      const preamble = matrix.slice(0, headerIdx).map((r) =>
+        (r || []).slice(0, width).map((c) => (isDateLike(c) ? formatDateCell(c) : cellText(c)).trim()),
+      );
 
       // Lignes de données : cellules vides conservées, ordre préservé.
       // Les lignes entièrement vides sont ignorées (bruit de fin de feuille).
@@ -98,13 +186,17 @@ export async function POST(request: NextRequest) {
       for (let i = headerIdx + 1; i < matrix.length; i++) {
         const raw = matrix[i] || [];
         const cells: string[] = [];
-        for (let c = 0; c < width; c++) cells.push(String(raw[c] ?? ""));
-        if (cells.every((v) => v.trim() === "")) continue;
+        for (let c = 0; c < width; c++) {
+          const v = raw[c];
+          cells.push(dateColumnIdx.includes(c) ? formatDateCell(v).trim() : cellText(v).trim());
+        }
+        if (cells.every((cv) => cv === "")) continue;
         dataRows.push({ rowIndex: dataRows.length, cells });
       }
       if (dataRows.length === 0 && preamble.length === 0) continue;
 
       const resteColumnIndex = detectResteColumnIndex(columns);
+      const clientsColumnIndex = detectClientsColumnIndex(columns);
 
       // Nom unique de feuille : "<feuille>" ou "<feuille> (2)" si déjà présent,
       // sauf si l'administrateur a demandé le remplacement.
@@ -132,6 +224,7 @@ export async function POST(request: NextRequest) {
         columns: JSON.stringify(columns),
         preamble: preamble.length > 0 ? JSON.stringify(preamble) : null,
         resteColumnIndex,
+        clientsColumnIndex,
         rowCount: dataRows.length,
         importedById: user.id,
         importedByName: user.fullName,

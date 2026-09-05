@@ -319,6 +319,7 @@ export const archiveSheets = pgTable("archive_sheets", {
   columns: text("columns").notNull(),               // JSON: string[] — en-têtes, ORDRE PRÉSERVÉ
   preamble: text("preamble"),                       // JSON: string[][] — lignes complémentaires avant l'en-tête
   resteColumnIndex: integer("reste_column_index"),  // Index de la colonne "Reste à livrer" si détectée
+  clientsColumnIndex: integer("clients_column_index"), // Index de la colonne "Clients" (fusion verticale)
   rowCount: integer("row_count").notNull().default(0),
   importedById: integer("imported_by_id").references(() => users.id, { onDelete: "set null" }),
   importedByName: text("imported_by_name"),
