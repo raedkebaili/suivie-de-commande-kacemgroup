@@ -320,6 +320,8 @@ export const archiveSheets = pgTable("archive_sheets", {
   preamble: text("preamble"),                       // JSON: string[][] — lignes complémentaires avant l'en-tête
   resteColumnIndex: integer("reste_column_index"),  // Index de la colonne "Reste à livrer" si détectée
   clientsColumnIndex: integer("clients_column_index"), // Index de la colonne "Clients" (fusion verticale)
+  affaireColumnIndex: integer("affaire_column_index"), // Index de la colonne "Affaire" (fusion verticale)
+  stateColumnIndex: integer("state_column_index"),     // Index d'une colonne "État" présente dans le fichier
   rowCount: integer("row_count").notNull().default(0),
   importedById: integer("imported_by_id").references(() => users.id, { onDelete: "set null" }),
   importedByName: text("imported_by_name"),
@@ -332,8 +334,12 @@ export const archiveRows = pgTable("archive_rows", {
   sheetId: integer("sheet_id").notNull().references(() => archiveSheets.id, { onDelete: "cascade" }),
   rowIndex: integer("row_index").notNull(),         // Position d'origine dans la feuille
   cells: text("cells").notNull(),                   // JSON: string[] aligné sur columns
-  // État manuel défini par l'administrateur. NULL = état déduit automatiquement
-  // (Reste à livrer = 0 → LIVRE). Une cellule vide n'est jamais interprétée comme 0.
+  // État LU DANS LE FICHIER Excel à l'import (colonne "État" du classeur).
+  // Sert de valeur de départ ; reste modifiable via stateOverride.
+  stateDetected: text("state_detected"),
+  // État manuel défini par l'administrateur (prioritaire). NULL = on retombe
+  // sur l'état du fichier, puis sur la règle Reste à livrer = 0 → LIVRE.
+  // Une cellule vide n'est jamais interprétée comme 0.
   stateOverride: text("state_override"),
   updatedById: integer("updated_by_id").references(() => users.id, { onDelete: "set null" }),
   updatedByName: text("updated_by_name"),

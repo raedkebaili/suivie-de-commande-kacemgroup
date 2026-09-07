@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { archiveRows, archiveSheets } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
-import { ARCHIVE_STATE_BY_KEY, resolveArchiveRowState } from "@/lib/archive-constants";
+import { ARCHIVE_STATE_BY_KEY, resolveArchiveRowState, resolveArchiveStateSource } from "@/lib/archive-constants";
 
 /**
  * PUT /api/archive/rows/[id]
@@ -53,7 +53,10 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       row: {
         id: updated.id,
         stateOverride: updated.stateOverride,
-        state: resolveArchiveRowState(updated.stateOverride, resteRaw),
+        stateDetected: updated.stateDetected,
+        // state = null remet la ligne sur l'état du fichier, puis sur la règle auto
+        state: resolveArchiveRowState(updated.stateOverride, resteRaw, updated.stateDetected),
+        stateSource: resolveArchiveStateSource(updated.stateOverride, resteRaw, updated.stateDetected),
         updatedByName: updated.updatedByName,
       },
     });

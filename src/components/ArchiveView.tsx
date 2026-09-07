@@ -13,7 +13,7 @@ import {
 } from "@/lib/archive-constants";
 
 type Sheet = { id: number; name: string; sourceFilename: string | null; rowCount: number; importedByName: string | null; createdAt: string };
-type Row = { id: number; rowIndex: number; cells: string[]; stateOverride: string | null; state: string | null; updatedByName: string | null; cellColors: Record<number, string> };
+type Row = { id: number; rowIndex: number; cells: string[]; stateOverride: string | null; stateDetected?: string | null; state: string | null; stateSource?: string; updatedByName: string | null; cellColors: Record<number, string> };
 type Pagination = { page: number; pageSize: number; total: number; pages: number };
 
 /**
@@ -23,6 +23,20 @@ type Pagination = { page: number; pageSize: number; total: number; pages: number
  * authentifiés ; import et personnalisation réservés au superadmin
  * (contrôlé côté serveur par les routes /api/archive/*).
  */
+// Origine de l'état affiché (priorité : manuel > fichier Excel > règle automatique)
+const STATE_SOURCE_BADGE: Record<string, string> = {
+  manuel: "✎",
+  fichier: "📄",
+  auto: "⚙",
+  aucun: "",
+};
+const STATE_SOURCE_HINT: Record<string, string> = {
+  manuel: "État modifié manuellement (prioritaire)",
+  fichier: "État lu dans le fichier Excel importé — modifiable",
+  auto: "État déduit automatiquement (Reste à livrer = 0) — modifiable",
+  aucun: "Aucun état — sélectionnez-en un si nécessaire",
+};
+
 // Un « span » fusionne les lignes successives d'un même Client.
 // span: "first" = rend la cellule fusionnée (rowSpan), "mid" = masquée (couvert par le rowSpan),
 // "single" = cellule normale. groupLen = taille du groupe (pour le rowSpan).
@@ -42,7 +56,8 @@ function computeClientBars(rows: Row[], clientsIdx: number | null): Bar[] {
 
   const isEmptyRow = (r: Row) => r.cells.every((c) => (c || "").trim() === ""); // ligne totalement vide
   const isEmptyClient = (r: Row) => (r.cells[clientsIdx] || "").trim() === "" && !isEmptyRow(r); // ligne complémentaire
-  const val = (r: Row) => (r.cells[clientsIdx] || "").trim();
+  // Comparaison insensible à la casse et aux espaces multiples (« EMB » = « emb  »)
+  const val = (r: Row) => (r.cells[clientsIdx] || "").trim().replace(/\s+/g, " ").toUpperCase();
 
   let i = 0;
   while (i < n) {
@@ -86,6 +101,8 @@ export default function ArchiveView({ user }: { user: User }) {
   const [sheetId, setSheetId] = useState<number | null>(null);
   const [columns, setColumns] = useState<string[]>([]);
   const [clientsColumnIndex, setClientsColumnIndex] = useState<number | null>(null);
+  const [affaireColumnIndex, setAffaireColumnIndex] = useState<number | null>(null);
+  const [stateColumnIndex, setStateColumnIndex] = useState<number | null>(null);
   const [preamble, setPreamble] = useState<string[][]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [pagination, setPagination] = useState<Pagination>({ page: 1, pageSize: 100, total: 0, pages: 1 });
@@ -133,9 +150,11 @@ export default function ArchiveView({ user }: { user: User }) {
       const p = new URLSearchParams({ sheetId: String(sheetId), page: String(page), pageSize: "100" });
       if (debounced.trim().length >= 2) p.set("q", debounced.trim());
       if (stateFilter) p.set("state", stateFilter);
-      const d = await apiFetch<{ columns: string[]; preamble: string[][]; rows: Row[]; pagination: Pagination; sheet: { clientsColumnIndex: number | null } }>(`/api/archive/rows?${p}`);
+      const d = await apiFetch<{ columns: string[]; preamble: string[][]; rows: Row[]; pagination: Pagination; sheet: { clientsColumnIndex: number | null; affaireColumnIndex: number | null; stateColumnIndex: number | null } }>(`/api/archive/rows?${p}`);
       setColumns(d.columns); setPreamble(d.preamble || []); setRows(d.rows); setPagination(d.pagination);
       setClientsColumnIndex(d.sheet?.clientsColumnIndex ?? null);
+      setAffaireColumnIndex(d.sheet?.affaireColumnIndex ?? null);
+      setStateColumnIndex(d.sheet?.stateColumnIndex ?? null);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur de chargement");
@@ -165,6 +184,19 @@ export default function ArchiveView({ user }: { user: User }) {
     } finally {
       setImporting(false);
     }
+  };
+
+  /** Supprime TOUTES les archives (toutes les feuilles du classeur) — admin */
+  const deleteAllSheets = async () => {
+    const total = sheets.reduce((sum, s) => sum + s.rowCount, 0);
+    if (!confirm(`Supprimer TOUTES les archives ?\n\n${sheets.length} feuille(s) et ${total} ligne(s) seront définitivement supprimées, ainsi que les états et couleurs personnalisées associés.\n\nLes commandes actives ne sont PAS concernées.`)) return;
+    if (!confirm("Confirmation finale : cette action est irréversible. Continuer ?")) return;
+    try {
+      const r = await apiFetch<{ deleted: number }>("/api/archive/sheets?all=1", { method: "DELETE" });
+      flash(`${r.deleted} feuille(s) d'archive supprimée(s)`);
+      setSheetId(null); setRows([]); setColumns([]); setPreamble([]);
+      await loadSheets();
+    } catch (err) { setError(err instanceof Error ? err.message : "Erreur"); }
   };
 
   const deleteSheet = async (s: Sheet) => {
@@ -227,8 +259,16 @@ export default function ArchiveView({ user }: { user: User }) {
 
   const currentSheet = useMemo(() => sheets.find(s => s.id === sheetId) || null, [sheets, sheetId]);
 
-  // Fusions verticales de la colonne « Clients » (recalculées à chaque page de données)
+  // Fusions verticales : colonne « Clients » ET colonne « Affaire »
+  // (recalculées à chaque page de données, indépendamment l'une de l'autre)
   const clientBars = useMemo(() => computeClientBars(rows, clientsColumnIndex), [rows, clientsColumnIndex]);
+  const affaireBars = useMemo(() => computeClientBars(rows, affaireColumnIndex), [rows, affaireColumnIndex]);
+  /** Retourne la fusion applicable à une colonne donnée, ou null si non fusionnée */
+  const barFor = (ci: number, ri: number): Bar | null => {
+    if (clientsColumnIndex !== null && ci === clientsColumnIndex) return clientBars[ri] ?? null;
+    if (affaireColumnIndex !== null && ci === affaireColumnIndex) return affaireBars[ri] ?? null;
+    return null;
+  };
 
   return (
     <div className="space-y-4">
@@ -249,6 +289,13 @@ export default function ArchiveView({ user }: { user: User }) {
               className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 disabled:opacity-50">
               {importing ? "Import en cours..." : "📥 Importer une archive Excel"}
             </button>
+            {sheets.length > 0 && (
+              <button onClick={deleteAllSheets}
+                title="Supprimer toutes les feuilles d'archive (les commandes actives ne sont pas concernées)"
+                className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">
+                🗑️ Tout supprimer
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -305,8 +352,20 @@ export default function ArchiveView({ user }: { user: User }) {
               const bg = getColor(s.colorKey);
               return <span key={s.key} className="px-2 py-0.5 rounded border border-black/10" style={{ backgroundColor: bg, color: getContrastTextColor(bg) }}>{s.label}</span>;
             })}
-            <span className="text-gray-400 italic">« Reste à livrer » = 0 → Livré automatiquement (cellule vide non interprétée)</span>
+            <span className="text-gray-400 italic">
+              États : 📄 lu dans le fichier · ⚙ auto (Reste à livrer = 0) · ✎ modifié manuellement — tous modifiables
+            </span>
             {isAdmin && <span className="text-gray-400 italic">• Clic droit sur une cellule = couleur personnalisée</span>}
+            {stateColumnIndex !== null && (
+              <span className="px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300">
+                Colonne « {columns[stateColumnIndex]} » du fichier utilisée comme état
+              </span>
+            )}
+            {(clientsColumnIndex !== null || affaireColumnIndex !== null) && (
+              <span className="px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                Fusion verticale : {[clientsColumnIndex !== null ? columns[clientsColumnIndex] : null, affaireColumnIndex !== null ? columns[affaireColumnIndex] : null].filter(Boolean).join(" + ")}
+              </span>
+            )}
           </div>
 
           {/* Lignes complémentaires de la feuille d'origine */}
@@ -339,22 +398,24 @@ export default function ArchiveView({ user }: { user: User }) {
                     <tr><td colSpan={columns.length + 2} className="text-center py-10 text-gray-400">Aucune ligne pour ces critères</td></tr>
                   ) : rows.map((r, ri) => {
                     const rs = rowStyle(r.state);
-                    const bar = clientBars[ri] || { span: "single" as const, groupLen: 1 };
                     return (
                       <tr key={r.id} style={rs} className={`border-b border-gray-200 dark:border-gray-700 ${rs ? "" : "hover:bg-gray-50 dark:hover:bg-gray-800/50 text-gray-700 dark:text-gray-200"}`}>
                         <td className="px-2 py-1 text-[10px] opacity-60 whitespace-nowrap">{r.rowIndex + 1}</td>
                         {columns.map((_, ci) => {
-                          // Colonne « Clients » : fusion verticale réelle (rowSpan).
-                          if (clientsColumnIndex !== null && ci === clientsColumnIndex) {
-                            if (bar.span === "mid") return null; // couvert par la cellule fusionnée
+                          // Colonnes « Clients » et « Affaire » : fusion verticale
+                          // réelle (rowSpan) + centrage, comme dans Excel.
+                          const bar = barFor(ci, ri);
+                          if (bar) {
+                            if (bar.span === "mid") return null; // couverte par la cellule fusionnée
                             const cs = cellStyle(r, ci);
-                            const groupLen = bar.groupLen;
+                            const merged = bar.groupLen > 1;
                             return (
-                              <td key={ci} style={cs} rowSpan={groupLen}
-                                className={`px-2 py-1 border-l border-black/10 dark:border-white/10 align-middle text-center font-bold whitespace-nowrap ${isAdmin ? "cursor-context-menu" : ""}`}
-                                title={r.cells[ci] || ""}
+                              <td key={ci} style={cs} rowSpan={bar.groupLen}
+                                className={`px-2 py-1 border-l border-black/10 dark:border-white/10 align-middle text-center whitespace-nowrap ${merged ? "font-bold border-y border-black/20 dark:border-white/20" : ""} ${isAdmin ? "cursor-context-menu" : ""}`}
+                                title={merged ? `${r.cells[ci] || ""} — ${bar.groupLen} lignes regroupées` : (r.cells[ci] || "")}
                                 onContextMenu={isAdmin ? (e) => { e.preventDefault(); setCellEditor({ rowId: r.id, columnIndex: ci, current: r.cellColors[ci] }); } : undefined}>
                                 {r.cells[ci] ?? ""}
+                                {merged && <span className="block text-[9px] font-normal opacity-60">({bar.groupLen})</span>}
                               </td>
                             );
                           }
@@ -370,13 +431,25 @@ export default function ArchiveView({ user }: { user: User }) {
                         })}
                         <td className="px-2 py-1 border-l-2 border-black/20 dark:border-white/20 whitespace-nowrap">
                           {isAdmin ? (
-                            <select value={r.stateOverride ?? ""} onChange={e => setRowState(r, e.target.value || null)}
-                              className="text-[11px] px-1 py-0.5 rounded border border-black/20 bg-white/80 text-black">
-                              <option value="">{r.state ? `Auto (${archiveStateLabel(r.state)})` : "Auto (—)"}</option>
-                              {ARCHIVE_STATES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
-                            </select>
+                            <span className="inline-flex items-center gap-1">
+                              <select value={r.stateOverride ?? ""} onChange={e => setRowState(r, e.target.value || null)}
+                                title={STATE_SOURCE_HINT[r.stateSource || "aucun"]}
+                                className="text-[11px] px-1 py-0.5 rounded border border-black/20 bg-white/80 text-black">
+                                {/* Valeur vide = automatique : état du fichier, sinon règle Reste à livrer = 0 */}
+                                <option value="">{r.state ? `Auto (${archiveStateLabel(r.state)})` : "Auto (—)"}</option>
+                                {ARCHIVE_STATES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                              </select>
+                              <span className="text-[9px] opacity-70" title={STATE_SOURCE_HINT[r.stateSource || "aucun"]}>
+                                {STATE_SOURCE_BADGE[r.stateSource || "aucun"]}
+                              </span>
+                            </span>
                           ) : (
-                            <span className="text-[11px] font-semibold">{archiveStateLabel(r.state)}</span>
+                            <span className="text-[11px] font-semibold inline-flex items-center gap-1">
+                              {archiveStateLabel(r.state)}
+                              <span className="text-[9px] opacity-70" title={STATE_SOURCE_HINT[r.stateSource || "aucun"]}>
+                                {STATE_SOURCE_BADGE[r.stateSource || "aucun"]}
+                              </span>
+                            </span>
                           )}
                         </td>
                       </tr>

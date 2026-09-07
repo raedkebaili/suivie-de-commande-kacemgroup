@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { desc } from "drizzle-orm";
-import {
-  users, agencies, clients, orders, orderItems, productionBatches, expeditionBatches,
-  productionUnitLib, articleLibrary, techLibrary, materialCategories, matieres, itemTechnicalComponents,
-  activityLogs, modificationLogs, notifications, backupHistory, systemSettings, photometricStudies, photometricStudyItems,
-} from "@/db/schema";
+// Les tables sauvegardées sont désormais listées dans src/lib/backup-data.ts.
+// Cette route n'a plus besoin que de backupHistory et systemSettings.
+import { backupHistory, systemSettings } from "@/db/schema";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
+import { collectBackupData } from "@/lib/backup-data";
 import { eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -17,30 +16,9 @@ const BACKUP_VERSION = 1;
  * Génère les données de sauvegarde (même logique que GET /api/backup)
  */
 async function generateBackupData() {
-  const data = {
-    users: await db.select().from(users),
-    agencies: await db.select().from(agencies),
-    clients: await db.select().from(clients),
-    orders: await db.select().from(orders),
-    orderItems: await db.select().from(orderItems),
-    productionBatches: await db.select().from(productionBatches),
-    expeditionBatches: await db.select().from(expeditionBatches),
-    productionUnitLib: await db.select().from(productionUnitLib),
-    articleLibrary: await db.select().from(articleLibrary),
-    techLibrary: await db.select().from(techLibrary),
-    materialCategories: await db.select().from(materialCategories),
-    matieres: await db.select().from(matieres),
-    itemTechnicalComponents: await db.select().from(itemTechnicalComponents),
-    activityLogs: await db.select().from(activityLogs),
-    modificationLogs: await db.select().from(modificationLogs),
-    notifications: await db.select().from(notifications),
-    photometricStudies: await db.select().from(photometricStudies),
-    photometricStudyItems: await db.select().from(photometricStudyItems),
-  };
-
-  const totalRecords = Object.values(data).reduce((sum, rows) => sum + rows.length, 0);
-
-  return { data, totalRecords };
+  // Collecteur partagé avec la sauvegarde manuelle (src/lib/backup-data.ts) :
+  // garantit que les deux sauvegardes contiennent exactement les mêmes tables.
+  return collectBackupData();
 }
 
 /**

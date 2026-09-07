@@ -5,7 +5,13 @@ import { db } from "@/db";
 import { archiveRows, archiveSheets } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
-import { detectClientsColumnIndex, detectResteColumnIndex } from "@/lib/archive-constants";
+import {
+  detectAffaireColumnIndex,
+  detectClientsColumnIndex,
+  detectResteColumnIndex,
+  detectStateColumnIndex,
+  parseArchiveStateFromText,
+} from "@/lib/archive-constants";
 import { ensureArchiveColors } from "@/lib/archive";
 
 // ── Détection du véritable header du tableau (module Archive uniquement) ──
@@ -137,6 +143,31 @@ export async function POST(request: NextRequest) {
       }) as unknown as unknown[][];
       if (matrix.length === 0) continue;
 
+      // ── Cellules fusionnées Excel ──
+      // Une cellule fusionnée ne porte sa valeur que sur sa première ligne ;
+      // les suivantes sont vides. On propage la valeur sur toute l'étendue de
+      // la fusion afin de ne perdre aucune donnée (Clients, Affaire, etc.) et
+      // de pouvoir refusionner correctement à l'affichage.
+      const merges = (ws["!merges"] || []) as { s: { r: number; c: number }; e: { r: number; c: number } }[];
+      if (merges.length > 0) {
+        const originRow = ws["!ref"] ? XLSX.utils.decode_range(ws["!ref"]).s.r : 0;
+        for (const m of merges) {
+          const r0 = m.s.r - originRow;
+          const r1 = m.e.r - originRow;
+          if (r0 < 0 || r0 >= matrix.length) continue;
+          const srcRow = matrix[r0] || [];
+          const value = srcRow[m.s.c];
+          if (value === undefined || value === null || String(value).trim() === "") continue;
+          for (let r = r0; r <= r1 && r < matrix.length; r++) {
+            if (!matrix[r]) matrix[r] = [];
+            for (let c = m.s.c; c <= m.e.c; c++) {
+              const cur = matrix[r][c];
+              if (cur === undefined || cur === null || String(cur).trim() === "") matrix[r][c] = value;
+            }
+          }
+        }
+      }
+
       // ── Vraie ligne d'en-tête : meilleure ligne candidate par mots-clés ──
       // (corrige l'ancien comportement qui prenait la 1re ligne de données
       // comme header, et ne garde JAMAIS une commande comme header).
@@ -197,6 +228,11 @@ export async function POST(request: NextRequest) {
 
       const resteColumnIndex = detectResteColumnIndex(columns);
       const clientsColumnIndex = detectClientsColumnIndex(columns);
+      const affaireColumnIndex = detectAffaireColumnIndex(columns);
+      // Colonne « État » éventuellement présente dans le fichier source :
+      // son contenu alimente l'état de chaque ligne (donc les couleurs),
+      // tout en restant modifiable ensuite par l'administrateur.
+      const stateColumnIndex = detectStateColumnIndex(columns);
 
       // Nom unique de feuille : "<feuille>" ou "<feuille> (2)" si déjà présent,
       // sauf si l'administrateur a demandé le remplacement.
@@ -225,6 +261,8 @@ export async function POST(request: NextRequest) {
         preamble: preamble.length > 0 ? JSON.stringify(preamble) : null,
         resteColumnIndex,
         clientsColumnIndex,
+        affaireColumnIndex,
+        stateColumnIndex,
         rowCount: dataRows.length,
         importedById: user.id,
         importedByName: user.fullName,
@@ -237,6 +275,8 @@ export async function POST(request: NextRequest) {
           sheetId: createdSheet.id,
           rowIndex: r.rowIndex,
           cells: JSON.stringify(r.cells),
+          // État lu dans le fichier (null si colonne absente ou valeur non reconnue)
+          stateDetected: stateColumnIndex !== null ? parseArchiveStateFromText(r.cells[stateColumnIndex]) : null,
         }));
         if (chunk.length > 0) await db.insert(archiveRows).values(chunk);
       }

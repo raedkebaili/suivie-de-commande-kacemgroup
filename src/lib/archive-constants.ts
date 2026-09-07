@@ -70,20 +70,39 @@ export function parseResteALivrer(raw: string | null | undefined): number | null
   return Number.isFinite(n) ? n : null;
 }
 
+/** Origine de l'état affiché (pour information dans l'interface) */
+export type ArchiveStateSource = "manuel" | "fichier" | "auto" | "aucun";
+
 /**
- * État effectif d'une ligne d'archive.
- * 1. état défini manuellement par l'administrateur (prioritaire) ;
- * 2. sinon, « Reste à livrer » = 0 → LIVRE ;
- * 3. sinon, aucun état (null) — la ligne reste neutre.
+ * État effectif d'une ligne d'archive, par ordre de priorité :
+ * 1. état modifié manuellement par l'administrateur (toujours prioritaire) ;
+ * 2. sinon, état LU DANS LE FICHIER Excel à l'import (colonne « État ») ;
+ * 3. sinon, règle automatique « Reste à livrer » = 0 → LIVRE ;
+ * 4. sinon, aucun état — la ligne reste neutre.
+ * Une cellule vide n'est jamais interprétée comme 0.
  */
 export function resolveArchiveRowState(
   stateOverride: string | null | undefined,
   resteRaw: string | null | undefined,
+  stateDetected?: string | null,
 ): ArchiveStateKey | null {
   if (stateOverride && ARCHIVE_STATE_BY_KEY[stateOverride]) return stateOverride as ArchiveStateKey;
+  if (stateDetected && ARCHIVE_STATE_BY_KEY[stateDetected]) return stateDetected as ArchiveStateKey;
   const reste = parseResteALivrer(resteRaw);
   if (reste === 0) return "LIVRE";
   return null;
+}
+
+/** Origine de l'état effectif, selon la même priorité que resolveArchiveRowState */
+export function resolveArchiveStateSource(
+  stateOverride: string | null | undefined,
+  resteRaw: string | null | undefined,
+  stateDetected?: string | null,
+): ArchiveStateSource {
+  if (stateOverride && ARCHIVE_STATE_BY_KEY[stateOverride]) return "manuel";
+  if (stateDetected && ARCHIVE_STATE_BY_KEY[stateDetected]) return "fichier";
+  if (parseResteALivrer(resteRaw) === 0) return "auto";
+  return "aucun";
 }
 
 /** Détecte l'index de la colonne « Reste à livrer » parmi les en-têtes */
@@ -100,16 +119,68 @@ export function detectResteColumnIndex(columns: string[]): number | null {
   return null;
 }
 
+const normHeader = (s: string) =>
+  (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
 /** Détecte l'index de la colonne « Clients » (pour la fusion verticale) */
 export function detectClientsColumnIndex(columns: string[]): number | null {
-  const norm = (s: string) =>
-    (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
   for (let i = 0; i < columns.length; i++) {
-    const c = norm(columns[i]);
+    const c = normHeader(columns[i]);
     if (c === "clients" || c === "client") return i;
   }
   for (let i = 0; i < columns.length; i++) {
-    if (norm(columns[i]).includes("client")) return i;
+    if (normHeader(columns[i]).includes("client")) return i;
   }
+  return null;
+}
+
+/** Détecte l'index de la colonne « Affaire » (fusion verticale également) */
+export function detectAffaireColumnIndex(columns: string[]): number | null {
+  for (let i = 0; i < columns.length; i++) {
+    const c = normHeader(columns[i]);
+    if (c === "affaire" || c === "affaires") return i;
+  }
+  for (let i = 0; i < columns.length; i++) {
+    if (normHeader(columns[i]).includes("affaire")) return i;
+  }
+  return null;
+}
+
+/**
+ * Détecte l'index d'une colonne « État / Etat / Statut » présente dans le
+ * fichier Excel source (permet de lire l'état des commandes à l'import).
+ */
+export function detectStateColumnIndex(columns: string[]): number | null {
+  for (let i = 0; i < columns.length; i++) {
+    const c = normHeader(columns[i]);
+    if (c === "etat" || c === "etats" || c === "statut" || c === "status") return i;
+  }
+  for (let i = 0; i < columns.length; i++) {
+    const c = normHeader(columns[i]);
+    if (c.startsWith("etat") || c.startsWith("statut")) return i;
+  }
+  return null;
+}
+
+/**
+ * Convertit un libellé texte issu du fichier Excel en état d'archive.
+ * Tolérant aux accents, à la casse et aux variantes courantes.
+ * Retourne null si la valeur est vide ou non reconnue.
+ */
+export function parseArchiveStateFromText(raw: string | null | undefined): ArchiveStateKey | null {
+  const c = normHeader(String(raw ?? ""));
+  if (!c) return null;
+
+  // Annulé / annulee / annule
+  if (c.startsWith("annul")) return "ANNULE";
+  // Prêt à livrer / pret a livre / preta...
+  if (c.startsWith("pret") || c.includes("pretalivr")) return "PRET_A_LIVRE";
+  // Prévision / prevision / prev
+  if (c.startsWith("prevision") || c === "prev" || c.startsWith("previs")) return "PREVISION";
+  // Livré / livree / livraison effectuée
+  if (c.startsWith("livr")) return "LIVRE";
+  // Variantes fréquentes
+  if (c === "ok" || c === "solde" || c === "soldee" || c === "termine" || c === "termine") return "LIVRE";
+  if (c === "encours" || c === "enprevision") return "PREVISION";
   return null;
 }

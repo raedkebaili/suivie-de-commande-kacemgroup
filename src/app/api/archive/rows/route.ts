@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { archiveCellColors, archiveRows, archiveSheets } from "@/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { getUserFromHeaders } from "@/lib/auth";
-import { resolveArchiveRowState } from "@/lib/archive-constants";
+import { resolveArchiveRowState, resolveArchiveStateSource } from "@/lib/archive-constants";
 
 /**
  * GET /api/archive/rows?sheetId=1&q=&state=&page=1&pageSize=100
@@ -53,9 +53,12 @@ export async function GET(request: NextRequest) {
         id: r.id,
         rowIndex: r.rowIndex,
         cells,
-        // État manuel (peut être null) et état effectif (manuel > Reste=0 > aucun)
+        // État manuel, état lu dans le fichier, état effectif et son origine
+        // (priorité : manuel > fichier > Reste à livrer = 0 > aucun)
         stateOverride: r.stateOverride,
-        state: resolveArchiveRowState(r.stateOverride, resteRaw),
+        stateDetected: r.stateDetected,
+        state: resolveArchiveRowState(r.stateOverride, resteRaw, r.stateDetected),
+        stateSource: resolveArchiveStateSource(r.stateOverride, resteRaw, r.stateDetected),
         updatedByName: r.updatedByName,
         cellColors: colorsByRow.get(r.id) || {},
       };
@@ -84,6 +87,8 @@ export async function GET(request: NextRequest) {
         createdAt: sheet.createdAt,
         resteColumnIndex: resteIdx,
         clientsColumnIndex: sheet.clientsColumnIndex,
+        affaireColumnIndex: sheet.affaireColumnIndex,
+        stateColumnIndex: sheet.stateColumnIndex,
       },
       columns,
       preamble,

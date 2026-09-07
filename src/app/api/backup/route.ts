@@ -10,6 +10,7 @@ import {
   archiveSheets, archiveRows, archiveCellColors,
 } from "@/db/schema";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
+import { collectBackupData } from "@/lib/backup-data";
 
 export const dynamic = "force-dynamic";
 
@@ -21,40 +22,9 @@ export async function GET(request: NextRequest) {
   if (!user || user.role !== "superadmin") return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
 
   try {
-    const data = {
-      users: await db.select().from(users),
-      agencies: await db.select().from(agencies),
-      clients: await db.select().from(clients),
-      orders: await db.select().from(orders),
-      orderItems: await db.select().from(orderItems),
-      productionBatches: await db.select().from(productionBatches),
-      expeditionBatches: await db.select().from(expeditionBatches),
-      productionUnitLib: await db.select().from(productionUnitLib),
-      articleLibrary: await db.select().from(articleLibrary),
-      techLibrary: await db.select().from(techLibrary),
-      materialCategories: await db.select().from(materialCategories),
-      matieres: await db.select().from(matieres),
-      itemTechnicalComponents: await db.select().from(itemTechnicalComponents),
-      activityLogs: await db.select().from(activityLogs),
-      modificationLogs: await db.select().from(modificationLogs),
-      notifications: await db.select().from(notifications),
-      photometricStudies: await db.select().from(photometricStudies),
-      photometricStudyItems: await db.select().from(photometricStudyItems),
-      recouvrementStates: await db.select().from(recouvrementStates),
-      clientRecouvrementStates: await db.select().from(clientRecouvrementStates),
-      clientRecouvrementLogs: await db.select().from(clientRecouvrementLogs),
-      // Tables de configuration : couleurs, paramètres d'affichage (colonnes,
-      // états de production, ligne TOTAL) et compteurs de numérotation.
-      systemSettings: await db.select().from(systemSettings),
-      appColors: await db.select().from(appColors),
-      orderCounters: await db.select().from(orderCounters),
-      // Module Archive commandes (données historiques + personnalisations)
-      archiveSheets: await db.select().from(archiveSheets),
-      archiveRows: await db.select().from(archiveRows),
-      archiveCellColors: await db.select().from(archiveCellColors),
-    };
+    // Collecteur partagé avec la sauvegarde automatique (src/lib/backup-data.ts)
+    const { data, totalRecords } = await collectBackupData();
 
-    const totalRecords = Object.values(data).reduce((sum, rows) => sum + rows.length, 0);
 
     const backup = {
       meta: {
@@ -159,6 +129,10 @@ export async function POST(request: NextRequest) {
   const archiveRowsRows = arr<typeof archiveRows.$inferInsert>("archiveRows");
   const archiveCellColorsRows = arr<typeof archiveCellColors.$inferInsert>("archiveCellColors");
   const restoreArchive = archiveSheetsRows.length > 0;
+  // Catalogue des états de recouvrement : même garde. Une sauvegarde antérieure
+  // à ce module ne doit pas effacer un catalogue enrichi par l'utilisateur.
+  // (Les affectations clients partent de toute façon en cascade avec clients.)
+  const restoreRecouvrement = recouvrementStatesRows.length > 0;
 
   const insertChunked = async <T extends Record<string, unknown>>(
     tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
@@ -199,7 +173,7 @@ export async function POST(request: NextRequest) {
       await tx.delete(articleLibrary);
       await tx.delete(productionUnitLib);
       await tx.delete(clients);
-      await tx.delete(recouvrementStates);
+      if (restoreRecouvrement) await tx.delete(recouvrementStates);
       await tx.delete(agencies);
       if (restoreSettings) await tx.delete(systemSettings);
       if (restoreColors) await tx.delete(appColors);
@@ -210,9 +184,11 @@ export async function POST(request: NextRequest) {
       await insertChunked(tx, users, usersRows);
       await insertChunked(tx, agencies, agenciesRows);
       await insertChunked(tx, clients, clientsRows);
-      await insertChunked(tx, recouvrementStates, recouvrementStatesRows);
-      await insertChunked(tx, clientRecouvrementStates, clientRecouvrementStatesRows);
-      await insertChunked(tx, clientRecouvrementLogs, clientRecouvrementLogsRows);
+      if (restoreRecouvrement) {
+        await insertChunked(tx, recouvrementStates, recouvrementStatesRows);
+        await insertChunked(tx, clientRecouvrementStates, clientRecouvrementStatesRows);
+        await insertChunked(tx, clientRecouvrementLogs, clientRecouvrementLogsRows);
+      }
       await insertChunked(tx, orders, ordersRows);
       await insertChunked(tx, orderItems, orderItemsRows);
       await insertChunked(tx, materialCategories, materialCategoriesRows);
@@ -243,7 +219,7 @@ export async function POST(request: NextRequest) {
         "expedition_batches", "production_unit_lib", "article_library", "tech_library",
         "material_categories", "matieres", "item_technical_components", "activity_logs", "modification_logs", "notifications",
         "photometric_studies", "photometric_study_items",
-        "recouvrement_states", "client_recouvrement_states", "client_recouvrement_logs",
+        ...(restoreRecouvrement ? ["recouvrement_states", "client_recouvrement_states", "client_recouvrement_logs"] : []),
         ...(restoreSettings ? ["system_settings"] : []),
         ...(restoreColors ? ["app_colors"] : []),
         ...(restoreCounters ? ["order_counters"] : []),
