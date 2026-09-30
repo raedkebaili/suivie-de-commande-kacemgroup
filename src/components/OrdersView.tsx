@@ -123,6 +123,15 @@ export default function OrdersView({ user }: { user: User }) {
 
   const ce=()=>["superadmin","commercial"].includes(user.role), ct=()=>["superadmin","technique"].includes(user.role), cp=()=>["superadmin","planification"].includes(user.role), cd=user.role==="superadmin";
 
+  // ── Accès limité du service planification ──
+  // Le planificateur peut CRÉER des commandes, mais uniquement à l'état
+  // commercial « Sur Stock / Besoin interne » (verrouillé ici et côté serveur).
+  // Il ne gagne aucun droit d'édition commerciale sur les commandes existantes.
+  const planifStockOnly = user.role === "planification";
+  const canCreateOrder = () => ce() || planifStockOnly;
+  // Saisie de l'en-tête et des articles : commercial, ou planificateur en création
+  const canEditOrderForm = () => ce() || (planifStockOnly && !editingOrder);
+
   // ── Visibilité des colonnes (config globale administrée par le superadmin) ──
   const isColVisible = (k:string):boolean => !hiddenCols.includes(k);
   const visibleColCount = ORDER_TABLE_TOTAL_COLS - ORDER_TABLE_COLUMNS.filter(c=>hiddenCols.includes(c.key)).length;
@@ -254,7 +263,7 @@ export default function OrdersView({ user }: { user: User }) {
     }
   };
 
-  const rf=async()=>{try{const n=await apiFetch<{orderNumber:string}>("/api/orders/next-number");setForm({orderNumber:n.orderNumber,orderDate:new Date().toISOString().split("T")[0],priority:"NORMALE",clientId:"",agencyId:"",affaire:"",commercialStatus:"PREVISION",productionStatus:"EN_INSTANCE",cancelReason:"",statusReason:""})}catch{setForm({orderNumber:"",orderDate:new Date().toISOString().split("T")[0],priority:"NORMALE",clientId:"",agencyId:"",affaire:"",commercialStatus:"PREVISION",productionStatus:"EN_INSTANCE",cancelReason:"",statusReason:""})};setFormItems([]);setTechItems({});setItemMaterialSelections({});setOpenTelegestionItem(null);setEditingOrder(null);setError("");setSaving(false)};
+  const rf=async()=>{try{const n=await apiFetch<{orderNumber:string}>("/api/orders/next-number");setForm({orderNumber:n.orderNumber,orderDate:new Date().toISOString().split("T")[0],priority:"NORMALE",clientId:"",agencyId:"",affaire:"",commercialStatus:planifStockOnly?"SUR_STOCK":"PREVISION",productionStatus:"EN_INSTANCE",cancelReason:"",statusReason:""})}catch{setForm({orderNumber:"",orderDate:new Date().toISOString().split("T")[0],priority:"NORMALE",clientId:"",agencyId:"",affaire:"",commercialStatus:planifStockOnly?"SUR_STOCK":"PREVISION",productionStatus:"EN_INSTANCE",cancelReason:"",statusReason:""})};setFormItems([]);setTechItems({});setItemMaterialSelections({});setOpenTelegestionItem(null);setEditingOrder(null);setError("");setSaving(false)};
 
   // Electron keyboard shortcuts (dispatched from page.tsx as custom DOM events):
   // F2 = Nouvelle commande, F5 = Actualiser. No-op in a regular browser tab.
@@ -288,9 +297,12 @@ export default function OrdersView({ user }: { user: User }) {
     // Pour une modification, on garde le numéro existant
     if(!form.clientId||(needAgency&&!form.agencyId)){setError(needAgency?"Client et agence requis":"Client requis");setSaving(false);return}
     const vi=formItems.filter(i=>i.articleName.trim());
-    if(ce()){
+    // Commercial : création + modification. Planification : CRÉATION uniquement,
+    // et toujours à l'état « Sur Stock / Besoin interne » (revérifié côté serveur).
+    if(canEditOrderForm()){
       if(vi.length===0&&!editingOrder){setError("Au moins un article");setSaving(false);return}
-      const pl:Record<string,unknown>={orderDate:form.orderDate,priority:"NORMALE",clientId:parseInt(form.clientId),agencyId:parseInt(form.agencyId),affaire:form.affaire||null,status:form.commercialStatus||"BON_COMMANDE",items:vi.map(i=>({id:i.id||undefined,articleName:i.articleName,quantity:i.quantity||1,note:i.note||null,clientSpec:i.clientSpec||null,unitPrice:i.unitPrice||null,description:i.description||null}))};
+      const statusToSend=planifStockOnly?"SUR_STOCK":(form.commercialStatus||"BON_COMMANDE");
+      const pl:Record<string,unknown>={orderDate:form.orderDate,priority:"NORMALE",clientId:parseInt(form.clientId),agencyId:parseInt(form.agencyId),affaire:form.affaire||null,status:statusToSend,items:vi.map(i=>({id:i.id||undefined,articleName:i.articleName,quantity:i.quantity||1,note:i.note||null,clientSpec:i.clientSpec||null,unitPrice:i.unitPrice||null,description:i.description||null}))};
       // Ajouter orderNumber seulement pour les modifications
       if(editingOrder){pl.orderNumber=form.orderNumber;}
       if(form.commercialStatus==="ANNULEE"&&form.cancelReason)pl.cancelReason=form.cancelReason;
@@ -498,7 +510,7 @@ export default function OrdersView({ user }: { user: User }) {
       <button onClick={()=>setShowImport(true)} className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700">📥 Import</button>
       <button onClick={ee} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">📤 Export</button>
       {ct()&&<button onClick={()=>openPhotoStudyModal()} className="px-4 py-1.5 bg-sky-600 text-white rounded-lg text-sm hover:bg-sky-700">🔬 Nouvelle Étude Photométrique</button>}
-      {ce()&&<button onClick={()=>{rf();setShowModal(true)}} className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">+ Nouvelle</button>}
+      {canCreateOrder()&&<button onClick={()=>{rf();setShowModal(true)}} title={planifStockOnly?"Créer une commande Sur Stock / Besoin interne":"Créer une commande"} className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">+ Nouvelle{planifStockOnly?" (Sur Stock)":""}</button>}
     </div>
 
     {loading?<div className="flex justify-center py-12"><svg className="animate-spin w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></div>:
@@ -588,19 +600,23 @@ export default function OrdersView({ user }: { user: User }) {
           </div>
           {!editingOrder && <span className="text-[10px] text-blue-600 mt-0.5 block">Format: N/AAAA (ex: 1/2026)</span>}
         </div>
-        <F l="Date" type="date" v={form.orderDate} onChange={v=>setForm({...form,orderDate:v})} disabled={!ce()&&!!editingOrder}/>
+        <F l="Date" type="date" v={form.orderDate} onChange={v=>setForm({...form,orderDate:v})} disabled={!canEditOrderForm()}/>
         {/* État initial : 3 choix pour le commercial */}
         <div><label className="block text-[11px] font-medium text-gray-600 mb-1">État initial</label>
-          <button type="button" onClick={()=>setForm({...form,commercialStatus:form.commercialStatus==="BON_COMMANDE"?"PREVISION":form.commercialStatus==="PREVISION"?"SUR_STOCK":"BON_COMMANDE"})} disabled={!ce()&&!!editingOrder}
-            className={`w-full px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${form.commercialStatus==="SUR_STOCK"?"bg-cyan-100 border-cyan-400 text-cyan-800":form.commercialStatus==="BON_COMMANDE"?"bg-blue-100 border-blue-400 text-blue-800":"bg-orange-100 border-orange-400 text-orange-800"}`}>
+          {/* Le planificateur est verrouillé sur « Sur Stock / Besoin interne » :
+              le bouton ne bascule pas (contrôle également appliqué côté serveur). */}
+          <button type="button" onClick={()=>{if(planifStockOnly)return;setForm({...form,commercialStatus:form.commercialStatus==="BON_COMMANDE"?"PREVISION":form.commercialStatus==="PREVISION"?"SUR_STOCK":"BON_COMMANDE"})}} disabled={(!ce()&&!!editingOrder)||planifStockOnly}
+            title={planifStockOnly?"Le service planification ne peut créer que des commandes « Sur Stock / Besoin interne »":"Cliquer pour changer l'état initial"}
+            className={`w-full px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${form.commercialStatus==="SUR_STOCK"?"bg-cyan-100 border-cyan-400 text-cyan-800":form.commercialStatus==="BON_COMMANDE"?"bg-blue-100 border-blue-400 text-blue-800":"bg-orange-100 border-orange-400 text-orange-800"} ${planifStockOnly?"opacity-90 cursor-not-allowed":""}`}>
             {form.commercialStatus==="SUR_STOCK"?"📦 Sur Stock / Besoin interne":form.commercialStatus==="BON_COMMANDE"?"📋 Bon de Commande reçu":"🔮 Prévision"}
+            {planifStockOnly&&<span className="block text-[9px] font-normal opacity-70">🔒 État imposé au service planification</span>}
           </button>
         </div>
-        <AutocompleteSelect label="Client *" items={clients.map(c=>({id:c.id,label:c.name}))} value={form.clientId} onChange={v=>setForm({...form,clientId:v})} disabled={!ce()&&!!editingOrder} />
-        <AutocompleteSelect label="Agence *" items={agencies.map(a=>({id:a.id,label:a.name}))} value={form.agencyId} onChange={v=>setForm({...form,agencyId:v})} disabled={!ce()&&!!editingOrder} />
-        <div><label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">N° Affaire</label><AutocompleteInput value={form.affaire} onChange={v=>setForm({...form,affaire:v})} suggestUrl="/api/library/affaires" placeholder="Affaire" disabled={!ce()&&!!editingOrder} /></div>
+        <AutocompleteSelect label="Client *" items={clients.map(c=>({id:c.id,label:c.name}))} value={form.clientId} onChange={v=>setForm({...form,clientId:v})} disabled={!canEditOrderForm()} />
+        <AutocompleteSelect label="Agence *" items={agencies.map(a=>({id:a.id,label:a.name}))} value={form.agencyId} onChange={v=>setForm({...form,agencyId:v})} disabled={!canEditOrderForm()} />
+        <div><label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">N° Affaire</label><AutocompleteInput value={form.affaire} onChange={v=>setForm({...form,affaire:v})} suggestUrl="/api/library/affaires" placeholder="Affaire" disabled={!canEditOrderForm()} /></div>
       </div>
-      {ce()&&<div className="mt-4">
+      {canEditOrderForm()&&<div className="mt-4">
       <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-2">Articles</label>
       {/* Header labels */}
       <div className="hidden md:flex gap-2 mb-1 px-0.5">

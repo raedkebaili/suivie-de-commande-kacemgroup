@@ -63,19 +63,66 @@ export async function GET(request: NextRequest) {
   });
 }
 
+// Statut commercial unique autorisé au service planification (« Sur Stock / Besoin interne »)
+const PLANIF_ALLOWED_STATUS = "SUR_STOCK";
+
+// Agence technique utilisée pour les commandes « Sur Stock / Besoin interne »
+// créées sans agence. Le code existant prévoit explicitement que l'agence est
+// facultative dans ce cas (needAgency), mais insérait agency_id = 0, ce qui
+// violait la clé étrangère (aucune agence d'id 0) et provoquait une erreur 500.
+// On résout donc vers une agence dédiée, créée à la demande.
+const INTERNAL_AGENCY = { name: "Besoin interne", code: "INTERNE" };
+
+async function resolveInternalAgencyId(): Promise<number> {
+  const [existing] = await db.select({ id: agencies.id }).from(agencies).where(eq(agencies.code, INTERNAL_AGENCY.code)).limit(1);
+  if (existing) return existing.id;
+  const [created] = await db.insert(agencies).values({
+    name: INTERNAL_AGENCY.name,
+    code: INTERNAL_AGENCY.code,
+    address: null,
+    active: true,
+  }).returning({ id: agencies.id });
+  return created.id;
+}
+
 export async function POST(request: NextRequest) {
-  const a = await auth(request, ["superadmin", "commercial"]); 
+  // Accès limité : le service planification peut créer des commandes, mais
+  // UNIQUEMENT à l'état commercial « Sur Stock / Besoin interne ».
+  const a = await auth(request, ["superadmin", "commercial", "planification"]);
   if (!a.ok) return NextResponse.json({ error: a.error }, { status: a.status });
-  
+
   const body = await request.json();
   const { orderDate, clientId, agencyId, affaire, items: itemsList } = body;
-  const needAgency = body.status !== "SUR_STOCK";
-  
+
+  // Détermination du statut commercial effectif
+  let effectiveStatus: string = body.status || "PREVISION";
+  if (a.user.role === "planification") {
+    // Refus explicite de toute tentative d'un autre état (contrôle serveur,
+    // indépendant de l'interface) puis verrouillage sur SUR_STOCK.
+    if (body.status && body.status !== PLANIF_ALLOWED_STATUS) {
+      return NextResponse.json({
+        error: "Le service planification ne peut créer que des commandes « Sur Stock / Besoin interne »",
+      }, { status: 403 });
+    }
+    effectiveStatus = PLANIF_ALLOWED_STATUS;
+  }
+
+  const needAgency = effectiveStatus !== "SUR_STOCK";
+
   // Validation des champs requis (le numéro de commande n'est plus requis du client)
   if (!clientId || (needAgency && !agencyId) || !itemsList || itemsList.length === 0) {
     return NextResponse.json({ 
       error: needAgency ? "Client, agence et articles requis" : "Client et articles requis" 
     }, { status: 400 });
+  }
+
+  // Agence : fournie, sinon agence interne pour les commandes « Sur Stock »
+  let resolvedAgencyId: number;
+  try {
+    resolvedAgencyId = agencyId ? parseInt(agencyId) : await resolveInternalAgencyId();
+  } catch (error) {
+    console.error("Erreur résolution agence:", error);
+    return NextResponse.json({ error: "Erreur lors de la résolution de l'agence" }, { status: 500 });
   }
 
   // Générer automatiquement le numéro de commande (thread-safe)
@@ -95,9 +142,9 @@ export async function POST(request: NextRequest) {
     orderDate: orderDate || new Date().toISOString().split("T")[0],
     priority: "NORMALE", 
     clientId: parseInt(clientId), 
-    agencyId: agencyId ? parseInt(agencyId) : 0,
+    agencyId: resolvedAgencyId,
     affaire: affaire || null, 
-    status: body.status || "PREVISION",
+    status: effectiveStatus,
     productionStatus: "EN_INSTANCE",
     createdBy: a.user.id, 
     createdByName: a.user.fullName,

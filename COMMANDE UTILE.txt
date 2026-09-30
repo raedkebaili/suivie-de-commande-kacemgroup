@@ -1,0 +1,7 @@
+'DATABASE_URL=postgresql://neondb_owner:npg_xsPtQV1kuD2i@ep-winter-art-b2tvmbh3-pooler.c-6.eu-central-1.aws.neon.tech/otp_db?sslmode=require&channel_binding=require' | Out-File -FilePath .env -Encoding ascii -NoNewline
+********************************************
+npx drizzle-kit push
+*****************************************
+git add -A
+git commit -m "Prêt pour le déploiement Vercel"
+git push
