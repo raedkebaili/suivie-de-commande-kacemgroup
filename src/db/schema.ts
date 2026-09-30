@@ -307,6 +307,34 @@ export const clientRecouvrementStates = pgTable("client_recouvrement_states", {
   updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
 });
 
+// ── Planning de production journalier (module planification) ────────
+// Chaque ligne = un article planifié pour une journée donnée.
+// N'altère JAMAIS directement order_items : la quantité n'est appliquée à la
+// production réelle qu'au passage au statut TERMINE, via la même logique que
+// l'onglet Production (src/lib/production-apply.ts), et une seule fois
+// (garde d'idempotence appliedQty / appliedAt).
+export const productionPlanEntries = pgTable("production_plan_entries", {
+  id: serial("id").primaryKey(),
+  planDate: text("plan_date").notNull(),              // Journée planifiée (YYYY-MM-DD)
+  itemId: integer("item_id").notNull().references(() => orderItems.id, { onDelete: "cascade" }),
+  orderId: integer("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),
+  // Copies pour l'historique et l'affichage (même approche que les composants techniques)
+  articleName: text("article_name").notNull(),
+  orderNumber: text("order_number"),
+  clientName: text("client_name"),
+  plannedQty: integer("planned_qty").notNull().default(0),
+  // EN_COURS | SUSPENDU | ANNULE | TERMINE
+  status: text("status").notNull().default("EN_COURS"),
+  reason: text("reason"),                             // Motif de suspension / annulation
+  appliedQty: integer("applied_qty").notNull().default(0),  // Quantité réellement appliquée en production
+  appliedAt: text("applied_at"),                      // Date d'application (idempotence)
+  createdById: integer("created_by_id").references(() => users.id, { onDelete: "set null" }),
+  createdByName: text("created_by_name"),
+  updatedByName: text("updated_by_name"),
+  createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
+});
+
 // ── Archive commandes (module indépendant) ──────────────────────────
 // Données historiques importées depuis Excel. STRICTEMENT SÉPARÉES des
 // commandes actives (tables orders / order_items) : aucune FK vers celles-ci.

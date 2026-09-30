@@ -92,6 +92,8 @@ export default function OrdersView({ user }: { user: User }) {
   const [dataVersion, setDataVersion] = useState(0);
   // Alertes de recouvrement par client (affichées sur la colonne Client)
   const [recouvByClient, setRecouvByClient] = useState<Map<number, ClientRecouvrementAssignment>>(new Map());
+  // Articles en cours de production d'après le planning (alerte visuelle)
+  const [planningActiveItems, setPlanningActiveItems] = useState<Set<number>>(new Set());
 
   const [form, setForm] = useState({ orderNumber:"", orderDate:new Date().toISOString().split("T")[0], priority:"NORMALE" as string, clientId:"", agencyId:"", affaire:"", commercialStatus:"PREVISION" as string, productionStatus:"EN_INSTANCE" as string, cancelReason:"", statusReason:"" });
   const [formItems, setFormItems] = useState<OrderItem[]>([]);
@@ -168,7 +170,13 @@ export default function OrdersView({ user }: { user: User }) {
     apiFetch<{matieres:Material[]}>("/api/matieres").then(d=>setMaterials(d.matieres)).catch(()=>{}),
     apiFetch<{hiddenColumns:string[];hiddenProductionStates?:string[];hideTotalRow?:boolean}>("/api/orders/column-visibility").then(d=>{setHiddenCols(d.hiddenColumns||[]);setHiddenProdStates(d.hiddenProductionStates||[]);setHideTotalRow(!!d.hideTotalRow)}).catch(()=>{}),
     apiFetch<{assignments:ClientRecouvrementAssignment[]}>("/api/recouvrement/client-states").then(d=>setRecouvByClient(new Map(d.assignments.map(a=>[a.clientId,a])))).catch(()=>{}),
+    apiFetch<{itemIds:number[]}>("/api/production-planning/active").then(d=>setPlanningActiveItems(new Set(d.itemIds||[]))).catch(()=>{}),
   ]).finally(()=>setLoading(false))},[fetchOrders]);
+  // Planning actif : recalculé à chaque rafraîchissement des commandes (temps réel)
+  const refreshPlanningActive=useCallback(async()=>{
+    try{const d=await apiFetch<{itemIds:number[]}>("/api/production-planning/active");setPlanningActiveItems(new Set(d.itemIds||[]))}catch{/* non bloquant */}
+  },[]);
+  useEffect(()=>{if(dataVersion>0)refreshPlanningActive()},[dataVersion,refreshPlanningActive]);
   // Watch live auto-refresh
   useEffect(()=>{if(!watchLive)return;const iv=setInterval(fetchOrders,10000);return()=>clearInterval(iv)},[watchLive,fetchOrders]);
   // Auto-expand on search
@@ -532,7 +540,7 @@ export default function OrdersView({ user }: { user: User }) {
       const operationalLabel=visualState==="neutral"?(o.productionStatus==="EN_PRODUCTION"?"En production":"En instance"):ORDER_STATE_LABELS[visualState];
       return (<React.Fragment key={o.id}><tr className={`cursor-pointer border-l-4 text-black [&_td]:text-black [&_span]:text-black [&_b]:text-black ${orderRowClass(visualState,o.status)}`} onClick={()=>toggleExpand(o.id)}>
         <td className="px-2 py-1.5 text-center font-bold">{expanded?"▾":"▸"}</td>
-        <td className="px-2 py-1.5 font-medium">{highlight(o.orderNumber)}</td>
+        <td className="px-2 py-1.5 font-medium">{highlight(o.orderNumber)}{(o.items||[]).some(i=>!!i.id&&planningActiveItems.has(i.id))&&<span className="planning-blink ml-1 inline-block px-1 text-[8px] font-bold align-middle" style={{["--planning-color"]:getColor("PLANNING_EN_COURS"),["--planning-text"]:"#000000"} as React.CSSProperties} title="Production en cours (planning)">PROD</span>}</td>
         {isColVisible("date")&&<td className="px-2 py-1.5 text-[10px]">{o.orderDate}</td>}
         <td className="px-2 py-1.5"><RecouvrementAlertCell name={highlight(o.clientName||"")} assignment={recouvByClient.get(o.clientId)} /></td>
         {isColVisible("agence")&&<td className="px-2 py-1.5 text-[10px]">{o.agencyName}</td>}
@@ -559,6 +567,7 @@ export default function OrdersView({ user }: { user: User }) {
             highlight={highlight}
             fmtDate={fmtDate}
             onShowExpeditionHistory={showExpeditionHistory}
+            planningInProgress={!!it.id&&planningActiveItems.has(it.id)}
           />
         ))}
         {!hideTotalRow&&<tr className="bg-white/60 text-[10px] text-black"><td className="px-1 py-1 font-semibold">TOTAL</td><td className="px-1 py-1">{ordered}</td><td className="px-1 py-1"></td><td className="px-1 py-1">{produced}</td><td className="px-1 py-1">{delivered}</td><td className="px-1 py-1">{Math.max(0,produced-delivered)}</td><td className="px-1 py-1"><span className="remaining-to-deliver">{Math.max(0,ordered-delivered)}</span></td><td className="px-1 py-1" colSpan={4}></td></tr>}

@@ -8,6 +8,7 @@ import {
   recouvrementStates, clientRecouvrementStates, clientRecouvrementLogs,
   systemSettings, appColors, orderCounters,
   archiveSheets, archiveRows, archiveCellColors,
+  productionPlanEntries,
 } from "@/db/schema";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 import { collectBackupData } from "@/lib/backup-data";
@@ -129,6 +130,9 @@ export async function POST(request: NextRequest) {
   const archiveRowsRows = arr<typeof archiveRows.$inferInsert>("archiveRows");
   const archiveCellColorsRows = arr<typeof archiveCellColors.$inferInsert>("archiveCellColors");
   const restoreArchive = archiveSheetsRows.length > 0;
+  // Planning de production — même garde de rétrocompatibilité
+  const productionPlanEntriesRows = arr<typeof productionPlanEntries.$inferInsert>("productionPlanEntries");
+  const restorePlanning = productionPlanEntriesRows.length > 0;
   // Catalogue des états de recouvrement : même garde. Une sauvegarde antérieure
   // à ce module ne doit pas effacer un catalogue enrichi par l'utilisateur.
   // (Les affectations clients partent de toute façon en cascade avec clients.)
@@ -150,6 +154,7 @@ export async function POST(request: NextRequest) {
   try {
     await db.transaction(async (tx) => {
       // Delete in reverse FK-dependency order
+      if (restorePlanning) await tx.delete(productionPlanEntries);
       if (restoreArchive) {
         await tx.delete(archiveCellColors);
         await tx.delete(archiveRows);
@@ -207,6 +212,7 @@ export async function POST(request: NextRequest) {
       if (restoreSettings) await insertChunked(tx, systemSettings, systemSettingsRows);
       if (restoreColors) await insertChunked(tx, appColors, appColorsRows);
       if (restoreCounters) await insertChunked(tx, orderCounters, orderCountersRows);
+      if (restorePlanning) await insertChunked(tx, productionPlanEntries, productionPlanEntriesRows);
       if (restoreArchive) {
         await insertChunked(tx, archiveSheets, archiveSheetsRows);
         await insertChunked(tx, archiveRows, archiveRowsRows);
@@ -224,6 +230,7 @@ export async function POST(request: NextRequest) {
         ...(restoreColors ? ["app_colors"] : []),
         ...(restoreCounters ? ["order_counters"] : []),
         ...(restoreArchive ? ["archive_sheets", "archive_rows", "archive_cell_colors"] : []),
+        ...(restorePlanning ? ["production_plan_entries"] : []),
       ];
       for (const t of tableNames) {
         await tx.execute(
@@ -244,7 +251,8 @@ export async function POST(request: NextRequest) {
     photometricStudiesRows.length + photometricStudyItemsRows.length +
     recouvrementStatesRows.length + clientRecouvrementStatesRows.length + clientRecouvrementLogsRows.length +
     systemSettingsRows.length + appColorsRows.length + orderCountersRows.length +
-    archiveSheetsRows.length + archiveRowsRows.length + archiveCellColorsRows.length;
+    archiveSheetsRows.length + archiveRowsRows.length + archiveCellColorsRows.length +
+    productionPlanEntriesRows.length;
 
   await logActivity(user.id, user.username, "BACKUP_RESTORE", `Restauration effectuée: ${totalRestored} enregistrements`);
 

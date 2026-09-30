@@ -3,6 +3,7 @@ import { friendlyDbErrorMessage } from "@/lib/db-error";
 import { ensureDefaultMaterialCategories } from "@/lib/material-categories";
 import { ensureRecouvrementDefaults } from "@/lib/recouvrement";
 import { ensureArchiveColors } from "@/lib/archive";
+import { ensurePlanningColors } from "@/lib/production-planning";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,7 @@ export async function GET() {
     // pas le healthcheck principal de répondre.
     try { await ensureRecouvrementDefaults(); } catch (e) { console.error("Seed recouvrement:", e); }
     try { await ensureArchiveColors(); } catch (e) { console.error("Seed archive:", e); }
+    try { await ensurePlanningColors(); } catch (e) { console.error("Seed planning:", e); }
     return Response.json({ ok: true });
   } catch (e) {
     console.error("Health check error:", e);

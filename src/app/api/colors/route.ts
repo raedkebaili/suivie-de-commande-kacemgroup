@@ -6,6 +6,7 @@ import { eq, asc } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 import { DEFAULT_COLORS, isValidHexColor, normalizeHexColor } from "@/lib/color-utils";
 import { ensureArchiveColors } from "@/lib/archive";
+import { ensurePlanningColors } from "@/lib/production-planning";
 
 /**
  * Initialise les couleurs par défaut manquantes.
@@ -51,6 +52,7 @@ export async function GET(request: NextRequest) {
     // Sous-module Archive : ajoute ses propres clés (catégorie "archive")
     // sans toucher aux couleurs existantes du tableau de suivi.
     try { await ensureArchiveColors(); } catch (e) { console.error("Seed couleurs archive:", e); }
+    try { await ensurePlanningColors(); } catch (e) { console.error("Seed couleurs planning:", e); }
     const colors = await db
       .select()
       .from(appColors)

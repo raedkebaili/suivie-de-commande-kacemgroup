@@ -64,6 +64,33 @@ html { transition: background-color 0.3s ease, color 0.3s ease; }
   border-radius: 6px;
 }
 
+/* Planning de production — clignotement « En cours de production ».
+   La couleur provient de --planning-color (clé PLANNING_EN_COURS, modifiable
+   dans l'onglet Couleurs). Utilisé dans le planning ET dans le tableau des
+   commandes pour signaler en temps réel les articles en cours. */
+@keyframes planningPulse {
+  0%, 100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  }
+  50% {
+    background-color: var(--planning-color, #eab308);
+    color: var(--planning-text, #000000);
+    box-shadow: 0 0 10px var(--planning-color, #eab308);
+  }
+}
+.planning-blink {
+  animation: planningPulse 1.8s ease-in-out infinite;
+  border-radius: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .planning-blink {
+    animation: none !important;
+    background-color: var(--planning-color, #eab308) !important;
+    color: var(--planning-text, #000000) !important;
+  }
+}
+
 /* Alerte Recouvrement — alternance du CONTENU : le nom du client et son état
    de recouvrement s'affichent en alternance au même emplacement (tableau des
    commandes et tableau des clients). 100 % CSS : aucun timer JS par ligne. */

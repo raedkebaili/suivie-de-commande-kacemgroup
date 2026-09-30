@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { orderItems, orders, clients, agencies, productionBatches } from "@/db/schema";
 import { eq, desc, sql } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
-import { isOrderFullyProduced, promotePrioritiesAfterCompletion } from "@/lib/priority-promotion";
+import { applyProductionQuantity } from "@/lib/production-apply";
 
 export async function GET(request: NextRequest) {
   const user = await getUserFromHeaders(request);
@@ -44,72 +44,21 @@ export async function POST(request: NextRequest) {
   const { itemId, batchQty, productionDate } = await request.json();
   if (!itemId || !batchQty) return NextResponse.json({ error: "itemId et batchQty requis" }, { status: 400 });
 
-  const qty = parseInt(batchQty) || 0;
-  if (qty <= 0) return NextResponse.json({ error: "Quantité doit être > 0" }, { status: 400 });
-
-  const [item] = await db.select().from(orderItems).where(eq(orderItems.id, parseInt(itemId))).limit(1);
-  if (!item) return NextResponse.json({ error: "Article non trouvé" }, { status: 404 });
-  const [order] = await db.select({ productionStatus: orders.productionStatus }).from(orders).where(eq(orders.id, item.orderId)).limit(1);
-  if (order?.productionStatus === "ANNULEE") {
-    return NextResponse.json({ error: "Impossible de produire une commande annulée" }, { status: 400 });
-  }
-
-  // Check if we can still produce (produced <= ordered)
-  const currentProduced = item.producedQty || 0;
-  const remaining = item.quantity - currentProduced;
-  if (remaining <= 0) return NextResponse.json({ error: "Cet article est déjà entièrement produit" }, { status: 400 });
-
-  const actualQty = Math.min(qty, remaining);
-  const newCumulative = currentProduced + actualQty;
-
-  // Insert batch
-  await db.insert(productionBatches).values({
-    itemId: item.id, orderId: item.orderId,
-    quantity: actualQty, cumulativeTotal: newCumulative,
-    producedBy: user.fullName,
-    productionDate: productionDate || new Date().toISOString().split("T")[0],
+  // Logique partagée avec le planning de production (src/lib/production-apply.ts) :
+  // lot, cumul, passage LIVREE, journalisation et promotion des priorités.
+  const res = await applyProductionQuantity({
+    itemId: parseInt(itemId),
+    qty: parseInt(batchQty) || 0,
+    productionDate,
+    user,
   });
+  if (!res.ok) return NextResponse.json({ error: res.error }, { status: res.status });
 
-  // Update item cumulative
-  await db.update(orderItems).set({ producedQty: newCumulative }).where(eq(orderItems.id, item.id));
-
-  // Check if all delivered -> LIVREE
-  const [all] = await db.select({
-    tc: sql<number>`sum(${orderItems.quantity})`,
-    td: sql<number>`sum(${orderItems.deliveredQty})`,
-  }).from(orderItems).where(eq(orderItems.orderId, item.orderId));
-  if (all && Number(all.td) >= Number(all.tc)) {
-    const [order] = await db.select().from(orders).where(eq(orders.id, item.orderId)).limit(1);
-    if (order && order.productionStatus !== "LIVREE") {
-      await db.update(orders).set({ productionStatus: "LIVREE", updatedAt: new Date().toISOString() }).where(eq(orders.id, item.orderId));
-    }
-  }
-
-  await logActivity(user.id, user.username, "PRODUCTION", `+${actualQty} de ${item.articleName} (total: ${newCumulative}/${item.quantity})`);
-
-  // ── Promotion automatique des priorités ──
-  // Si la commande est désormais entièrement produite (qté commandée = qté
-  // produite sur tous ses articles), elle libère son rang et les commandes
-  // suivantes remontent d'un cran (P2 → P1, P3 → P2, …).
-  let priorityPromotion: Awaited<ReturnType<typeof promotePrioritiesAfterCompletion>> | null = null;
-  try {
-    if (await isOrderFullyProduced(item.orderId)) {
-      priorityPromotion = await promotePrioritiesAfterCompletion(item.orderId, { id: user.id, fullName: user.fullName });
-      if (priorityPromotion.promoted.length > 0) {
-        await logActivity(user.id, user.username, "PRIORITY_PROMOTION",
-          `Production terminée → ${priorityPromotion.promoted.length} commande(s) promue(s): ` +
-          priorityPromotion.promoted.map(p => `#${p.orderNumber} ${p.from}→${p.to}`).join(", "));
-      }
-    }
-  } catch (e) {
-    // La promotion ne doit jamais faire échouer l'enregistrement du lot produit
-    console.error("Promotion des priorités:", e);
-  }
-
+  // Réponse inchangée par rapport au comportement d'origine
   return NextResponse.json({
     ok: true,
-    cumulative: newCumulative,
-    remaining: item.quantity - newCumulative,
-    priorityPromotion,
+    cumulative: res.cumulative,
+    remaining: res.remaining,
+    priorityPromotion: res.priorityPromotion,
   });
 }

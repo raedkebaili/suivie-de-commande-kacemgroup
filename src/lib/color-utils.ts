@@ -205,4 +205,5 @@ export const COLOR_CATEGORIES: Record<string, string> = {
   recouvrement: "États de Recouvrement",
   // Sous-module Archive : section dédiée et ISOLÉE du tableau de suivi.
   archive: "Archive Commandes (module séparé)",
+  planning: "Planning de Production",
 };

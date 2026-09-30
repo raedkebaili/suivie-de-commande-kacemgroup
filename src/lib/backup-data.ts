@@ -22,6 +22,7 @@ import {
   recouvrementStates, clientRecouvrementStates, clientRecouvrementLogs,
   systemSettings, appColors, orderCounters,
   archiveSheets, archiveRows, archiveCellColors,
+  productionPlanEntries,
 } from "@/db/schema";
 
 export async function collectBackupData() {
@@ -56,6 +57,8 @@ export async function collectBackupData() {
     archiveSheets: await db.select().from(archiveSheets),
     archiveRows: await db.select().from(archiveRows),
     archiveCellColors: await db.select().from(archiveCellColors),
+    // Planning de production journalier
+    productionPlanEntries: await db.select().from(productionPlanEntries),
   };
 
   const totalRecords = Object.values(data).reduce((sum, rows) => sum + rows.length, 0);

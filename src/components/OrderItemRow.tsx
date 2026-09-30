@@ -14,6 +14,8 @@ type OrderItemRowProps = {
   highlight: (text: string) => React.ReactNode;
   fmtDate: (d: string) => string;
   onShowExpeditionHistory: (itemId: number) => void;
+  /** true si l'article est EN COURS DE PRODUCTION d'après le planning (clignotement) */
+  planningInProgress?: boolean;
 };
 
 /**
@@ -28,8 +30,13 @@ export default function OrderItemRow({
   highlight,
   fmtDate,
   onShowExpeditionHistory,
+  planningInProgress = false,
 }: OrderItemRowProps) {
-  const { getModifiedCellStyle } = useColors();
+  const { getModifiedCellStyle, getColor } = useColors();
+  // Alerte visuelle « en cours de production » (couleur administrable)
+  const planningStyle = planningInProgress
+    ? ({ ["--planning-color"]: getColor("PLANNING_EN_COURS"), ["--planning-text"]: "#000000" } as React.CSSProperties)
+    : undefined;
   
   // Déterminer l'état visuel de l'article
   const itemState: OrderVisualState = 
@@ -57,7 +64,9 @@ export default function OrderItemRow({
         title={isArticleModified ? "Article modifié" : undefined}
       >
         {isArticleModified && <span className="mr-0.5">✏️</span>}
-        {highlight(item.articleName)}
+        {planningInProgress
+          ? <span className="planning-blink inline-block px-1 font-bold" style={planningStyle} title="En cours de production (planning)">{highlight(item.articleName)}</span>
+          : highlight(item.articleName)}
       </td>
       
       {/* Quantité commandée */}
