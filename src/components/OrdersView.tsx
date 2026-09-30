@@ -264,11 +264,16 @@ export default function OrdersView({ user }: { user: User }) {
   };
 
   const rf=async()=>{try{const n=await apiFetch<{orderNumber:string}>("/api/orders/next-number");setForm({orderNumber:n.orderNumber,orderDate:new Date().toISOString().split("T")[0],priority:"NORMALE",clientId:"",agencyId:"",affaire:"",commercialStatus:planifStockOnly?"SUR_STOCK":"PREVISION",productionStatus:"EN_INSTANCE",cancelReason:"",statusReason:""})}catch{setForm({orderNumber:"",orderDate:new Date().toISOString().split("T")[0],priority:"NORMALE",clientId:"",agencyId:"",affaire:"",commercialStatus:planifStockOnly?"SUR_STOCK":"PREVISION",productionStatus:"EN_INSTANCE",cancelReason:"",statusReason:""})};setFormItems([]);setTechItems({});setItemMaterialSelections({});setOpenTelegestionItem(null);setEditingOrder(null);setError("");setSaving(false)};
+  // Initialisation du formulaire pour une NOUVELLE commande : au moins une ligne
+  // d'article prête à la saisie (le commercial disposait du bouton « + Ajouter »,
+  // mais un formulaire vide sans aucune ligne n'est pas utilisable).
+  const aiInit=()=>setFormItems([{articleName:"",quantity:1,unitPrice:"",description:""}]);
 
   // Electron keyboard shortcuts (dispatched from page.tsx as custom DOM events):
   // F2 = Nouvelle commande, F5 = Actualiser. No-op in a regular browser tab.
   useEffect(() => {
-    const onNewOrder = () => { if (ce()) { rf(); setShowModal(true); } };
+    // Raccourci F2 : même accès limité que le bouton (planification = Sur Stock)
+    const onNewOrder = () => { if (canCreateOrder()) { rf(); aiInit(); setShowModal(true); } };
     const onRefresh = () => { fetchOrders(); };
     window.addEventListener("shortcut:new-order", onNewOrder);
     window.addEventListener("shortcut:refresh", onRefresh);
@@ -510,7 +515,7 @@ export default function OrdersView({ user }: { user: User }) {
       <button onClick={()=>setShowImport(true)} className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700">📥 Import</button>
       <button onClick={ee} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">📤 Export</button>
       {ct()&&<button onClick={()=>openPhotoStudyModal()} className="px-4 py-1.5 bg-sky-600 text-white rounded-lg text-sm hover:bg-sky-700">🔬 Nouvelle Étude Photométrique</button>}
-      {canCreateOrder()&&<button onClick={()=>{rf();setShowModal(true)}} title={planifStockOnly?"Créer une commande Sur Stock / Besoin interne":"Créer une commande"} className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">+ Nouvelle{planifStockOnly?" (Sur Stock)":""}</button>}
+      {canCreateOrder()&&<button onClick={()=>{rf();aiInit();setShowModal(true)}} title={planifStockOnly?"Créer une commande Sur Stock / Besoin interne":"Créer une commande"} className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">+ Nouvelle{planifStockOnly?" (Sur Stock)":""}</button>}
     </div>
 
     {loading?<div className="flex justify-center py-12"><svg className="animate-spin w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></div>:
@@ -590,7 +595,11 @@ export default function OrdersView({ user }: { user: User }) {
       <div className="sticky top-0 bg-white dark:bg-gray-900 border-b px-5 py-3 rounded-t-2xl flex justify-between z-10"><div><h3 className="text-lg font-semibold text-gray-800 dark:text-white">{editingOrder?`N°${editingOrder.orderNumber}`:"Nouvelle Commande"}</h3>{editingOrder?.createdByName&&<span className="text-xs text-gray-500">Créée par {editingOrder.createdByName}</span>}{editingOrder?.updatedBy&&<span className="text-xs text-gray-500 ml-3">Modifié par {editingOrder.updatedBy}</span>}</div><button onClick={()=>setShowModal(false)} className="p-1.5 hover:bg-gray-100 rounded-lg"><svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg></button></div>
       <div className="p-5 space-y-5">{error&&<div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
 
-      {(ce()||editingOrder)&&<fieldset className="border border-blue-200 dark:border-blue-800 rounded-xl p-4 bg-blue-50/30 dark:bg-blue-900/10"><legend className="text-sm font-bold text-blue-700 px-2">📋 COMMERCIAL</legend>
+      {/* COMMERCIAL : visible pour le commercial (création + modification) et pour
+          le planificateur EN CRÉATION (accès limité « Sur Stock / Besoin interne »).
+          Pour les autres rôles (technique, planification en modification), le fieldset
+          n'apparaît qu'en consultation d'une commande existante (editingOrder). */}
+      {(canEditOrderForm()||editingOrder)&&<fieldset className="border border-blue-200 dark:border-blue-800 rounded-xl p-4 bg-blue-50/30 dark:bg-blue-900/10"><legend className="text-sm font-bold text-blue-700 px-2">📋 COMMERCIAL</legend>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2">
         {/* N° Commande - Lecture seule, généré automatiquement */}
         <div>
@@ -613,7 +622,7 @@ export default function OrdersView({ user }: { user: User }) {
           </button>
         </div>
         <AutocompleteSelect label="Client *" items={clients.map(c=>({id:c.id,label:c.name}))} value={form.clientId} onChange={v=>setForm({...form,clientId:v})} disabled={!canEditOrderForm()} />
-        <AutocompleteSelect label="Agence *" items={agencies.map(a=>({id:a.id,label:a.name}))} value={form.agencyId} onChange={v=>setForm({...form,agencyId:v})} disabled={!canEditOrderForm()} />
+        <AutocompleteSelect label={form.commercialStatus==="SUR_STOCK"?"Agence (facultative)":"Agence *"} items={agencies.map(a=>({id:a.id,label:a.name}))} value={form.agencyId} onChange={v=>setForm({...form,agencyId:v})} disabled={!canEditOrderForm()} />
         <div><label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">N° Affaire</label><AutocompleteInput value={form.affaire} onChange={v=>setForm({...form,affaire:v})} suggestUrl="/api/library/affaires" placeholder="Affaire" disabled={!canEditOrderForm()} /></div>
       </div>
       {canEditOrderForm()&&<div className="mt-4">
