@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { orderItems, orders, clients, agencies, productionBatches } from "@/db/schema";
 import { eq, desc, sql } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
+import { isOrderFullyProduced, promotePrioritiesAfterCompletion } from "@/lib/priority-promotion";
 
 export async function GET(request: NextRequest) {
   const user = await getUserFromHeaders(request);
@@ -85,5 +86,30 @@ export async function POST(request: NextRequest) {
   }
 
   await logActivity(user.id, user.username, "PRODUCTION", `+${actualQty} de ${item.articleName} (total: ${newCumulative}/${item.quantity})`);
-  return NextResponse.json({ ok: true, cumulative: newCumulative, remaining: item.quantity - newCumulative });
+
+  // ── Promotion automatique des priorités ──
+  // Si la commande est désormais entièrement produite (qté commandée = qté
+  // produite sur tous ses articles), elle libère son rang et les commandes
+  // suivantes remontent d'un cran (P2 → P1, P3 → P2, …).
+  let priorityPromotion: Awaited<ReturnType<typeof promotePrioritiesAfterCompletion>> | null = null;
+  try {
+    if (await isOrderFullyProduced(item.orderId)) {
+      priorityPromotion = await promotePrioritiesAfterCompletion(item.orderId, { id: user.id, fullName: user.fullName });
+      if (priorityPromotion.promoted.length > 0) {
+        await logActivity(user.id, user.username, "PRIORITY_PROMOTION",
+          `Production terminée → ${priorityPromotion.promoted.length} commande(s) promue(s): ` +
+          priorityPromotion.promoted.map(p => `#${p.orderNumber} ${p.from}→${p.to}`).join(", "));
+      }
+    }
+  } catch (e) {
+    // La promotion ne doit jamais faire échouer l'enregistrement du lot produit
+    console.error("Promotion des priorités:", e);
+  }
+
+  return NextResponse.json({
+    ok: true,
+    cumulative: newCumulative,
+    remaining: item.quantity - newCumulative,
+    priorityPromotion,
+  });
 }

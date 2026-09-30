@@ -7,8 +7,10 @@ import ArticleGroupingView from "@/components/ArticleGroupingView";
 import AutocompleteInput from "@/components/AutocompleteInput";
 import CategoryMaterialSelect from "@/components/CategoryMaterialSelect";
 import { PRIORITY_LABELS } from "@/lib/types";
+import { PRIORITY_OPTIONS, priorityColorKey, priorityLabel } from "@/lib/priority";
 import { getOrderVisualState, ORDER_STATE_LABELS, ORDER_STATE_PANEL_CLASSES, ORDER_STATE_ROW_CLASSES, OrderVisualState } from "@/lib/order-visual-state";
 import { useColors } from "@/lib/color-context";
+import { darkenColor, getContrastTextColor } from "@/lib/color-utils";
 import OrderItemRow from "@/components/OrderItemRow";
 
 type FullOrder = Order & { totalQty?: number; totalDelivered?: number; totalProduced?: number; totalRemaining?: number };
@@ -414,7 +416,12 @@ export default function OrdersView({ user }: { user: User }) {
   const lensCategory = materialCategories.find(c => c.key === "lens" || c.name.toLowerCase().includes("lentille"));
   const lensMaterials = lensCategory ? materials.filter(m => m.categoryId === lensCategory.id) : [];
 
-  const pc=(p:string)=>p==="TRES_URGENTE"?"bg-red-500 text-black border border-red-800":p==="URGENTE"?"bg-red-200 text-black border border-red-500":"bg-gray-200 text-black border border-gray-400";
+  // Badge de priorité : couleur pilotée par le gestionnaire de couleurs
+  // (clés PRIORITY_P1…P10 + valeurs historiques), texte contrasté automatiquement.
+  const priorityBadgeStyle=(p:string):React.CSSProperties=>{
+    const bg=getColor(priorityColorKey(p));
+    return { backgroundColor:bg, color:getContrastTextColor(bg), borderColor:darkenColor(bg,20), borderWidth:"1px", borderStyle:"solid" };
+  };
   const commercialBadge=(status:string)=>status==="SUR_STOCK"?"bg-cyan-300 border-cyan-700":status==="BON_COMMANDE"?"bg-blue-300 border-blue-700":"bg-[#FFD3AC] border-orange-600";
   const productionBadge=(state:string,productionStatus?:string|null)=>state==="cancelled"?"bg-[#FF2C2C] border-[#B81F1F]":state==="delivered"?"bg-green-400 border-green-800":state==="awaiting-delivery"?"bg-[#FFF700] border-[#B8A900]":productionStatus==="EN_PRODUCTION"?"bg-yellow-300 border-yellow-700":"bg-violet-300 border-violet-700";
   const orderRowClass=(state:string,commercialStatus:string)=>state==="neutral"&&commercialStatus==="PREVISION"?"bg-[#FFD3AC] hover:bg-[#ffc28c] border-orange-600":ORDER_STATE_ROW_CLASSES[state as keyof typeof ORDER_STATE_ROW_CLASSES];
@@ -425,7 +432,13 @@ export default function OrdersView({ user }: { user: User }) {
     <div className="flex flex-wrap gap-2 items-center">
       <select value={fs} onChange={e=>setFs(e.target.value)} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"><option value="">États</option><option value="SUR_STOCK">📦</option><option value="BON_COMMANDE">📋</option><option value="PREVISION">🟠</option><option value="EN_INSTANCE">🟣</option><option value="EN_PRODUCTION">🟡</option><option value="LIVREE">🟢</option><option value="ANNULEE">🔴</option></select>
       <select value={fa} onChange={e=>setFa(e.target.value)} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"><option value="">Agences</option>{agencies.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select>
-      <select value={fp} onChange={e=>setFp(e.target.value)} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"><option value="">Priorités</option><option value="TRES_URGENTE">Très Urgente</option><option value="URGENTE">Urgente</option><option value="NORMALE">Normale</option></select>
+      <select value={fp} onChange={e=>setFp(e.target.value)} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm">
+        <option value="">Priorités</option>
+        {PRIORITY_OPTIONS.map(p=><option key={p.value} value={p.value}>{p.label}</option>)}
+        {/* Valeurs historiques encore présentes dans les données */}
+        <option value="URGENTE">Urgente (ancien)</option>
+        <option value="TRES_URGENTE">Très Urgente (ancien)</option>
+      </select>
       <button onClick={fetchOrders} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg text-sm hover:bg-gray-300">🔄 Actualiser</button>
       <label className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer flex items-center gap-1 transition-colors ${watchLive?"bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-400":"bg-gray-100 dark:bg-gray-800 text-gray-500 border border-gray-300 dark:border-gray-600"}`}>
         <input type="checkbox" checked={watchLive} onChange={e=>setWatchLive(e.target.checked)} className="sr-only" />
@@ -507,7 +520,7 @@ export default function OrdersView({ user }: { user: User }) {
         <td className="px-2 py-1.5"><RecouvrementAlertCell name={highlight(o.clientName||"")} assignment={recouvByClient.get(o.clientId)} /></td>
         {isColVisible("agence")&&<td className="px-2 py-1.5 text-[10px]">{o.agencyName}</td>}
         {isColVisible("affaire")&&<td className="px-2 py-1.5 text-[10px] font-medium">{highlight(o.affaire||"-")}</td>}
-        {isColVisible("priorite")&&<td className="px-2 py-1.5"><span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${pc(o.priority)}`}>{PRIORITY_LABELS[o.priority]}</span></td>}
+        {isColVisible("priorite")&&<td className="px-2 py-1.5"><span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap" style={priorityBadgeStyle(o.priority)}>{priorityLabel(o.priority)}</span></td>}
         {isColVisible("etatComm")&&<td className="px-2 py-1.5"><span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${commercialBadge(o.status)}`}>{o.status==="SUR_STOCK"?"Stock":o.status==="BON_COMMANDE"?"Bon de commande":"Prévision"}</span></td>}
         <td className="px-2 py-1.5" title={o.statusReason||""}>{isProdStateVisible(productionStateKey(visualState,o.productionStatus))?<><span className={`inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded border ${productionBadge(visualState,o.productionStatus)}`}>{operationalLabel}</span>{o.statusReason&&<span className="text-[8px] ml-1 cursor-help">💬</span>}{visualState==="cancelled"&&o.cancelReason&&<span className="text-[9px] ml-1">({o.cancelReason})</span>}</>:<span className="text-[10px] opacity-40">—</span>}</td>
         {isColVisible("creePar")&&<td className="px-2 py-1.5 text-[10px]">{o.createdByName||"-"}</td>}
@@ -655,7 +668,16 @@ export default function OrdersView({ user }: { user: User }) {
 
       {cp()&&editingOrder&&<fieldset className="border border-emerald-200 dark:border-emerald-800 rounded-xl p-4 bg-emerald-50/30 dark:bg-emerald-900/10"><legend className="text-sm font-bold text-emerald-700 px-2">📅 PLANIFICATION</legend>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-        <div><label className="block text-[11px] font-medium text-gray-600 mb-1">Priorité</label><select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})} className="w-full px-2 py-2 bg-white border rounded-lg text-sm"><option value="PREVISION">Prévision</option><option value="NORMALE">Normale</option><option value="URGENTE">Urgente</option><option value="TRES_URGENTE">Très Urgente</option></select></div>
+        <div><label className="block text-[11px] font-medium text-gray-600 mb-1">Priorité</label>
+          <select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})} className="w-full px-2 py-2 bg-white border rounded-lg text-sm">
+            {PRIORITY_OPTIONS.map(p=><option key={p.value} value={p.value}>{p.label}</option>)}
+            {/* Conserve la valeur historique de la commande si elle n'est plus proposée */}
+            {form.priority&&!PRIORITY_OPTIONS.some(p=>p.value===form.priority)&&(
+              <option value={form.priority}>{PRIORITY_LABELS[form.priority]||form.priority} (ancien)</option>
+            )}
+          </select>
+          <p className="text-[10px] text-gray-500 mt-1">Priorité 1 = la plus urgente. À la fin de production d&apos;une commande, les suivantes remontent automatiquement d&apos;un niveau.</p>
+        </div>
         <div><label className="block text-[11px] font-medium text-gray-600 mb-1">État</label><select value={form.productionStatus} onChange={e=>setForm({...form,productionStatus:e.target.value})} className="w-full px-2 py-2 bg-white border rounded-lg text-sm"><option value="EN_INSTANCE">🟣 En instance</option><option value="EN_PRODUCTION">🟡 En production</option><option value="LIVREE">🟢 Livrée</option><option value="ANNULEE">🔴 Annulée</option></select></div>
         <div><F l="Motif changement" v={form.statusReason} onChange={v=>setForm({...form,statusReason:v})}/></div>
         {form.productionStatus==="ANNULEE"&&<div className="md:col-span-2"><F l="Cause annulation" v={form.cancelReason} onChange={v=>setForm({...form,cancelReason:v})}/></div>}

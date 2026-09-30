@@ -33,8 +33,20 @@ export const DEFAULT_COLORS: Array<{
   
   // Priorités
   { key: "PRIORITY_NORMALE", category: "priority", label: "Priorité Normale", color: "#d1d5db", description: "Priorité standard", sortOrder: 120 },
-  { key: "PRIORITY_URGENTE", category: "priority", label: "Priorité Urgente", color: "#fca5a5", description: "Priorité haute", sortOrder: 130 },
-  { key: "PRIORITY_TRES_URGENTE", category: "priority", label: "Très Urgente", color: "#ef4444", description: "Priorité maximale", sortOrder: 140 },
+  { key: "PRIORITY_URGENTE", category: "priority", label: "Priorité Urgente", color: "#fca5a5", description: "Priorité haute (historique)", sortOrder: 130 },
+  { key: "PRIORITY_TRES_URGENTE", category: "priority", label: "Très Urgente", color: "#ef4444", description: "Priorité maximale (historique)", sortOrder: 140 },
+
+  // Niveaux de priorité du planificateur (P1 = la plus urgente … P10)
+  { key: "PRIORITY_P1", category: "priority", label: "Priorité 1", color: "#dc2626", description: "Niveau 1 — la plus urgente", sortOrder: 141 },
+  { key: "PRIORITY_P2", category: "priority", label: "Priorité 2", color: "#ea580c", description: "Niveau 2", sortOrder: 142 },
+  { key: "PRIORITY_P3", category: "priority", label: "Priorité 3", color: "#f97316", description: "Niveau 3", sortOrder: 143 },
+  { key: "PRIORITY_P4", category: "priority", label: "Priorité 4", color: "#f59e0b", description: "Niveau 4", sortOrder: 144 },
+  { key: "PRIORITY_P5", category: "priority", label: "Priorité 5", color: "#eab308", description: "Niveau 5", sortOrder: 145 },
+  { key: "PRIORITY_P6", category: "priority", label: "Priorité 6", color: "#c0ca33", description: "Niveau 6", sortOrder: 146 },
+  { key: "PRIORITY_P7", category: "priority", label: "Priorité 7", color: "#84cc16", description: "Niveau 7", sortOrder: 147 },
+  { key: "PRIORITY_P8", category: "priority", label: "Priorité 8", color: "#4ade80", description: "Niveau 8", sortOrder: 148 },
+  { key: "PRIORITY_P9", category: "priority", label: "Priorité 9", color: "#7dd3fc", description: "Niveau 9", sortOrder: 149 },
+  { key: "PRIORITY_P10", category: "priority", label: "Priorité 10", color: "#a5b4fc", description: "Niveau 10 — la moins urgente", sortOrder: 150 },
   
   // Modification tracking
   { key: "FIELD_MODIFIED", category: "tracking", label: "Champs Modifiés", color: "#9D00FF", description: "Couleur de fond pour les cellules modifiées", sortOrder: 150 },

@@ -2,6 +2,9 @@
 import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import type { User, ProductionBatch } from "@/lib/types";
+import { priorityColorKey, priorityLabel, prioritySortRank } from "@/lib/priority";
+import { useColors } from "@/lib/color-context";
+import { darkenColor, getContrastTextColor } from "@/lib/color-utils";
 import {
   getOrderVisualState,
   ORDER_STATE_LABELS,
@@ -31,6 +34,12 @@ export default function ProductionView({ user: _user }: { user: User }) {
   const [batchQtys, setBatchQtys] = useState<Record<number, string>>({});
   const [batchDates, setBatchDates] = useState<Record<number, string>>({});
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  // Couleurs de priorité pilotées par le gestionnaire de couleurs existant
+  const { getColor } = useColors();
+  const priorityBadgeStyle = (p: string): React.CSSProperties => {
+    const bg = getColor(priorityColorKey(p));
+    return { backgroundColor: bg, color: getContrastTextColor(bg), borderColor: darkenColor(bg, 20) };
+  };
 
   const fetchData = useCallback(async () => {
     const data = await apiFetch<{ items: Item[]; batches: ProductionBatch[] }>("/api/production");
@@ -86,13 +95,17 @@ export default function ProductionView({ user: _user }: { user: User }) {
       clientName: first.clientName,
       affaire: first.affaire,
       productionStatus: first.productionStatus,
+      priority: first.priority,
       items: orderItems,
       totalOrdered,
       totalProduced,
       totalDelivered,
       visualState,
     };
-  });
+  })
+  // File de production : Priorité 1 d'abord … puis Priorité 10, puis Normale.
+  // À priorité égale, l'ordre d'origine (plus récent en premier) est conservé.
+  .sort((a, b) => prioritySortRank(a.priority) - prioritySortRank(b.priority));
 
   return (
     <div className="space-y-3 text-black operational-content">
@@ -118,9 +131,20 @@ export default function ProductionView({ user: _user }: { user: User }) {
                 <span className="font-semibold text-black">#{order.orderNumber}</span>
                 <span className="text-sm text-black">{order.clientName}</span>
                 {order.affaire && <span className="text-xs text-black">Aff: {order.affaire}</span>}
-                <span className="px-2 py-1 rounded-md bg-white/70 border border-black/20 text-xs font-bold text-black">
-                  {ORDER_STATE_LABELS[order.visualState]}
+                {/* Niveau de priorité : indispensable au planificateur pour suivre la file */}
+                <span className="px-2 py-0.5 rounded-md text-[11px] font-bold border border-black/20" style={priorityBadgeStyle(order.priority)}>
+                  {priorityLabel(order.priority)}
                 </span>
+                {/* Le libellé « En cours » (état neutre) n'est plus affiché ici :
+                    il n'apporte pas d'information au planificateur. Les autres
+                    états (En attente de livraison, Livrée, Annulée) restent visibles.
+                    ORDER_STATE_LABELS n'est pas modifié : les onglets Commandes et
+                    Expédition conservent leur affichage d'origine. */}
+                {order.visualState !== "neutral" && (
+                  <span className="px-2 py-1 rounded-md bg-white/70 border border-black/20 text-xs font-bold text-black">
+                    {ORDER_STATE_LABELS[order.visualState]}
+                  </span>
+                )}
                 <div className="flex-1" />
                 <span className="text-xs text-black">Cmd: <b>{order.totalOrdered}</b></span>
                 <span className="text-xs text-black">Prod: <b>{order.totalProduced}</b></span>
