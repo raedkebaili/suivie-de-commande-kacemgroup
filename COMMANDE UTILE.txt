@@ -5,3 +5,7 @@ npx drizzle-kit push
 git add -A
 git commit -m "Prêt pour le déploiement Vercel"
 git push
+********************************************
+il y'a des améliorations a intégré il faut ajouté 
+- lorsque on ajoute des article dans le plannig il s'ajoute directement par le statue en court de production hors que il doivent etre avec une statue "Non traité" pour que l'utilisateur choisie le vrai état au besoin 
+il y'a des bug couleur qui nécessite l'actualisation de la page pour voir les vrais couleur  

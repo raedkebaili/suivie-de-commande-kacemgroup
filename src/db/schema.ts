@@ -323,8 +323,8 @@ export const productionPlanEntries = pgTable("production_plan_entries", {
   orderNumber: text("order_number"),
   clientName: text("client_name"),
   plannedQty: integer("planned_qty").notNull().default(0),
-  // EN_COURS | SUSPENDU | ANNULE | TERMINE
-  status: text("status").notNull().default("EN_COURS"),
+  // EN_ATTENTE (neutre, par défaut) | EN_COURS | SUSPENDU | ANNULE | TERMINE
+  status: text("status").notNull().default("EN_ATTENTE"),
   reason: text("reason"),                             // Motif de suspension / annulation
   appliedQty: integer("applied_qty").notNull().default(0),  // Quantité réellement appliquée en production
   appliedAt: text("applied_at"),                      // Date d'application (idempotence)

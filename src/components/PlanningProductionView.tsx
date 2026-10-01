@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
 import { useColors } from "@/lib/color-context";
@@ -8,11 +8,11 @@ import { getContrastTextColor } from "@/lib/color-utils";
 import {
   PLANNING_STATUSES,
   PLANNING_STATUS_BY_KEY,
-  planningStatusBlinks,
+  planningEntryBlinks,
   planningStatusLabel,
   todayISO,
 } from "@/lib/production-planning-constants";
-import { priorityColorKey, priorityLabel } from "@/lib/priority";
+import { priorityColorKey, priorityLabel, prioritySortRank } from "@/lib/priority";
 
 type Entry = {
   id: number; planDate: string; itemId: number; orderId: number;
@@ -150,10 +150,10 @@ export default function PlanningProductionView({ user }: { user: User }) {
   };
 
   /** Style d'une cellule d'état : couleur administrable + clignotement si en cours */
-  const statusStyle = (status: string): React.CSSProperties => {
+  const statusStyle = (status: string, planDate?: string): React.CSSProperties => {
     const def = PLANNING_STATUS_BY_KEY[status];
-    const bg = getColor(def?.colorKey || "PLANNING_EN_COURS");
-    if (planningStatusBlinks(status)) {
+    const bg = getColor(def?.colorKey || "PLANNING_EN_ATTENTE");
+    if (planningEntryBlinks(status, planDate)) {
       return { ["--planning-color"]: bg, ["--planning-text"]: getContrastTextColor(bg) } as React.CSSProperties;
     }
     return { backgroundColor: bg, color: getContrastTextColor(bg) };
@@ -162,12 +162,43 @@ export default function PlanningProductionView({ user }: { user: User }) {
   const filteredPicker = useMemo(() => {
     const q = pickerSearch.trim().toLowerCase();
     const base = prodItems.filter(i => i.productionStatus !== "ANNULEE" && (i.quantity - (i.producedQty || 0)) > 0);
-    if (q.length < 2) return base.slice(0, 80);
+    if (q.length < 2) return base.slice(0, 200);
     return base.filter(i =>
       i.articleName.toLowerCase().includes(q) ||
       (i.orderNumber || "").toLowerCase().includes(q) ||
-      (i.clientName || "").toLowerCase().includes(q)).slice(0, 80);
+      (i.clientName || "").toLowerCase().includes(q)).slice(0, 200);
   }, [prodItems, pickerSearch]);
+
+  /**
+   * Articles du sélecteur REGROUPÉS PAR COMMANDE : l'utilisateur visualise
+   * immédiatement à quelle commande (et quel client) appartient chaque article.
+   * Les commandes les plus prioritaires apparaissent en premier.
+   */
+  const pickerGroups = useMemo(() => {
+    const map = new Map<number, { orderId: number; orderNumber: string; clientName: string | null; affaire: string | null; priority: string; items: ProdItem[] }>();
+    for (const i of filteredPicker) {
+      let g = map.get(i.orderId);
+      if (!g) {
+        g = { orderId: i.orderId, orderNumber: i.orderNumber, clientName: i.clientName, affaire: i.affaire, priority: i.priority, items: [] };
+        map.set(i.orderId, g);
+      }
+      g.items.push(i);
+    }
+    return [...map.values()].sort((a, b) => {
+      const d = prioritySortRank(a.priority) - prioritySortRank(b.priority);
+      return d !== 0 ? d : (a.orderNumber || "").localeCompare(b.orderNumber || "", "fr");
+    });
+  }, [filteredPicker]);
+
+  /** Coche / décoche tous les articles d'une commande */
+  const toggleOrderSelection = (items: ProdItem[], checked: boolean) => {
+    const next = { ...selection };
+    for (const i of items) {
+      if (checked) next[i.itemId] = String(i.quantity - (i.producedQty || 0));
+      else delete next[i.itemId];
+    }
+    setSelection(next);
+  };
 
   const stats = useMemo(() => {
     const by: Record<string, number> = {};
@@ -247,16 +278,24 @@ export default function PlanningProductionView({ user }: { user: User }) {
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {entries.map(e => {
-                  const blinking = planningStatusBlinks(e.status);
+                  // Clignote seulement si EN_COURS ET date atteinte (pas de prévision)
+                  const blinking = planningEntryBlinks(e.status, e.planDate);
+                  const isFuture = e.planDate > todayISO();
                   const def = PLANNING_STATUS_BY_KEY[e.status];
                   const requiresReason = def?.requiresReason;
                   return (
                     <tr key={e.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 align-middle">
                       <td className="px-3 py-2">
                         <span className={blinking ? "planning-blink inline-block px-1.5 py-0.5 font-semibold" : "font-semibold text-gray-800 dark:text-gray-100"}
-                          style={blinking ? statusStyle(e.status) : undefined}>
+                          style={blinking ? statusStyle(e.status, e.planDate) : undefined}>
                           {e.articleName}
                         </span>
+                        {isFuture && e.status === "EN_COURS" && (
+                          <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 font-medium"
+                            title={`Production prévue le ${e.planDate} : l'alerte visuelle démarrera à cette date`}>
+                            prévision
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2 font-mono text-[11px] text-gray-600 dark:text-gray-300">#{e.orderNumber || e.orderId}</td>
                       <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{e.clientName || "-"}</td>
@@ -269,11 +308,11 @@ export default function PlanningProductionView({ user }: { user: User }) {
                         {canManage ? (
                           <select value={e.status} onChange={ev => changeStatus(e, ev.target.value)}
                             className={`text-[11px] font-bold px-2 py-1 rounded border border-black/20 ${blinking ? "planning-blink" : ""}`}
-                            style={statusStyle(e.status)}>
+                            style={statusStyle(e.status, e.planDate)}>
                             {PLANNING_STATUSES.map(s => <option key={s.key} value={s.key} style={{ backgroundColor: "#fff", color: "#000" }}>{s.label}</option>)}
                           </select>
                         ) : (
-                          <span className={`text-[11px] font-bold px-2 py-1 rounded inline-block ${blinking ? "planning-blink" : ""}`} style={statusStyle(e.status)}>
+                          <span className={`text-[11px] font-bold px-2 py-1 rounded inline-block ${blinking ? "planning-blink" : ""}`} style={statusStyle(e.status, e.planDate)}>
                             {planningStatusLabel(e.status)}
                           </span>
                         )}
@@ -327,42 +366,69 @@ export default function PlanningProductionView({ user }: { user: User }) {
                   <tr className="bg-gray-50 dark:bg-gray-800 text-left">
                     <th className="px-2 py-2 w-8"></th>
                     <th className="px-2 py-2 font-semibold text-gray-600 dark:text-gray-300">Article</th>
-                    <th className="px-2 py-2 font-semibold text-gray-600 dark:text-gray-300">Commande</th>
-                    <th className="px-2 py-2 font-semibold text-gray-600 dark:text-gray-300">Client</th>
+                    <th className="px-2 py-2 font-semibold text-gray-600 dark:text-gray-300" colSpan={2}>Commande / détail</th>
                     <th className="px-2 py-2 font-semibold text-gray-600 dark:text-gray-300">Priorité</th>
                     <th className="px-2 py-2 font-semibold text-gray-600 dark:text-gray-300 text-right">Reste</th>
                     <th className="px-2 py-2 font-semibold text-gray-600 dark:text-gray-300 text-right">Qté à produire</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {filteredPicker.map(i => {
-                    const rest = i.quantity - (i.producedQty || 0);
-                    const checked = selection[i.itemId] !== undefined;
-                    const pbg = getColor(priorityColorKey(i.priority));
+                  {/* Articles REGROUPÉS PAR COMMANDE : en-tête de commande puis ses articles */}
+                  {pickerGroups.map(g => {
+                    const pbg = getColor(priorityColorKey(g.priority));
+                    const allChecked = g.items.every(i => selection[i.itemId] !== undefined);
                     return (
-                      <tr key={i.itemId} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                        <td className="px-2 py-1.5">
-                          <input type="checkbox" checked={checked} className="accent-blue-600"
-                            onChange={ev => {
-                              const next = { ...selection };
-                              if (ev.target.checked) next[i.itemId] = String(rest); else delete next[i.itemId];
-                              setSelection(next);
-                            }} />
-                        </td>
-                        <td className="px-2 py-1.5 font-medium text-gray-800 dark:text-gray-100">{i.articleName}</td>
-                        <td className="px-2 py-1.5 font-mono text-[10px] text-gray-500">#{i.orderNumber}</td>
-                        <td className="px-2 py-1.5 text-gray-500">{i.clientName || "-"}</td>
-                        <td className="px-2 py-1.5"><span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: pbg, color: getContrastTextColor(pbg) }}>{priorityLabel(i.priority)}</span></td>
-                        <td className="px-2 py-1.5 text-right font-bold text-orange-600 dark:text-orange-400">{rest}</td>
-                        <td className="px-2 py-1.5 text-right">
-                          <input type="number" min={1} max={rest} disabled={!checked}
-                            value={selection[i.itemId] ?? ""} onChange={ev => setSelection({ ...selection, [i.itemId]: ev.target.value })}
-                            className="w-20 px-2 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-right text-gray-700 dark:text-gray-200 disabled:opacity-40" />
-                        </td>
-                      </tr>
+                      <React.Fragment key={g.orderId}>
+                        <tr className="bg-slate-100 dark:bg-gray-800 border-t-2 border-slate-300 dark:border-gray-600">
+                          <td className="px-2 py-1.5">
+                            <input type="checkbox" checked={allChecked} className="accent-blue-600"
+                              title="Sélectionner tous les articles de cette commande"
+                              onChange={ev => toggleOrderSelection(g.items, ev.target.checked)} />
+                          </td>
+                          <td className="px-2 py-1.5 font-bold text-gray-800 dark:text-gray-100" colSpan={3}>
+                            Commande #{g.orderNumber}
+                            <span className="ml-2 font-normal text-gray-600 dark:text-gray-300">{g.clientName || "—"}</span>
+                            {g.affaire && <span className="ml-2 text-[10px] text-purple-600 dark:text-purple-400">Aff : {g.affaire}</span>}
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: pbg, color: getContrastTextColor(pbg) }}>{priorityLabel(g.priority)}</span>
+                          </td>
+                          <td className="px-2 py-1.5 text-right text-[10px] text-gray-500" colSpan={2}>
+                            {g.items.length} article(s) à produire
+                          </td>
+                        </tr>
+                        {g.items.map(i => {
+                          const rest = i.quantity - (i.producedQty || 0);
+                          const checked = selection[i.itemId] !== undefined;
+                          return (
+                            <tr key={i.itemId} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                              <td className="px-2 py-1.5"></td>
+                              <td className="px-2 py-1.5 font-medium text-gray-800 dark:text-gray-100 pl-6">
+                                <input type="checkbox" checked={checked} className="accent-blue-600 mr-2"
+                                  onChange={ev => {
+                                    const next = { ...selection };
+                                    if (ev.target.checked) next[i.itemId] = String(rest); else delete next[i.itemId];
+                                    setSelection(next);
+                                  }} />
+                                ↳ {i.articleName}
+                              </td>
+                              <td className="px-2 py-1.5 text-[10px] text-gray-400" colSpan={2}>
+                                commandé {i.quantity} · produit {i.producedQty || 0}
+                              </td>
+                              <td className="px-2 py-1.5"></td>
+                              <td className="px-2 py-1.5 text-right font-bold text-orange-600 dark:text-orange-400">{rest}</td>
+                              <td className="px-2 py-1.5 text-right">
+                                <input type="number" min={1} max={rest} disabled={!checked}
+                                  value={selection[i.itemId] ?? ""} onChange={ev => setSelection({ ...selection, [i.itemId]: ev.target.value })}
+                                  className="w-20 px-2 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-right text-gray-700 dark:text-gray-200 disabled:opacity-40" />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </React.Fragment>
                     );
                   })}
-                  {filteredPicker.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-gray-400">Aucun article à produire</td></tr>}
+                  {pickerGroups.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-gray-400">Aucun article à produire</td></tr>}
                 </tbody>
               </table>
             </div>

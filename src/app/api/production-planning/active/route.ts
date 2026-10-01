@@ -2,8 +2,9 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { productionPlanEntries } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, lte } from "drizzle-orm";
 import { getUserFromHeaders } from "@/lib/auth";
+import { todayISO } from "@/lib/production-planning-constants";
 
 /**
  * GET /api/production-planning/active
@@ -29,7 +30,12 @@ export async function GET(request: NextRequest) {
         articleName: productionPlanEntries.articleName,
       })
       .from(productionPlanEntries)
-      .where(eq(productionPlanEntries.status, "EN_COURS"));
+      // EN_COURS ET date atteinte : un planning de prévision (date postérieure)
+      // ne déclenche aucune alerte visuelle tant que le jour n'est pas arrivé.
+      .where(and(
+        eq(productionPlanEntries.status, "EN_COURS"),
+        lte(productionPlanEntries.planDate, todayISO()),
+      ));
 
     return NextResponse.json({
       active: rows,

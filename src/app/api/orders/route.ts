@@ -17,8 +17,12 @@ export async function GET(request: NextRequest) {
   const a = await auth(request); if (!a.ok) return NextResponse.json({ error: a.error }, { status: a.status });
   const sp = new URL(request.url).searchParams;
   const status = sp.get("status"); const agencyId = sp.get("agencyId"); const priority = sp.get("priority");
+  // Filtre sur l'état de PRODUCTION (colonne distincte de l'état commercial).
+  // Ajout rétrocompatible : si le paramètre est absent, comportement inchangé.
+  const productionStatus = sp.get("productionStatus");
   const conds = [];
   if (status) conds.push(eq(orders.status, status));
+  if (productionStatus) conds.push(eq(orders.productionStatus, productionStatus));
   if (agencyId) conds.push(eq(orders.agencyId, parseInt(agencyId)));
   if (priority) conds.push(eq(orders.priority, priority));
   const where = conds.length > 0 ? and(...conds) : undefined;

@@ -161,7 +161,19 @@ export default function OrdersView({ user }: { user: User }) {
     catch (err) { setHiddenProdStates(prev); alert(err instanceof Error ? err.message : "Erreur d'enregistrement"); }
   };
 
-  const fetchOrders = useCallback(async()=>{const p=new URLSearchParams();if(fs)p.set("status",fs);if(fa)p.set("agencyId",fa);if(fp)p.set("priority",fp);setOrders((await apiFetch<{orders:FullOrder[]}>(`/api/orders?${p}`)).orders);setDataVersion(v=>v+1)},[fs,fa,fp]);
+  const fetchOrders = useCallback(async()=>{
+    const p=new URLSearchParams();
+    // Le filtre d'états est préfixé pour viser la bonne colonne :
+    //   comm:*     → état commercial (orders.status)
+    //   prod:*     → état de production (orders.productionStatus)
+    //   planning:* → filtre côté client sur le planning de production
+    if(fs.startsWith("comm:"))p.set("status",fs.slice(5));
+    else if(fs.startsWith("prod:"))p.set("productionStatus",fs.slice(5));
+    if(fa)p.set("agencyId",fa);
+    if(fp)p.set("priority",fp);
+    setOrders((await apiFetch<{orders:FullOrder[]}>(`/api/orders?${p}`)).orders);
+    setDataVersion(v=>v+1)
+  },[fs,fa,fp]);
   useEffect(()=>{setLoading(true);Promise.all([
     fetchOrders(),
     apiFetch<{agencies:Agency[]}>("/api/agencies").then(d=>setAgencies(d.agencies)).catch(()=>{}),
@@ -238,7 +250,14 @@ export default function OrdersView({ user }: { user: User }) {
 
   // Sort a copy of the fetched orders client-side based on the selected field/direction.
   const sortedOrders = useMemo(() => {
-    const arr = [...orders];
+    // Filtre « Planning de production » : appliqué côté client car il repose
+    // sur l'état temps réel du planning (articles réellement en cours).
+    let arr = [...orders];
+    if (fs === "planning:EN_COURS") {
+      arr = arr.filter(o => (o.items || []).some(i => !!i.id && planningActiveItems.has(i.id)));
+    } else if (fs === "planning:NONE") {
+      arr = arr.filter(o => !(o.items || []).some(i => !!i.id && planningActiveItems.has(i.id)));
+    }
     const dir = sortDir === "asc" ? 1 : -1;
     arr.sort((a, b) => {
       if (sortField === "alpha") {
@@ -253,7 +272,7 @@ export default function OrdersView({ user }: { user: User }) {
       return dir * (da - db);
     });
     return arr;
-  }, [orders, sortField, sortDir]);
+  }, [orders, sortField, sortDir, fs, planningActiveItems]);
 
   // Empiler / Dépiler toutes les commandes en un clic.
   const allExpanded = sortedOrders.length > 0 && sortedOrders.every(o => expandedOrders.has(o.id));
@@ -336,7 +355,7 @@ export default function OrdersView({ user }: { user: User }) {
   const hd=async(id:number)=>{if(!confirm("Supprimer?"))return;await apiFetch(`/api/orders/${id}`,{method:"DELETE"});fetchOrders()};
   const showExpeditionHistory=async(itemId:number)=>{setExpItemId(itemId);const d=await apiFetch<{batches:ExpeditionBatch[]}>(`/api/expedition/${itemId}`);setExpBatches(d.batches);setShowExpHistory(true)};
   const showModifications=async(orderId:number)=>{setModOrderId(orderId);const d=await apiFetch<{logs:typeof modLogs}>(`/api/order-modifications/${orderId}`);setModLogs(d.logs);setShowModHistory(true)};
-  const ee=async()=>{const p=new URLSearchParams();if(fs)p.set("status",fs);if(fa)p.set("agencyId",fa);const token=getToken();const res=await fetch(`/api/orders/export?${p}`,{headers:token?{Authorization:`Bearer ${token}`}:{}});if(!res.ok){alert("Erreur export");return}const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`commandes_${new Date().toISOString().split("T")[0]}.xlsx`;a.click();URL.revokeObjectURL(url)};
+  const ee=async()=>{const p=new URLSearchParams();if(fs.startsWith("comm:"))p.set("status",fs.slice(5));if(fa)p.set("agencyId",fa);const token=getToken();const res=await fetch(`/api/orders/export?${p}`,{headers:token?{Authorization:`Bearer ${token}`}:{}});if(!res.ok){alert("Erreur export");return}const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`commandes_${new Date().toISOString().split("T")[0]}.xlsx`;a.click();URL.revokeObjectURL(url)};
   const ai=()=>setFormItems([...formItems,{articleName:"",quantity:1,unitPrice:"",description:""}]);
   const ri=(i:number)=>{if(formItems.length<=1)return;setFormItems(formItems.filter((_,x)=>x!==i))};
   const ui=(i:number,f:keyof OrderItem,v:string|number)=>{const u=[...formItems];(u[i]as Record<string,unknown>)[f]=v;setFormItems(u)};
@@ -455,7 +474,25 @@ export default function OrdersView({ user }: { user: User }) {
 
   return (<div className="space-y-3 operational-content">
     <div className="flex flex-wrap gap-2 items-center">
-      <select value={fs} onChange={e=>setFs(e.target.value)} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"><option value="">États</option><option value="SUR_STOCK">📦</option><option value="BON_COMMANDE">📋</option><option value="PREVISION">🟠</option><option value="EN_INSTANCE">🟣</option><option value="EN_PRODUCTION">🟡</option><option value="LIVREE">🟢</option><option value="ANNULEE">🔴</option></select>
+      <select value={fs} onChange={e=>setFs(e.target.value)} title="Filtrer par état commercial, état de production ou suivi du planning"
+        className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">
+        <option value="">Tous les états</option>
+        <optgroup label="État commercial">
+          <option value="comm:SUR_STOCK">📦 Sur Stock / Besoin interne</option>
+          <option value="comm:BON_COMMANDE">📋 Bon de commande</option>
+          <option value="comm:PREVISION">🟠 Prévision</option>
+        </optgroup>
+        <optgroup label="État de production">
+          <option value="prod:EN_INSTANCE">🟣 En instance</option>
+          <option value="prod:EN_PRODUCTION">🟡 En production</option>
+          <option value="prod:LIVREE">🟢 Livrée</option>
+          <option value="prod:ANNULEE">🔴 Annulée</option>
+        </optgroup>
+        <optgroup label="Planning de production">
+          <option value="planning:EN_COURS">🏭 En cours de production (planning)</option>
+          <option value="planning:NONE">⚪ Hors planning</option>
+        </optgroup>
+      </select>
       <select value={fa} onChange={e=>setFa(e.target.value)} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"><option value="">Agences</option>{agencies.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select>
       <select value={fp} onChange={e=>setFp(e.target.value)} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm">
         <option value="">Priorités</option>

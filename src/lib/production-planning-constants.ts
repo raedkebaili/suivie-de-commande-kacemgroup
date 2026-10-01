@@ -9,7 +9,10 @@
 
 export const PLANNING_COLOR_CATEGORY = "planning";
 
-export type PlanningStatus = "EN_COURS" | "SUSPENDU" | "ANNULE" | "TERMINE";
+// EN_ATTENTE = état neutre de départ : l'article est planifié mais la
+// production n'a pas encore réellement démarré (aucun clignotement).
+// C'est le planificateur qui bascule manuellement en EN_COURS.
+export type PlanningStatus = "EN_ATTENTE" | "EN_COURS" | "SUSPENDU" | "ANNULE" | "TERMINE";
 
 export type PlanningStatusDef = {
   key: PlanningStatus;
@@ -25,6 +28,7 @@ export type PlanningStatusDef = {
 };
 
 export const PLANNING_STATUSES: PlanningStatusDef[] = [
+  { key: "EN_ATTENTE", label: "En attente de démarrage", colorKey: "PLANNING_EN_ATTENTE", defaultColor: "#cbd5e1", description: "Planning — planifié, production pas encore démarrée", sortOrder: 495, blink: false, requiresReason: false },
   { key: "EN_COURS",  label: "En cours de production", colorKey: "PLANNING_EN_COURS",  defaultColor: "#eab308", description: "Planning — production en cours (clignotant)", sortOrder: 500, blink: true,  requiresReason: false },
   { key: "SUSPENDU",  label: "Suspendu",               colorKey: "PLANNING_SUSPENDU",  defaultColor: "#f97316", description: "Planning — production suspendue",            sortOrder: 510, blink: false, requiresReason: true },
   { key: "ANNULE",    label: "Annulé",                 colorKey: "PLANNING_ANNULE",    defaultColor: "#ef4444", description: "Planning — production annulée",              sortOrder: 520, blink: false, requiresReason: true },
@@ -45,6 +49,21 @@ export function isValidPlanningStatus(key: unknown): key is PlanningStatus {
 /** Statuts pour lesquels la ligne doit clignoter (production en cours) */
 export function planningStatusBlinks(key: string | null | undefined): boolean {
   return !!key && PLANNING_STATUS_BY_KEY[key]?.blink === true;
+}
+
+/**
+ * Clignotement effectif d'une ligne de planning.
+ * Une production PRÉVUE à une date postérieure ne clignote pas tant que cette
+ * date n'est pas atteinte : le planning de prévision reste purement indicatif.
+ */
+export function planningEntryBlinks(
+  status: string | null | undefined,
+  planDate: string | null | undefined,
+  today: string = todayISO(),
+): boolean {
+  if (!planningStatusBlinks(status)) return false;
+  if (!planDate) return true;
+  return planDate <= today; // date atteinte (aujourd'hui ou passée)
 }
 
 /** Rôles autorisés à gérer le planning (création, états, raisons) */

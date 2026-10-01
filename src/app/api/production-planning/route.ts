@@ -126,7 +126,9 @@ export async function POST(request: NextRequest) {
         orderNumber: row.orderNumber,
         clientName: row.clientName,
         plannedQty,
-        status: "EN_COURS",
+        // État neutre de départ : la production ne démarre (et ne clignote)
+        // qu'après bascule manuelle du planificateur en « En cours ».
+        status: "EN_ATTENTE",
         createdById: user.id,
         createdByName: user.fullName,
         updatedByName: user.fullName,
