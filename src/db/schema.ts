@@ -66,6 +66,10 @@ export const orderItems = pgTable("order_items", {
   quantity: integer("quantity").notNull().default(1),
   note: text("note"),
   clientSpec: text("client_spec"),
+  // Famille TÉLÉGESTION : coché par le commercial à la saisie de l'article.
+  // Indépendant des composants techniques de télégestion (itemTechnicalComponents) :
+  // ce drapeau marque l'appartenance de l'article à la famille, dès la commande.
+  isTelegestion: boolean("is_telegestion").notNull().default(false),
   productionUnit: text("production_unit"),
   plannedLoadingDate: text("planned_loading_date"),
   // Tech

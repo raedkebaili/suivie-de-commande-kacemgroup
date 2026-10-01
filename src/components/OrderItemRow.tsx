@@ -37,6 +37,10 @@ export default function OrderItemRow({
   const planningStyle = planningInProgress
     ? ({ ["--planning-color"]: getColor("PLANNING_EN_COURS"), ["--planning-text"]: "#000000" } as React.CSSProperties)
     : undefined;
+  // Famille TÉLÉGESTION : surbrillance de la ligne avec la couleur définie
+  // pour les spécifications techniques de télégestion (administrable).
+  const isTelegestionItem = !!item.isTelegestion;
+  const telegestionBg = isTelegestionItem ? getColor("TELEGESTION_ITEM") : undefined;
   
   // Déterminer l'état visuel de l'article
   const itemState: OrderVisualState = 
@@ -56,7 +60,9 @@ export default function OrderItemRow({
   const modStyle = getModifiedCellStyle();
 
   return (
-    <tr className={`border-b border-black/20 text-black [&_td]:text-black [&_span]:text-black [&_b]:text-black ${ORDER_STATE_PANEL_CLASSES[itemState]}`}>
+    <tr className={`border-b border-black/20 text-black [&_td]:text-black [&_span]:text-black [&_b]:text-black ${ORDER_STATE_PANEL_CLASSES[itemState]}`}
+      style={telegestionBg ? { backgroundColor: telegestionBg, boxShadow: `inset 3px 0 0 0 ${telegestionBg}` } : undefined}
+      title={isTelegestionItem ? "Article de la famille Télégestion" : undefined}>
       {/* Article */}
       <td 
         className="px-1 py-1 font-medium text-[10px]" 
@@ -64,6 +70,7 @@ export default function OrderItemRow({
         title={isArticleModified ? "Article modifié" : undefined}
       >
         {isArticleModified && <span className="mr-0.5">✏️</span>}
+        {isTelegestionItem && <span className="mr-0.5" title="Famille Télégestion">📡</span>}
         {planningInProgress
           ? <span className="planning-blink inline-block px-1 font-bold" style={planningStyle} title="En cours de production (planning)">{highlight(item.articleName)}</span>
           : highlight(item.articleName)}

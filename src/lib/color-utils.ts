@@ -53,6 +53,10 @@ export const DEFAULT_COLORS: Array<{
   
   // Études photométriques
   { key: "ETUDE_PHOTOMETRIQUE", category: "etude", label: "Étude Photométrique", color: "#0ea5e9", description: "Couleur des lignes d'étude photométrique dans le tableau", sortOrder: 160 },
+
+  // Télégestion — reprend le bleu ciel déjà utilisé par les spécifications
+  // techniques de télégestion (composants 📡), désormais administrable.
+  { key: "TELEGESTION_ITEM", category: "technique", label: "Article Télégestion", color: "#bae6fd", description: "Surbrillance des articles de la famille télégestion", sortOrder: 170 },
 ];
 
 /**
@@ -202,6 +206,7 @@ export const COLOR_CATEGORIES: Record<string, string> = {
   priority: "Priorités",
   tracking: "Suivi des Modifications",
   etude: "Études Photométriques",
+  technique: "Technique / Télégestion",
   recouvrement: "États de Recouvrement",
   // Sous-module Archive : section dédiée et ISOLÉE du tableau de suivi.
   archive: "Archive Commandes (module séparé)",

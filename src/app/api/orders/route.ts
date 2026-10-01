@@ -35,6 +35,14 @@ export async function GET(request: NextRequest) {
     if (ids.length === 0) return NextResponse.json({ orders: [] });
     conds.push(inArray(orders.id, ids));
   }
+  // Filtre FAMILLE TÉLÉGESTION : commandes ayant au moins un article marqué
+  if (sp.get("telegestion") === "1") {
+    const matching = await db.selectDistinct({ orderId: orderItems.orderId })
+      .from(orderItems).where(eq(orderItems.isTelegestion, true));
+    const ids = matching.map(m => m.orderId);
+    if (ids.length === 0) return NextResponse.json({ orders: [] });
+    conds.push(inArray(orders.id, ids));
+  }
   const where = conds.length > 0 ? and(...conds) : undefined;
 
   const data = await db.select({
@@ -173,6 +181,7 @@ export async function POST(request: NextRequest) {
       quantity: item.quantity || 1, 
       note: item.note || null,
       clientSpec: item.clientSpec || null,
+      isTelegestion: !!item.isTelegestion,
       productionUnit: item.productionUnit || null,
       plannedLoadingDate: item.plannedLoadingDate || null,
       deliveredQty: 0, 

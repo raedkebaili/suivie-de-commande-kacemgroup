@@ -85,6 +85,7 @@ export default function OrdersView({ user }: { user: User }) {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   // Visibilité des colonnes (admin) — défaut : toutes visibles (comportement historique)
   const [ff, setFf] = useState(""); // filtre par usine (unité de production)
+  const [ftel, setFtel] = useState(false); // filtre famille télégestion
   const [factoryList, setFactoryList] = useState<{id:number;code:string;name:string}[]>([]);
   const [hiddenCols, setHiddenCols] = useState<string[]>([]);
   const [hiddenProdStates, setHiddenProdStates] = useState<string[]>([]);
@@ -173,9 +174,10 @@ export default function OrdersView({ user }: { user: User }) {
     if(fa)p.set("agencyId",fa);
     if(fp)p.set("priority",fp);
     if(ff)p.set("factory",ff);
+    if(ftel)p.set("telegestion","1");
     setOrders((await apiFetch<{orders:FullOrder[]}>(`/api/orders?${p}`)).orders);
     setDataVersion(v=>v+1)
-  },[fs,fa,fp,ff]);
+  },[fs,fa,fp,ff,ftel]);
   useEffect(()=>{setLoading(true);Promise.all([
     fetchOrders(),
     apiFetch<{agencies:Agency[]}>("/api/agencies").then(d=>setAgencies(d.agencies)).catch(()=>{}),
@@ -320,7 +322,7 @@ export default function OrdersView({ user }: { user: User }) {
     setEditingOrder(order);
     const prodStatus = order.productionStatus || "EN_INSTANCE";
     setForm({orderNumber:order.orderNumber,orderDate:order.orderDate,priority:order.priority,clientId:String(order.clientId),agencyId:String(order.agencyId),affaire:order.affaire||"",commercialStatus:order.status||"PREVISION",productionStatus:order.productionStatus||"EN_INSTANCE",cancelReason:order.cancelReason||"",statusReason:order.statusReason||""});
-    setFormItems(order.items&&order.items.length>0?order.items.map(i=>({id:i.id,articleName:i.articleName,quantity:i.quantity,unitPrice:i.unitPrice||"",description:i.description||"",note:i.note||"",clientSpec:i.clientSpec||"",productionUnit:i.productionUnit||"",plannedLoadingDate:i.plannedLoadingDate||""})):[{articleName:"",quantity:1,unitPrice:"",description:""}]);
+    setFormItems(order.items&&order.items.length>0?order.items.map(i=>({id:i.id,articleName:i.articleName,quantity:i.quantity,unitPrice:i.unitPrice||"",description:i.description||"",note:i.note||"",clientSpec:i.clientSpec||"",isTelegestion:!!i.isTelegestion,productionUnit:i.productionUnit||"",plannedLoadingDate:i.plannedLoadingDate||""})):[{articleName:"",quantity:1,unitPrice:"",description:""}]);
     const ti:Record<number,Record<string,string>>={};
     const selected:Record<number,number[]>={};
     order.items?.forEach(i=>{if(i.id){ti[i.id]={pcb:i.pcb||"",colorTemperature:i.colorTemperature||"",lens:i.lens||"",driver:i.driver||"",electricalClass:i.electricalClass||"",accessories:i.accessories||"",otherTechSpecs:i.otherTechSpecs||""};selected[i.id]=(i.technicalComponents||[]).map(component=>component.materialId).filter((id):id is number=>id!==null);}});
@@ -337,7 +339,7 @@ export default function OrdersView({ user }: { user: User }) {
     if(canEditOrderForm()){
       if(vi.length===0&&!editingOrder){setError("Au moins un article");setSaving(false);return}
       const statusToSend=planifStockOnly?"SUR_STOCK":(form.commercialStatus||"BON_COMMANDE");
-      const pl:Record<string,unknown>={orderDate:form.orderDate,priority:"NORMALE",clientId:parseInt(form.clientId),agencyId:parseInt(form.agencyId),affaire:form.affaire||null,status:statusToSend,items:vi.map(i=>({id:i.id||undefined,articleName:i.articleName,quantity:i.quantity||1,note:i.note||null,clientSpec:i.clientSpec||null,unitPrice:i.unitPrice||null,description:i.description||null}))};
+      const pl:Record<string,unknown>={orderDate:form.orderDate,priority:"NORMALE",clientId:parseInt(form.clientId),agencyId:parseInt(form.agencyId),affaire:form.affaire||null,status:statusToSend,items:vi.map(i=>({id:i.id||undefined,articleName:i.articleName,quantity:i.quantity||1,note:i.note||null,clientSpec:i.clientSpec||null,isTelegestion:!!i.isTelegestion,unitPrice:i.unitPrice||null,description:i.description||null}))};
       // Ajouter orderNumber seulement pour les modifications
       if(editingOrder){pl.orderNumber=form.orderNumber;}
       if(form.commercialStatus==="ANNULEE"&&form.cancelReason)pl.cancelReason=form.cancelReason;
@@ -511,6 +513,10 @@ export default function OrdersView({ user }: { user: User }) {
         <option value="URGENTE">Urgente (ancien)</option>
         <option value="TRES_URGENTE">Très Urgente (ancien)</option>
       </select>
+      <label className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer flex items-center gap-1.5 border transition-colors ${ftel?"bg-sky-100 border-sky-500 text-sky-800 font-semibold":"bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200"}`}
+        title="N\u2019afficher que les commandes contenant des articles de la famille T\u00e9l\u00e9gestion">
+        <input type="checkbox" checked={ftel} onChange={e=>setFtel(e.target.checked)} className="accent-sky-600" />📡 T\u00e9l\u00e9gestion
+      </label>
       <button onClick={fetchOrders} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg text-sm hover:bg-gray-300">🔄 Actualiser</button>
       <label className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer flex items-center gap-1 transition-colors ${watchLive?"bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-400":"bg-gray-100 dark:bg-gray-800 text-gray-500 border border-gray-300 dark:border-gray-600"}`}>
         <input type="checkbox" checked={watchLive} onChange={e=>setWatchLive(e.target.checked)} className="sr-only" />
@@ -689,6 +695,7 @@ export default function OrdersView({ user }: { user: User }) {
         <span className="w-20 text-[10px] font-semibold text-gray-500 dark:text-gray-400 text-center">Quantité</span>
         <span className="flex-[2] text-[10px] font-semibold text-gray-500 dark:text-gray-400">Besoin client</span>
         <span className="flex-[2] text-[10px] font-semibold text-gray-500 dark:text-gray-400">Note</span>
+        <span className="text-[10px] font-semibold text-sky-700 whitespace-nowrap">📡 Télégestion</span>
         <span className="w-7"></span>
       </div>
       <div className="space-y-2">{formItems.map((item,idx)=>
@@ -709,6 +716,13 @@ export default function OrdersView({ user }: { user: User }) {
             <input type="text" placeholder="Note" value={item.note||""} onChange={e=>ui(idx,"note",e.target.value)}
               className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200" />
           </div>
+          {/* Famille TÉLÉGESTION : coché par le commercial dès la saisie */}
+          <label className="shrink-0 flex items-center gap-1 px-2 py-1.5 rounded border border-sky-300 bg-sky-50 cursor-pointer select-none"
+            title="Cet article appartient à la famille Télégestion">
+            <input type="checkbox" checked={!!item.isTelegestion}
+              onChange={e=>ui(idx,"isTelegestion",e.target.checked as unknown as string)} className="accent-sky-600" />
+            <span className="text-[11px] font-medium text-sky-800 whitespace-nowrap">📡 Télégestion</span>
+          </label>
           <div className="w-7 shrink-0 flex justify-center">
             {formItems.length>1 && <button onClick={()=>ri(idx)} className="p-1 text-red-500 hover:text-red-700 text-sm">✕</button>}
           </div>
