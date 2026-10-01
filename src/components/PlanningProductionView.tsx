@@ -14,12 +14,15 @@ import {
 } from "@/lib/production-planning-constants";
 import { priorityColorKey, priorityLabel, prioritySortRank } from "@/lib/priority";
 
+type Factory = { id: number; code: string; name: string; responsableName: string | null; active: boolean };
+
 type Entry = {
   id: number; planDate: string; itemId: number; orderId: number;
   articleName: string; orderNumber: string | null; clientName: string | null;
   plannedQty: number; status: string; reason: string | null;
   appliedQty: number; appliedAt: string | null;
   createdByName: string | null; updatedByName: string | null; updatedAt: string | null;
+  factoryId: number | null; factoryName: string | null;
   itemQuantity: number | null; itemProducedQty: number | null; itemDeliveredQty: number | null;
   productionStatus: string | null;
 };
@@ -41,6 +44,8 @@ export default function PlanningProductionView({ user }: { user: User }) {
   const { getColor } = useColors();
 
   const [date, setDate] = useState(todayISO());
+  const [factories, setFactories] = useState<Factory[]>([]);
+  const [factoryId, setFactoryId] = useState<string>("");
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -60,7 +65,9 @@ export default function PlanningProductionView({ user }: { user: User }) {
 
   const load = useCallback(async () => {
     try {
-      const d = await apiFetch<{ entries: Entry[] }>(`/api/production-planning?date=${date}`);
+      const q = new URLSearchParams({ date });
+      if (factoryId) q.set("factoryId", factoryId);
+      const d = await apiFetch<{ entries: Entry[] }>(`/api/production-planning?${q}`);
       setEntries(d.entries);
       setError("");
     } catch (err) {
@@ -68,9 +75,16 @@ export default function PlanningProductionView({ user }: { user: User }) {
     } finally {
       setLoading(false);
     }
-  }, [date]);
+  }, [date, factoryId]);
 
   useEffect(() => { setLoading(true); load(); }, [load]);
+
+  // Liste des usines (chaque usine a son propre planning)
+  useEffect(() => {
+    apiFetch<{ factories: Factory[] }>("/api/factories")
+      .then(d => { setFactories(d.factories); setFactoryId(prev => prev || (d.factories.find(f => f.active)?.id ? String(d.factories.find(f => f.active)!.id) : "")); })
+      .catch(() => {});
+  }, []);
 
   // Temps réel : rafraîchissement automatique toutes les 30 s
   useEffect(() => {
@@ -91,10 +105,11 @@ export default function PlanningProductionView({ user }: { user: User }) {
       .map(([itemId, q]) => ({ itemId: parseInt(itemId), plannedQty: parseInt(q) || 0 }))
       .filter(e => e.plannedQty > 0);
     if (list.length === 0) { setError("Sélectionnez au moins un article avec une quantité"); return; }
+    if (!factoryId) { setError("Selectionnez l’usine de production"); return; }
     setSaving(true); setError("");
     try {
       const r = await apiFetch<{ created: unknown[]; skipped: { itemId: number; reason: string }[] }>("/api/production-planning", {
-        method: "POST", body: JSON.stringify({ date, entries: list }),
+        method: "POST", body: JSON.stringify({ date, factoryId: parseInt(factoryId), entries: list }),
       });
       setShowPicker(false);
       flash(`${r.created.length} article(s) ajouté(s) au planning du ${date}` +
@@ -236,6 +251,20 @@ export default function PlanningProductionView({ user }: { user: User }) {
           className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200" />
         <button onClick={() => shiftDay(1)} className="px-2.5 py-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg text-sm">→</button>
         <button onClick={() => setDate(todayISO())} className="px-3 py-1.5 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">Aujourd&apos;hui</button>
+        {/* Chaque usine possède son propre planning journalier */}
+        <span className="text-xs font-medium text-gray-600 dark:text-gray-400 ml-2">🏭 Usine</span>
+        <select value={factoryId} onChange={e => setFactoryId(e.target.value)}
+          className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">
+          <option value="">Toutes les usines</option>
+          {factories.map(f => (
+            <option key={f.id} value={f.id} disabled={!f.active}>
+              {f.name} ({f.code}){f.active ? "" : " — inactive"}
+            </option>
+          ))}
+        </select>
+        {factories.length === 0 && (
+          <span className="text-[11px] text-amber-600 dark:text-amber-400">Aucune usine : créez-en une dans l&apos;onglet Usines.</span>
+        )}
         <div className="flex-1" />
         {PLANNING_STATUSES.map(s => {
           const bg = getColor(s.colorKey);
@@ -269,6 +298,7 @@ export default function PlanningProductionView({ user }: { user: User }) {
                   <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Article</th>
                   <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Commande</th>
                   <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Client</th>
+                  <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Usine</th>
                   <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300 text-right">Qté planifiée</th>
                   <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300 text-right">Avancement</th>
                   <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">État de production</th>
@@ -299,6 +329,7 @@ export default function PlanningProductionView({ user }: { user: User }) {
                       </td>
                       <td className="px-3 py-2 font-mono text-[11px] text-gray-600 dark:text-gray-300">#{e.orderNumber || e.orderId}</td>
                       <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{e.clientName || "-"}</td>
+                      <td className="px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-nowrap">🏭 {e.factoryName || "—"}</td>
                       <td className="px-3 py-2 text-right font-bold text-blue-700 dark:text-blue-400">{e.plannedQty}</td>
                       <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300 whitespace-nowrap">
                         {e.itemProducedQty ?? 0}/{e.itemQuantity ?? 0}
@@ -354,7 +385,7 @@ export default function PlanningProductionView({ user }: { user: User }) {
           <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-4xl mx-4 max-h-[88vh] flex flex-col">
             <div className="px-5 py-3 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
               <div>
-                <h4 className="font-semibold text-gray-800 dark:text-white">Planifier des articles — {date}</h4>
+                <h4 className="font-semibold text-gray-800 dark:text-white">Planifier des articles — {date}{factoryId ? ` · 🏭 ${factories.find(f => String(f.id) === factoryId)?.name || ""}` : ""}</h4>
                 <p className="text-[11px] text-gray-500">Articles issus de l&apos;onglet Production, restant à produire.</p>
               </div>
               <input type="text" value={pickerSearch} onChange={e => setPickerSearch(e.target.value)} placeholder="🔍 Rechercher…"

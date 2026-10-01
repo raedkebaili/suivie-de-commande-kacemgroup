@@ -20,11 +20,21 @@ export async function GET(request: NextRequest) {
   // Filtre sur l'état de PRODUCTION (colonne distincte de l'état commercial).
   // Ajout rétrocompatible : si le paramètre est absent, comportement inchangé.
   const productionStatus = sp.get("productionStatus");
+  // Filtre par USINE : retient les commandes ayant au moins un article dont
+  // l'unité de production correspond au nom de l'usine (alimenté par le planning).
+  const factory = sp.get("factory");
   const conds = [];
   if (status) conds.push(eq(orders.status, status));
   if (productionStatus) conds.push(eq(orders.productionStatus, productionStatus));
   if (agencyId) conds.push(eq(orders.agencyId, parseInt(agencyId)));
   if (priority) conds.push(eq(orders.priority, priority));
+  if (factory) {
+    const matching = await db.selectDistinct({ orderId: orderItems.orderId })
+      .from(orderItems).where(eq(orderItems.productionUnit, factory));
+    const ids = matching.map(m => m.orderId);
+    if (ids.length === 0) return NextResponse.json({ orders: [] });
+    conds.push(inArray(orders.id, ids));
+  }
   const where = conds.length > 0 ? and(...conds) : undefined;
 
   const data = await db.select({

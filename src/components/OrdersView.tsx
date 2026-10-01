@@ -84,6 +84,8 @@ export default function OrdersView({ user }: { user: User }) {
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   // Visibilité des colonnes (admin) — défaut : toutes visibles (comportement historique)
+  const [ff, setFf] = useState(""); // filtre par usine (unité de production)
+  const [factoryList, setFactoryList] = useState<{id:number;code:string;name:string}[]>([]);
   const [hiddenCols, setHiddenCols] = useState<string[]>([]);
   const [hiddenProdStates, setHiddenProdStates] = useState<string[]>([]);
   const [hideTotalRow, setHideTotalRow] = useState(false);
@@ -102,7 +104,6 @@ export default function OrdersView({ user }: { user: User }) {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [itemMaterialSelections, setItemMaterialSelections] = useState<Record<number, number[]>>({});
   const [openTelegestionItem, setOpenTelegestionItem] = useState<number | null>(null);
-  const [itemProdUnits, setItemProdUnits] = useState<Record<number, string>>({});
   const [itemLoadingDates, setItemLoadingDates] = useState<Record<number, string>>({});
   
   // Cache des modifications par commande: Map<orderId, Map<articleName, Set<fieldType>>>
@@ -171,9 +172,10 @@ export default function OrdersView({ user }: { user: User }) {
     else if(fs.startsWith("prod:"))p.set("productionStatus",fs.slice(5));
     if(fa)p.set("agencyId",fa);
     if(fp)p.set("priority",fp);
+    if(ff)p.set("factory",ff);
     setOrders((await apiFetch<{orders:FullOrder[]}>(`/api/orders?${p}`)).orders);
     setDataVersion(v=>v+1)
-  },[fs,fa,fp]);
+  },[fs,fa,fp,ff]);
   useEffect(()=>{setLoading(true);Promise.all([
     fetchOrders(),
     apiFetch<{agencies:Agency[]}>("/api/agencies").then(d=>setAgencies(d.agencies)).catch(()=>{}),
@@ -183,6 +185,7 @@ export default function OrdersView({ user }: { user: User }) {
     apiFetch<{hiddenColumns:string[];hiddenProductionStates?:string[];hideTotalRow?:boolean}>("/api/orders/column-visibility").then(d=>{setHiddenCols(d.hiddenColumns||[]);setHiddenProdStates(d.hiddenProductionStates||[]);setHideTotalRow(!!d.hideTotalRow)}).catch(()=>{}),
     apiFetch<{assignments:ClientRecouvrementAssignment[]}>("/api/recouvrement/client-states").then(d=>setRecouvByClient(new Map(d.assignments.map(a=>[a.clientId,a])))).catch(()=>{}),
     apiFetch<{itemIds:number[]}>("/api/production-planning/active").then(d=>setPlanningActiveItems(new Set(d.itemIds||[]))).catch(()=>{}),
+    apiFetch<{factories:{id:number;code:string;name:string}[]}>("/api/factories").then(d=>setFactoryList(d.factories)).catch(()=>{}),
   ]).finally(()=>setLoading(false))},[fetchOrders]);
   // Planning actif : recalculé à chaque rafraîchissement des commandes (temps réel)
   const refreshPlanningActive=useCallback(async()=>{
@@ -347,7 +350,9 @@ export default function OrdersView({ user }: { user: User }) {
     }
     if(cp()&&editingOrder){
       // Send per-item productionUnit + plannedLoadingDate
-      const itemUpdates = Object.keys({...itemProdUnits,...itemLoadingDates}).map(k => ({itemId: parseInt(k), productionUnit: itemProdUnits[parseInt(k)] || undefined, plannedLoadingDate: itemLoadingDates[parseInt(k)] || undefined}));
+      // L'unité de production n'est plus envoyée depuis ce formulaire : elle est
+      // pilotée par l'usine choisie dans le planning de production.
+      const itemUpdates = Object.keys(itemLoadingDates).map(k => ({itemId: parseInt(k), plannedLoadingDate: itemLoadingDates[parseInt(k)] || undefined}));
       await apiFetch(`/api/orders/${editingOrder.id}`,{method:"PUT",body:JSON.stringify({priority:form.priority,productionStatus:form.productionStatus,statusReason:form.statusReason,cancelReason:form.cancelReason,itemUpdates})});
     }
     setShowModal(false);rf();fetchOrders()}catch(err:unknown){setError(err instanceof Error?err.message:"Erreur");setSaving(false)}};
@@ -494,6 +499,11 @@ export default function OrdersView({ user }: { user: User }) {
         </optgroup>
       </select>
       <select value={fa} onChange={e=>setFa(e.target.value)} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"><option value="">Agences</option>{agencies.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select>
+      <select value={ff} onChange={e=>setFf(e.target.value)} title="Filtrer par usine (unité de production)"
+        className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">
+        <option value="">🏭 Usines</option>
+        {factoryList.map(f=><option key={f.id} value={f.name}>{f.name} ({f.code})</option>)}
+      </select>
       <select value={fp} onChange={e=>setFp(e.target.value)} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm">
         <option value="">Priorités</option>
         {PRIORITY_OPTIONS.map(p=><option key={p.value} value={p.value}>{p.label}</option>)}
@@ -754,9 +764,15 @@ export default function OrdersView({ user }: { user: User }) {
         {form.productionStatus==="ANNULEE"&&<div className="md:col-span-2"><F l="Cause annulation" v={form.cancelReason} onChange={v=>setForm({...form,cancelReason:v})}/></div>}
       </div>
       <div className="text-xs font-medium text-gray-600 mb-2">Unité Production par article :</div>
+      {/* L'unité de production n'est plus saisie ici : elle est désormais
+          déterminée par l'USINE choisie dans l'onglet « Planning production ».
+          Elle reste affichée (lecture seule) et continue d'apparaître dans le
+          tableau des commandes et l'export, comme auparavant. */}
       {editingOrder.items?.filter(i=>i.id).map(it=><div key={it.id} className="flex items-center gap-2 mb-2">
         <span className="text-[11px] text-gray-600 w-24 truncate">{it.articleName}</span>
-        <input type="text" placeholder="Unité Prod" value={itemProdUnits[it.id!]||(it.productionUnit||'')} onChange={e=>setItemProdUnits({...itemProdUnits,[it.id!]:e.target.value})} className="flex-1 px-2 py-1 border rounded text-xs"/>
+        <span className="flex-1 px-2 py-1 border border-gray-200 bg-gray-50 rounded text-xs text-gray-600" title="Usine définie lors de la planification de production">
+          🏭 {it.productionUnit || <span className="italic text-gray-400">Usine non planifiée</span>}
+        </span>
       </div>)}
       </fieldset>}
 

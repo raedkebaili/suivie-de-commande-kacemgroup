@@ -22,7 +22,7 @@ import {
   recouvrementStates, clientRecouvrementStates, clientRecouvrementLogs,
   systemSettings, appColors, orderCounters,
   archiveSheets, archiveRows, archiveCellColors,
-  productionPlanEntries,
+  productionPlanEntries, factories,
 } from "@/db/schema";
 
 export async function collectBackupData() {
@@ -58,6 +58,7 @@ export async function collectBackupData() {
     archiveRows: await db.select().from(archiveRows),
     archiveCellColors: await db.select().from(archiveCellColors),
     // Planning de production journalier
+    factories: await db.select().from(factories),
     productionPlanEntries: await db.select().from(productionPlanEntries),
   };
 

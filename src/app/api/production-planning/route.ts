@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { clients, orderItems, orders, productionPlanEntries } from "@/db/schema";
+import { clients, factories, orderItems, orders, productionPlanEntries } from "@/db/schema";
 import { and, asc, eq } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 import { ensurePlanningColors } from "@/lib/production-planning";
@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
 
   const sp = new URL(request.url).searchParams;
   const date = sp.get("date") || todayISO();
+  const factoryId = sp.get("factoryId"); // chaque usine a son propre planning
 
   try {
     await ensurePlanningColors();
@@ -44,6 +45,8 @@ export async function GET(request: NextRequest) {
         createdByName: productionPlanEntries.createdByName,
         updatedByName: productionPlanEntries.updatedByName,
         updatedAt: productionPlanEntries.updatedAt,
+        factoryId: productionPlanEntries.factoryId,
+        factoryName: productionPlanEntries.factoryName,
         // Avancement réel de l'article (source : order_items)
         itemQuantity: orderItems.quantity,
         itemProducedQty: orderItems.producedQty,
@@ -53,10 +56,12 @@ export async function GET(request: NextRequest) {
       .from(productionPlanEntries)
       .leftJoin(orderItems, eq(productionPlanEntries.itemId, orderItems.id))
       .leftJoin(orders, eq(productionPlanEntries.orderId, orders.id))
-      .where(eq(productionPlanEntries.planDate, date))
+      .where(factoryId
+        ? and(eq(productionPlanEntries.planDate, date), eq(productionPlanEntries.factoryId, parseInt(factoryId)))
+        : eq(productionPlanEntries.planDate, date))
       .orderBy(asc(productionPlanEntries.id));
 
-    return NextResponse.json({ date, entries: rows });
+    return NextResponse.json({ date, factoryId: factoryId ? parseInt(factoryId) : null, entries: rows });
   } catch (error) {
     console.error("Erreur lecture planning:", error);
     return NextResponse.json({ error: "Erreur lors de la récupération du planning" }, { status: 500 });
@@ -83,6 +88,15 @@ export async function POST(request: NextRequest) {
 
     const list = Array.isArray(body.entries) ? body.entries : [];
     if (list.length === 0) return NextResponse.json({ error: "Aucun article à planifier" }, { status: 400 });
+
+    // ── Usine : chaque planning appartient à une usine ──
+    const factoryId = parseInt(String(body.factoryId));
+    if (!Number.isFinite(factoryId)) {
+      return NextResponse.json({ error: "Usine requise : sélectionnez l'usine de production" }, { status: 400 });
+    }
+    const [factory] = await db.select().from(factories).where(eq(factories.id, factoryId)).limit(1);
+    if (!factory) return NextResponse.json({ error: "Usine introuvable" }, { status: 400 });
+    if (!factory.active) return NextResponse.json({ error: "Cette usine est désactivée" }, { status: 400 });
 
     const created: unknown[] = [];
     const skipped: { itemId: number; reason: string }[] = [];
@@ -115,11 +129,14 @@ export async function POST(request: NextRequest) {
         .where(and(
           eq(productionPlanEntries.planDate, date),
           eq(productionPlanEntries.itemId, itemId),
+          eq(productionPlanEntries.factoryId, factory.id),
         )).limit(1);
-      if (dup) { skipped.push({ itemId, reason: "Déjà planifié ce jour" }); continue; }
+      if (dup) { skipped.push({ itemId, reason: "Déjà planifié ce jour dans cette usine" }); continue; }
 
       const [entry] = await db.insert(productionPlanEntries).values({
         planDate: date,
+        factoryId: factory.id,
+        factoryName: factory.name,
         itemId: row.itemId,
         orderId: row.orderId,
         articleName: row.articleName,
@@ -133,12 +150,19 @@ export async function POST(request: NextRequest) {
         createdByName: user.fullName,
         updatedByName: user.fullName,
       }).returning();
+
+      // L'unité de production de l'article reçoit le NOM DE L'USINE : le
+      // tableau des commandes et l'export Excel continuent de l'afficher
+      // exactement comme avant (colonne « Unité »), désormais alimentée
+      // automatiquement par la planification.
+      await db.update(orderItems).set({ productionUnit: factory.name }).where(eq(orderItems.id, row.itemId));
+
       created.push(entry);
     }
 
     if (created.length > 0) {
       await logActivity(user.id, user.username, "PLANNING_ADD",
-        `${created.length} article(s) planifié(s) le ${date}`);
+        `${created.length} article(s) planifié(s) le ${date} — usine ${factory.name}`);
     }
 
     return NextResponse.json({ created, skipped }, { status: created.length > 0 ? 201 : 200 });

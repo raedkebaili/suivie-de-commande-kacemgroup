@@ -307,6 +307,23 @@ export const clientRecouvrementStates = pgTable("client_recouvrement_states", {
   updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
 });
 
+// ── Usines (unités de production) ───────────────────────────────────
+// Chaque usine possède son propre planning de production.
+// Le NOM de l'usine est recopié dans order_items.production_unit lors de la
+// planification, afin que le tableau des commandes et l'export Excel
+// continuent d'afficher l'unité de production exactement comme avant.
+export const factories = pgTable("factories", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull().unique(),
+  name: text("name").notNull().unique(),
+  // Responsable d'usine : obligatoirement un utilisateur de la plateforme
+  responsableId: integer("responsable_id").references(() => users.id, { onDelete: "restrict" }),
+  responsableName: text("responsable_name"),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
+});
+
 // ── Planning de production journalier (module planification) ────────
 // Chaque ligne = un article planifié pour une journée donnée.
 // N'altère JAMAIS directement order_items : la quantité n'est appliquée à la
@@ -316,6 +333,9 @@ export const clientRecouvrementStates = pgTable("client_recouvrement_states", {
 export const productionPlanEntries = pgTable("production_plan_entries", {
   id: serial("id").primaryKey(),
   planDate: text("plan_date").notNull(),              // Journée planifiée (YYYY-MM-DD)
+  // Usine concernée : chaque usine a son propre planning journalier
+  factoryId: integer("factory_id").references(() => factories.id, { onDelete: "set null" }),
+  factoryName: text("factory_name"),                  // Copie pour l'historique
   itemId: integer("item_id").notNull().references(() => orderItems.id, { onDelete: "cascade" }),
   orderId: integer("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),
   // Copies pour l'historique et l'affichage (même approche que les composants techniques)
