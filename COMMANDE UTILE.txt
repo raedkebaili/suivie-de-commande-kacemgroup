@@ -6,6 +6,23 @@ git add -A
 git commit -m "Prêt pour le déploiement Vercel"
 git push
 ********************************************
-il y'a des améliorations a intégré il faut ajouté 
-- lorsque on ajoute des article dans le plannig il s'ajoute directement par le statue en court de production hors que il doivent etre avec une statue "Non traité" pour que l'utilisateur choisie le vrai état au besoin 
-il y'a des bug couleur qui nécessite l'actualisation de la page pour voir les vrais couleur  
+ CLOUD FLARE TOKEN 
+
+cfat_BOdHfapuRTOnrY5iQuP2pak0nEeS1q46butgPoRqc60fcf28
+
+Access Key ID
+74ccccd4a8d85aeb5f98b297a846411e
+
+Secret Access Key
+
+e7f749e456c2196f33e2d65d5583231cbe5933d03e72fd7091d415655359fb9e
+
+S3 API endpoint
+https://ed1dfbb8fc2646469c817d2b053f9377.r2.cloudflarestorage.com
+
+Example Usage
+curl -X GET "https://api.cloudflare.com/client/v4/accounts/ed1dfbb8fc2646469c817d2b053f9377/tokens/verify" \
+  -H "Authorization: Bearer cfat_BOdHfapuRTOnrY5iQuP2pak0nEeS1q46butgPoRqc60fcf28"
+
+
+

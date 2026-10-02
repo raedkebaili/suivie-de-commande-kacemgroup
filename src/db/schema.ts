@@ -311,6 +311,32 @@ export const clientRecouvrementStates = pgTable("client_recouvrement_states", {
   updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
 });
 
+// ── Stockage Google Drive (configuration CENTRALISÉE, une seule ligne) ──
+// Un unique compte Google sert d'espace de stockage à toute la plateforme.
+// Les secrets (client secret, refresh token) sont CHIFFRÉS au repos
+// (AES-256-GCM, cf. src/lib/crypto.ts) et ne sont JAMAIS renvoyés au frontend.
+export const storageConfig = pgTable("storage_config", {
+  id: serial("id").primaryKey(),
+  provider: text("provider").notNull().default("google_drive"),
+  // Identifiants OAuth de l'application (saisis par l'admin ou via variables d'env)
+  clientId: text("client_id"),
+  encryptedClientSecret: text("encrypted_client_secret"),
+  // Compte Google connecté + jeton de rafraîchissement (chiffré)
+  googleAccountEmail: text("google_account_email"),
+  encryptedRefreshToken: text("encrypted_refresh_token"),
+  // Dossier racine du stockage sur le Drive
+  rootFolderId: text("root_folder_id"),
+  rootFolderName: text("root_folder_name").notNull().default("ORDERTRACK STORAGE"),
+  // disconnected | connected | expired
+  status: text("status").notNull().default("disconnected"),
+  lastError: text("last_error"),
+  connectedAt: text("connected_at"),
+  lastSyncAt: text("last_sync_at"),
+  connectedById: integer("connected_by_id").references(() => users.id, { onDelete: "set null" }),
+  connectedByName: text("connected_by_name"),
+  updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
+});
+
 // ── Usines (unités de production) ───────────────────────────────────
 // Chaque usine possède son propre planning de production.
 // Le NOM de l'usine est recopié dans order_items.production_unit lors de la
