@@ -69,8 +69,12 @@ export function ColorProvider({ children }: { children: React.ReactNode }) {
   const [colors, setColors] = useState<AppColor[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Identifie l'utilisateur pour lequel les couleurs serveur ont été chargées.
+  // Tant que cet identifiant n'est pas prêt, aucun module authentifié ne doit
+  // être rendu avec les seules couleurs par défaut.
+  const [loadedForUserId, setLoadedForUserId] = useState<number | null>(null);
 
-  const loadDefaults = useCallback(() => {
+  const loadDefaults = useCallback((authenticatedUserId: number | null = null) => {
     setColors(DEFAULT_COLORS.map((c, idx) => ({
       id: idx + 1,
       key: c.key,
@@ -82,6 +86,7 @@ export function ColorProvider({ children }: { children: React.ReactNode }) {
       updatedAt: new Date().toISOString(),
       updatedByName: null,
     })));
+    setLoadedForUserId(authenticatedUserId);
     setLoading(false);
   }, []);
 
@@ -97,9 +102,10 @@ export function ColorProvider({ children }: { children: React.ReactNode }) {
       setError(null);
       const data = await apiFetch<{ colors: AppColor[] }>("/api/colors");
       setColors(data.colors);
+      setLoadedForUserId(user.id);
     } catch {
-      // Fallback silencieux vers les couleurs par défaut
-      loadDefaults();
+      // Fallback silencieux vers les couleurs par défaut, sans bloquer l'accès.
+      loadDefaults(user.id);
     } finally {
       setLoading(false);
     }
@@ -196,6 +202,8 @@ export function ColorProvider({ children }: { children: React.ReactNode }) {
     };
   }, [getColor]);
 
+  const colorsReady = !user || loadedForUserId === user.id;
+
   return (
     <ColorContext.Provider
       value={{
@@ -212,7 +220,17 @@ export function ColorProvider({ children }: { children: React.ReactNode }) {
         refreshColors: fetchColors,
       }}
     >
-      {children}
+      {colorsReady ? children : (
+        <div className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-950">
+          <div className="flex flex-col items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
+            <svg className="h-8 w-8 animate-spin text-blue-600" fill="none" viewBox="0 0 24 24" aria-label="Chargement des couleurs">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            <span>Chargement de l&apos;apparence…</span>
+          </div>
+        </div>
+      )}
     </ColorContext.Provider>
   );
 }

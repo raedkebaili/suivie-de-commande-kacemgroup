@@ -6,21 +6,24 @@
  */
 import { db } from "@/db";
 import { appColors } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { PLANNING_COLOR_CATEGORY, PLANNING_STATUSES } from "./production-planning-constants";
 
 export async function ensurePlanningColors() {
-  for (const s of PLANNING_STATUSES) {
-    const [existing] = await db.select({ id: appColors.id }).from(appColors).where(eq(appColors.key, s.colorKey)).limit(1);
-    if (!existing) {
-      await db.insert(appColors).values({
-        key: s.colorKey,
-        category: PLANNING_COLOR_CATEGORY,
-        label: `Planning — ${s.label}`,
-        color: s.defaultColor,
-        description: s.description,
-        sortOrder: s.sortOrder,
-      });
-    }
-  }
+  const keys = PLANNING_STATUSES.map(status => status.colorKey);
+  const existing = await db.select({ key: appColors.key })
+    .from(appColors)
+    .where(inArray(appColors.key, keys));
+  const existingKeys = new Set(existing.map(color => color.key));
+  const missing = PLANNING_STATUSES.filter(status => !existingKeys.has(status.colorKey));
+  if (missing.length === 0) return;
+
+  await db.insert(appColors).values(missing.map(status => ({
+    key: status.colorKey,
+    category: PLANNING_COLOR_CATEGORY,
+    label: `Planning — ${status.label}`,
+    color: status.defaultColor,
+    description: status.description,
+    sortOrder: status.sortOrder,
+  }))).onConflictDoNothing({ target: appColors.key });
 }
