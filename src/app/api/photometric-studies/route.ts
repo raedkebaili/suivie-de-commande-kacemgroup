@@ -344,13 +344,43 @@ export async function PUT(request: NextRequest) {
   const { id, studyNumber, note, clientId, items } = body;
   if (!id) return NextResponse.json({ error: "ID requis" }, { status: 400 });
 
-  const [study] = await db.select().from(photometricStudies).where(eq(photometricStudies.id, parseInt(id))).limit(1);
+  const studyId = parseInt(id);
+  const [study] = await db.select().from(photometricStudies).where(eq(photometricStudies.id, studyId)).limit(1);
   if (!study) return NextResponse.json({ error: "Étude non trouvée" }, { status: 404 });
+
+  // orderId est facultatif pour une simple modification. Lorsqu'il est
+  // fourni, il permet la conversion d'une étude indépendante (orderId NULL)
+  // vers une commande existante, ou le rattachement à une autre commande.
+  let targetOrderId = study.orderId;
+  let targetOrderNumber: string | null = null;
+  if (body.orderId !== undefined) {
+    const requestedOrderId = body.orderId === null || String(body.orderId).trim() === ""
+      ? null
+      : parseInt(String(body.orderId));
+    if (requestedOrderId === null || !Number.isFinite(requestedOrderId)) {
+      return NextResponse.json({ error: "Une commande existante est requise pour le rattachement" }, { status: 400 });
+    }
+    const [targetOrder] = await db.select().from(orders).where(eq(orders.id, requestedOrderId)).limit(1);
+    if (!targetOrder) return NextResponse.json({ error: "Commande cible non trouvée" }, { status: 404 });
+    targetOrderId = targetOrder.id;
+    targetOrderNumber = targetOrder.orderNumber;
+  } else if (targetOrderId !== null) {
+    const [targetOrder] = await db.select({ orderNumber: orders.orderNumber }).from(orders)
+      .where(eq(orders.id, targetOrderId)).limit(1);
+    targetOrderNumber = targetOrder?.orderNumber || null;
+  }
 
   const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   if (studyNumber !== undefined) updates.studyNumber = studyNumber.trim();
   if (note !== undefined) updates.note = note?.trim() || null;
-  if (body.affaireName !== undefined) updates.affaireName = body.affaireName?.trim() || null;
+  if (targetOrderId !== null) {
+    updates.orderId = targetOrderId;
+    // Une étude liée utilise l'affaire de la commande ; le nom libre ne doit
+    // pas rester une seconde source contradictoire après conversion.
+    updates.affaireName = null;
+  } else if (body.affaireName !== undefined) {
+    updates.affaireName = body.affaireName?.trim() || null;
+  }
   if (clientId !== undefined) {
     updates.clientId = clientId ? parseInt(clientId) : null;
     if (clientId) {
@@ -361,18 +391,15 @@ export async function PUT(request: NextRequest) {
     }
   }
 
-  await db.update(photometricStudies).set(updates).where(eq(photometricStudies.id, parseInt(id)));
-
+  let prepared: { orderItemId: number | null; productName: string; lens: { id: number | null; reference: string | null; label: string | null; categoryId: number | null }; note: string | null }[] = [];
   if (Array.isArray(items)) {
-    // Le snapshot de l'étude reste conservé, et une lentille sélectionnée pour
-    // une étude liée remplace aussi la valeur technique de l'article existant.
-    // lensId=null ne crée ni ne supprime aucune ligne technique.
-    const prepared: { orderItemId: number | null; productName: string; lens: { id: number | null; reference: string | null; label: string | null; categoryId: number | null }; note: string | null }[] = [];
+    // Validation complète avant toute suppression/insertion : une conversion
+    // partielle ne doit jamais rattacher une étude avec des articles invalides.
     for (const item of items as StudyItemInput[]) {
       const snap = await resolveLensSnapshot(item.lensId ?? null);
       if ("error" in snap) return NextResponse.json({ error: snap.error }, { status: 422 });
-      if (study.orderId !== null) {
-        const v = await resolveOrderItem(study.orderId, item);
+      if (targetOrderId !== null) {
+        const v = await resolveOrderItem(targetOrderId, item);
         if ("error" in v) return NextResponse.json({ error: v.error }, { status: 422 });
         prepared.push({ orderItemId: v.item.id, productName: v.item.articleName, lens: snap, note: item.note?.trim() || null });
       } else {
@@ -380,10 +407,12 @@ export async function PUT(request: NextRequest) {
         prepared.push({ orderItemId: null, productName: item.productName.trim(), lens: snap, note: item.note?.trim() || null });
       }
     }
-    await db.delete(photometricStudyItems).where(eq(photometricStudyItems.studyId, parseInt(id)));
+    if (prepared.length === 0) return NextResponse.json({ error: "Au moins un produit requis" }, { status: 400 });
+
+    await db.delete(photometricStudyItems).where(eq(photometricStudyItems.studyId, studyId));
     for (const p of prepared) {
       await db.insert(photometricStudyItems).values({
-        studyId: parseInt(id),
+        studyId,
         orderItemId: p.orderItemId,
         productName: p.productName,
         lensId: p.lens.id,
@@ -393,19 +422,25 @@ export async function PUT(request: NextRequest) {
       });
     }
 
-    if (study.orderId !== null) {
+    if (targetOrderId !== null) {
       const appliedArticleIds = new Set<number>();
       const effectiveStudyNumber = typeof studyNumber === "string" ? studyNumber.trim() : study.studyNumber;
       for (const p of prepared) {
         if (p.orderItemId === null || !p.lens.reference || appliedArticleIds.has(p.orderItemId)) continue;
         appliedArticleIds.add(p.orderItemId);
-        await applyStudyLensToArticle(study.orderId, p.orderItemId, p.lens, effectiveStudyNumber, user);
+        await applyStudyLensToArticle(targetOrderId, p.orderItemId, p.lens, effectiveStudyNumber, user);
       }
     }
   }
 
-  await logActivity(user.id, user.username, "UPDATE_PHOTOMETRIC_STUDY", `Étude #${study.studyNumber} modifiée`);
-  return NextResponse.json({ ok: true });
+  await db.update(photometricStudies).set(updates).where(eq(photometricStudies.id, studyId));
+
+  const wasConverted = study.orderId === null && targetOrderId !== null;
+  const actionDetails = wasConverted
+    ? `Étude #${study.studyNumber} convertie vers la commande ${targetOrderNumber || targetOrderId}`
+    : `Étude #${study.studyNumber} modifiée`;
+  await logActivity(user.id, user.username, "UPDATE_PHOTOMETRIC_STUDY", actionDetails);
+  return NextResponse.json({ ok: true, converted: wasConverted, orderId: targetOrderId });
 }
 
 /**

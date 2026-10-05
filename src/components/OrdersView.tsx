@@ -243,6 +243,7 @@ export default function OrdersView({ user }: { user: User }) {
   const [editingStudy, setEditingStudy] = useState<PhotoStudy | null>(null);
   const [orderStudies, setOrderStudies] = useState<Map<number, PhotoStudy[]>>(new Map());
   const [standaloneStudies, setStandaloneStudies] = useState<PhotoStudy[]>([]);
+  const [isConvertingStudy, setIsConvertingStudy] = useState(false);
   // ── Documents contextuels (Stockage Google Drive existant) ──
   // Cible du panneau de consultation/ajout (affaire ou étude)
   const [docsTarget, setDocsTarget] = useState<{ entity: "order" | "study"; id: number; label: string } | null>(null);
@@ -573,6 +574,7 @@ export default function OrdersView({ user }: { user: User }) {
   }, [orderStudies]);
 
   const openPhotoStudyModal = (study?: PhotoStudy) => {
+    setIsConvertingStudy(false);
     if (study) {
       setEditingStudy(study);
       setPhotoStudyForm({ id: String(study.id), orderId: study.orderId ? String(study.orderId) : "", clientId: study.clientId ? String(study.clientId) : "", affaireName: study.affaireName || "", studyNumber: study.studyNumber, note: study.note || "" });
@@ -586,6 +588,37 @@ export default function OrdersView({ user }: { user: User }) {
       setPhotoStudyMode("order");
       setStudyOrderArticles([]);
     }
+    setStudyInvalidatedMsg("");
+    setPendingStudyDocs([]);
+    setShowPhotoStudyModal(true);
+    setError("");
+  };
+
+  const openPhotoStudyConversion = (study: PhotoStudy) => {
+    setIsConvertingStudy(true);
+    setEditingStudy(study);
+    setPhotoStudyMode("order");
+    setPhotoStudyForm({
+      id: String(study.id),
+      orderId: "",
+      clientId: study.clientId ? String(study.clientId) : "",
+      affaireName: study.affaireName || "",
+      studyNumber: study.studyNumber,
+      note: study.note || "",
+    });
+    // Les lignes restent des snapshots indépendants jusqu'au choix de la
+    // commande ; l'effet de chargement les reliera ensuite par nom exact.
+    setPhotoStudyItems(study.items.length > 0
+      ? study.items.map(i => ({
+          orderItemId: null,
+          productName: i.productName,
+          lensId: i.lensId ? String(i.lensId) : "",
+          lensReference: i.lensReference ?? null,
+          lensLabel: i.lensLabel ?? null,
+          note: i.note || "",
+        }))
+      : [{ orderItemId: null, productName: "", lensId: "", note: "" }]);
+    setStudyOrderArticles([]);
     setStudyInvalidatedMsg("");
     setPendingStudyDocs([]);
     setShowPhotoStudyModal(true);
@@ -637,11 +670,12 @@ export default function OrdersView({ user }: { user: User }) {
       if (photoStudyMode === "order" && photoStudyForm.orderId) {
         await loadStudiesForOrder(parseInt(photoStudyForm.orderId), true);
       }
-      if (photoStudyMode === "standalone") {
+      if (photoStudyMode === "standalone" || isConvertingStudy) {
         await fetchStandaloneStudies();
       }
       setShowPhotoStudyModal(false);
       setEditingStudy(null);
+      setIsConvertingStudy(false);
       await fetchOrders();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Erreur");
@@ -1207,19 +1241,26 @@ export default function OrdersView({ user }: { user: User }) {
     <div className="flex justify-end mt-4"><button onClick={()=>setShowExpHistory(false)} className="px-4 py-2 text-sm bg-gray-200 dark:bg-gray-700 rounded-lg">Fermer</button></div></div></div>}
 
     {/* PHOTOMETRIC STUDY MODAL */}
-    {showPhotoStudyModal&&<div className="fixed inset-0 z-50 flex items-center justify-center"><div className="absolute inset-0 bg-black/50" onClick={()=>setShowPhotoStudyModal(false)}/><div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto p-6">
-      <h4 className="text-lg font-semibold mb-4 text-gray-800 dark:text-white">🔬 Nouvelle Étude Photométrique</h4>
+    {showPhotoStudyModal&&<div className="fixed inset-0 z-50 flex items-center justify-center"><div className="absolute inset-0 bg-black/50" onClick={()=>{setShowPhotoStudyModal(false);setEditingStudy(null);setIsConvertingStudy(false)}}/><div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto p-6">
+      <h4 className="text-lg font-semibold mb-4 text-gray-800 dark:text-white">{isConvertingStudy ? "🔁 Convertir l’étude indépendante" : "🔬 Nouvelle Étude Photométrique"}</h4>
       {error&&<div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm mb-4">{error}</div>}
 
       {/* Sélecteur de mode : commande existante ou affaire libre */}
-      <div className="flex gap-2 mb-5">
-        <button onClick={()=>setPhotoStudyMode("order")} className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium border-2 transition-colors ${photoStudyMode==="order" ? "bg-sky-100 border-sky-500 text-sky-800" : "bg-gray-50 border-gray-300 text-gray-600 hover:bg-gray-100"}`}>
-          📋 Lier à une commande existante
-        </button>
-        <button onClick={()=>setPhotoStudyMode("standalone")} className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium border-2 transition-colors ${photoStudyMode==="standalone" ? "bg-amber-100 border-amber-500 text-amber-800" : "bg-gray-50 border-gray-300 text-gray-600 hover:bg-gray-100"}`}>
-          ✏️ Étude indépendante (affaire libre)
-        </button>
-      </div>
+      {isConvertingStudy ? (
+        <div className="mb-5 rounded-lg border-2 border-amber-400 bg-amber-50 p-3 text-sm text-amber-900">
+          🔁 Conversion de l&apos;étude indépendante en étude liée : choisissez la commande cible.
+          Les produits seront vérifiés et reliés aux articles existants par nom exact.
+        </div>
+      ) : (
+        <div className="flex gap-2 mb-5">
+          <button onClick={()=>setPhotoStudyMode("order")} className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium border-2 transition-colors ${photoStudyMode==="order" ? "bg-sky-100 border-sky-500 text-sky-800" : "bg-gray-50 border-gray-300 text-gray-600 hover:bg-gray-100"}`}>
+            📋 Lier à une commande existante
+          </button>
+          <button onClick={()=>setPhotoStudyMode("standalone")} className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium border-2 transition-colors ${photoStudyMode==="standalone" ? "bg-amber-100 border-amber-500 text-amber-800" : "bg-gray-50 border-gray-300 text-gray-600 hover:bg-gray-100"}`}>
+            ✏️ Étude indépendante (affaire libre)
+          </button>
+        </div>
+      )}
 
       <div className="space-y-4">
         {/* Cas 1 : Sélection d'une commande existante (recherche intelligente, liste contrôlée) */}
@@ -1358,7 +1399,7 @@ export default function OrdersView({ user }: { user: User }) {
         )}
       </div>
       <div className="flex justify-end gap-2 mt-6">
-        <button onClick={() => { setShowPhotoStudyModal(false); setEditingStudy(null); }} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Annuler</button>
+        <button onClick={() => { setShowPhotoStudyModal(false); setEditingStudy(null); setIsConvertingStudy(false); }} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Annuler</button>
         <button onClick={savePhotoStudy} disabled={photoStudySaving} className="px-6 py-2 text-sm bg-sky-600 text-white rounded-lg hover:bg-sky-700 disabled:opacity-50">
           {photoStudySaving ? "Enregistrement..." : editingStudy ? "💾 Enregistrer" : "🔬 Créer l'Étude"}
         </button>
@@ -1411,6 +1452,7 @@ export default function OrdersView({ user }: { user: User }) {
                     <td className="px-2 py-1.5 text-[10px] text-black">{study.createdByName}</td>
                     <td className="px-2 py-1.5 text-[10px] text-black">{fmtDate(study.createdAt)}</td>
                     <td className="px-2 py-1.5 text-[10px]">
+                      {ct() && <button onClick={() => openPhotoStudyConversion(study)} className="text-[9px] underline mr-2 text-amber-700">Convertir</button>}
                       {ct() && <button onClick={() => openPhotoStudyModal(study)} className="text-[9px] underline mr-2 text-black">Modifier</button>}
                       {cd && <button onClick={() => deletePhotoStudy(study.id)} className="text-[9px] underline text-red-700">Supprimer</button>}
                     </td>
