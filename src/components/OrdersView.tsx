@@ -864,8 +864,8 @@ export default function OrdersView({ user }: { user: User }) {
         <option value="TRES_URGENTE">Très Urgente (ancien)</option>
       </select>
       <label className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer flex items-center gap-1.5 border transition-colors ${ftel?"bg-sky-100 border-sky-500 text-sky-800 font-semibold":"bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200"}`}
-        title="N\u2019afficher que les commandes contenant des articles de la famille T\u00e9l\u00e9gestion">
-        <input type="checkbox" checked={ftel} onChange={e=>setFtel(e.target.checked)} className="accent-sky-600" />📡 T\u00e9l\u00e9gestion
+        title="N’afficher que les commandes contenant des articles de la famille Télégestion">
+        <input type="checkbox" checked={ftel} onChange={e=>setFtel(e.target.checked)} className="accent-sky-600" />📡 Télégestion
       </label>
       <button onClick={fetchOrders} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg text-sm hover:bg-gray-300">🔄 Actualiser</button>
       <label className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer flex items-center gap-1 transition-colors ${watchLive?"bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-400":"bg-gray-100 dark:bg-gray-800 text-gray-500 border border-gray-300 dark:border-gray-600"}`}>
