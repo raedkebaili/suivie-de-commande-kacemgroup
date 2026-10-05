@@ -19,6 +19,90 @@ import DocumentsPanel, { PendingDocumentsZone, uploadPendingDocuments, type Pend
 
 type FullOrder = Order & { totalQty?: number; totalDelivered?: number; totalProduced?: number; totalRemaining?: number; documentCount?: number; hasCahierDesCharges?: boolean };
 
+function normalizeOrderSearch(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+function orderMatchesSearch(order: FullOrder, query: string): boolean {
+  const haystack = [
+    order.orderNumber,
+    order.clientName,
+    order.clientCode,
+    order.affaire,
+    ...(order.items || []).map((item) => item.articleName),
+  ].map((value) => normalizeOrderSearch(value || ""));
+  return haystack.some((value) => value.includes(query));
+}
+
+function DebouncedSearchInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => setDraft(value), [value]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => onChange(draft), 180);
+    return () => window.clearTimeout(timer);
+  }, [draft, onChange]);
+
+  return (
+    <input
+      type="text"
+      placeholder="🔍 Filtrer dans le tableau..."
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm w-48 text-gray-700 dark:text-gray-200"
+    />
+  );
+}
+
+/**
+ * Garde la ligne d'une commande dépliée légère tant qu'elle est loin de la
+ * fenêtre. Le détail est monté à l'approche du viewport : toutes les données
+ * restent accessibles en défilant, mais React/DOM ne crée pas simultanément
+ * tous les tableaux d'articles et leurs composants techniques.
+ */
+function DeferredOrderDetails({
+  estimatedHeight,
+  children,
+}: {
+  estimatedHeight: number;
+  children: () => React.ReactNode;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element || typeof IntersectionObserver === "undefined") {
+      setVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "600px 0px" },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        contentVisibility: "auto",
+        containIntrinsicSize: `0 ${estimatedHeight}px`,
+        minHeight: visible ? undefined : estimatedHeight,
+      }}
+    >
+      {visible ? children() : null}
+    </div>
+  );
+}
+
 type SortField = "date" | "alpha" | "number";
 type SortDir = "asc" | "desc";
 
@@ -240,8 +324,17 @@ export default function OrdersView({ user }: { user: User }) {
   useEffect(()=>{if(dataVersion>0)refreshPlanningActive()},[dataVersion,refreshPlanningActive]);
   // Watch live auto-refresh
   useEffect(()=>{if(!watchLive)return;const iv=setInterval(fetchOrders,10000);return()=>clearInterval(iv)},[watchLive,fetchOrders]);
-  // Auto-expand on search
-  useEffect(()=>{if(searchTerm.length<2)return;const ids=new Set<number>();orders.forEach(o=>{if((o.orderNumber||"").toLowerCase().includes(searchTerm.toLowerCase())||(o.affaire||"").toLowerCase().includes(searchTerm.toLowerCase())||(o.clientName||"").toLowerCase().includes(searchTerm.toLowerCase())||(o.items||[]).some(i=>i.articleName.toLowerCase().includes(searchTerm.toLowerCase())))ids.add(o.id)});if(ids.size>0)setExpandedOrders(ids)},[searchTerm,orders]);
+  // Auto-expand only the matching orders after the debounced search value changes.
+  useEffect(() => {
+    const query = normalizeOrderSearch(searchTerm);
+    if (query.length < 2) return;
+    const matchingIds = new Set(orders.filter((order) => orderMatchesSearch(order, query)).map((order) => order.id));
+    if (matchingIds.size === 0) return;
+    setExpandedOrders((previous) => {
+      const unchanged = previous.size === matchingIds.size && [...matchingIds].every((id) => previous.has(id));
+      return unchanged ? previous : matchingIds;
+    });
+  }, [searchTerm, orders]);
 
   // Charger les modifications d'une commande
   const loadOrderModifications = useCallback(async (orderId: number) => {
@@ -301,11 +394,14 @@ export default function OrdersView({ user }: { user: User }) {
     setExpandedOrders(s);
   };
 
-  // Sort a copy of the fetched orders client-side based on the selected field/direction.
+  // Filtre et tri côté client. La recherche réduit réellement le nombre de
+  // commandes montées dans le DOM ; auparavant elle ne faisait qu'ouvrir les
+  // commandes correspondantes tout en conservant toutes les lignes affichées.
   const sortedOrders = useMemo(() => {
-    // Filtre « Planning de production » : appliqué côté client car il repose
-    // sur l'état temps réel du planning (articles réellement en cours).
-    let arr = [...orders];
+    const query = normalizeOrderSearch(searchTerm);
+    let arr = query.length >= 2
+      ? orders.filter((order) => orderMatchesSearch(order, query))
+      : [...orders];
     if (fs === "planning:EN_COURS") {
       arr = arr.filter(o => (o.items || []).some(i => !!i.id && planningActiveItems.has(i.id)));
     } else if (fs === "planning:NONE") {
@@ -325,7 +421,7 @@ export default function OrdersView({ user }: { user: User }) {
       return dir * (da - db);
     });
     return arr;
-  }, [orders, sortField, sortDir, fs, planningActiveItems]);
+  }, [orders, sortField, sortDir, fs, planningActiveItems, searchTerm]);
 
   // Empiler / Dépiler toutes les commandes en un clic.
   const allExpanded = sortedOrders.length > 0 && sortedOrders.every(o => expandedOrders.has(o.id));
@@ -403,7 +499,12 @@ export default function OrdersView({ user }: { user: User }) {
     setShowModal(false);rf();fetchOrders()}catch(err:unknown){setError(err instanceof Error?err.message:"Erreur");setSaving(false)}};
 
   const hd=async(id:number)=>{if(!confirm("Supprimer?"))return;await apiFetch(`/api/orders/${id}`,{method:"DELETE"});fetchOrders()};
-  const showExpeditionHistory=async(itemId:number)=>{setExpItemId(itemId);const d=await apiFetch<{batches:ExpeditionBatch[]}>(`/api/expedition/${itemId}`);setExpBatches(d.batches);setShowExpHistory(true)};
+  const showExpeditionHistory = useCallback(async (itemId: number) => {
+    setExpItemId(itemId);
+    const d = await apiFetch<{ batches: ExpeditionBatch[] }>(`/api/expedition/${itemId}`);
+    setExpBatches(d.batches);
+    setShowExpHistory(true);
+  }, []);
   const showModifications=async(orderId:number)=>{setModOrderId(orderId);const d=await apiFetch<{logs:typeof modLogs}>(`/api/order-modifications/${orderId}`);setModLogs(d.logs);setShowModHistory(true)};
   const ee=async()=>{const p=new URLSearchParams();if(fs.startsWith("comm:"))p.set("status",fs.slice(5));if(fa)p.set("agencyId",fa);const res=await fetch(`/api/orders/export?${p}`,{credentials:"same-origin"});if(!res.ok){alert("Erreur export");return}const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`commandes_${new Date().toISOString().split("T")[0]}.xlsx`;a.click();URL.revokeObjectURL(url)};
   const ai=()=>setFormItems([...formItems,{articleName:"",quantity:1,unitPrice:"",description:""}]);
@@ -652,7 +753,13 @@ export default function OrdersView({ user }: { user: User }) {
   const productionBadge=(state:string,productionStatus?:string|null)=>state==="cancelled"?"bg-[#FF2C2C] border-[#B81F1F]":state==="delivered"?"bg-green-400 border-green-800":state==="awaiting-delivery"?"bg-[#FFF700] border-[#B8A900]":productionStatus==="EN_PRODUCTION"?"bg-yellow-300 border-yellow-700":"bg-violet-300 border-violet-700";
   const orderRowClass=(state:string,commercialStatus:string)=>state==="neutral"&&commercialStatus==="PREVISION"?"bg-[#FFD3AC] hover:bg-[#ffc28c] border-orange-600":ORDER_STATE_ROW_CLASSES[state as keyof typeof ORDER_STATE_ROW_CLASSES];
   const orderPanelClass=(state:string,commercialStatus:string)=>state==="neutral"&&commercialStatus==="PREVISION"?"bg-[#FFD3AC] border-orange-600":ORDER_STATE_PANEL_CLASSES[state as keyof typeof ORDER_STATE_PANEL_CLASSES];
-  const highlight=(text:string)=>{if(!searchTerm||searchTerm.length<2)return text;const idx=text.toLowerCase().indexOf(searchTerm.toLowerCase());if(idx<0)return text;return <>{text.slice(0,idx)}<mark className="bg-yellow-300 dark:bg-yellow-500 text-black px-0.5 rounded">{text.slice(idx,idx+searchTerm.length)}</mark>{text.slice(idx+searchTerm.length)}</>};
+  const highlight = useCallback((text: string) => {
+    if (!searchTerm || searchTerm.length < 2) return text;
+    const query = searchTerm.toLowerCase();
+    const idx = text.toLowerCase().indexOf(query);
+    if (idx < 0) return text;
+    return <>{text.slice(0, idx)}<mark className="bg-yellow-300 dark:bg-yellow-500 text-black px-0.5 rounded">{text.slice(idx, idx + searchTerm.length)}</mark>{text.slice(idx + searchTerm.length)}</>;
+  }, [searchTerm]);
 
   return (<div className="space-y-3 operational-content">
     <div className="flex flex-wrap gap-2 items-center">
@@ -697,8 +804,7 @@ export default function OrdersView({ user }: { user: User }) {
         <input type="checkbox" checked={watchLive} onChange={e=>setWatchLive(e.target.checked)} className="sr-only" />
         <span className={`w-2 h-2 rounded-full ${watchLive?"bg-green-500 animate-pulse":""}`}></span>📡 Live
       </label>
-      <input type="text" placeholder="🔍 Filtrer dans le tableau..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)}
-        className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm w-48 text-gray-700 dark:text-gray-200" />
+      <DebouncedSearchInput value={searchTerm} onChange={setSearchTerm} />
       <div className="flex items-center gap-1 ml-1">
         <span className="text-xs text-gray-500 dark:text-gray-400">Trier par</span>
         <select value={sortField} onChange={e=>setSortField(e.target.value as SortField)}
@@ -781,11 +887,13 @@ export default function OrdersView({ user }: { user: User }) {
         <td className="px-2 py-1.5 text-right" onClick={e=>e.stopPropagation()}><button onClick={()=>oe(o)} className="px-2 py-1 text-[10px] bg-white/70 border border-black/30 text-black rounded">Détails</button>{cd&&<button onClick={()=>hd(o.id)} className="ml-1 px-2 py-1 text-[10px] bg-white/70 border border-black/30 text-black rounded">✕</button>}</td>
       </tr>
       {expanded&&o.items&&o.items.length>0&&<tr key={`${o.id}-exp`} className={`text-black [&_td]:text-black [&_span]:text-black [&_b]:text-black ${orderPanelClass(visualState,o.status)}`}><td colSpan={visibleColCount} className="px-2 py-2">
+        <DeferredOrderDetails estimatedHeight={Math.max(180, o.items.length * 42 + 80)}>
+          {() => (
         <table className="w-full text-[11px] border-collapse"><thead><tr className="text-left text-black border-b border-black/30">
           <th className="px-1 py-1">Article</th><th className="px-1 py-1">Cmd</th><th className="px-1 py-1">Unité</th><th className="px-1 py-1">Prod</th><th className="px-1 py-1">Livré</th><th className="px-1 py-1">Stock</th><th className="px-1 py-1">Reste à livrer</th>
           <th className="px-1 py-1">Besoin</th><th className="px-1 py-1">Spécs Tech</th><th className="px-1 py-1">Note</th><th className="px-1 py-1">Expéd</th>
         </tr></thead><tbody>
-        {o.items.map(it => (
+        {o.items!.map(it => (
           <OrderItemRow
             key={it.id}
             item={it}
@@ -824,6 +932,8 @@ export default function OrdersView({ user }: { user: User }) {
           </React.Fragment>
         ))}
         </tbody></table>
+          )}
+        </DeferredOrderDetails>
       </td></tr>}
       </React.Fragment>)})}
     </tbody></table></div></div>}

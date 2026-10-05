@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type { ArticleGroup } from "@/lib/article-grouping";
 
@@ -14,7 +14,7 @@ type Totals = { groups: number; lines: number; quantity: number; produced: numbe
  * rafraîchissement du tableau des commandes (prop refreshKey), donc les
  * nouvelles commandes apparaissent automatiquement.
  */
-export default function ArticleGroupingView({
+function ArticleGroupingView({
   filters,
   refreshKey,
 }: {
@@ -27,7 +27,13 @@ export default function ArticleGroupingView({
   const [error, setError] = useState("");
   const [open, setOpen] = useState(true);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearch(searchDraft), 180);
+    return () => window.clearTimeout(timer);
+  }, [searchDraft]);
 
   const query = useMemo(() => {
     const p = new URLSearchParams();
@@ -101,7 +107,7 @@ export default function ArticleGroupingView({
         <span className="text-[11px] text-gray-400 italic">Regroupement sur les 3 premiers caractères du nom d&apos;article</span>
         <div className="flex-1" />
         {open && <>
-          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Filtrer article, affaire, client..."
+          <input type="text" value={searchDraft} onChange={e => setSearchDraft(e.target.value)} placeholder="🔍 Filtrer article, affaire, client..."
             className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm w-56 text-gray-700 dark:text-gray-200" />
           <button onClick={load} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg text-sm hover:bg-gray-300">🔄 Actualiser</button>
           <button onClick={exportXlsx} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">📤 Exporter</button>
@@ -201,3 +207,10 @@ export default function ArticleGroupingView({
     </div>
   );
 }
+
+export default memo(ArticleGroupingView, (previous, next) =>
+  previous.refreshKey === next.refreshKey &&
+  previous.filters.status === next.filters.status &&
+  previous.filters.agency === next.filters.agency &&
+  previous.filters.priority === next.filters.priority,
+);

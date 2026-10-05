@@ -22,7 +22,7 @@ type OrderItemRowProps = {
  * Composant pour afficher une ligne d'article dans le tableau de commande.
  * Applique la coloration des champs modifiés.
  */
-export default function OrderItemRow({
+function OrderItemRow({
   item,
   orderId,
   visualState,
@@ -184,3 +184,5 @@ export default function OrderItemRow({
     </tr>
   );
 }
+
+export default React.memo(OrderItemRow);
