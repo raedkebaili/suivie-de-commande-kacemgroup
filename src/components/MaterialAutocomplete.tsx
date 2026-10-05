@@ -245,7 +245,7 @@ export default function MaterialAutocomplete({
       {isOpen && !loading && suggestions.length === 0 && value.length >= 1 && (
         <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg p-3">
           <div className="text-sm text-gray-500 text-center">
-            Aucune matière trouvée pour "{value}"
+            Aucune matière trouvée pour &quot;{value}&quot;
           </div>
         </div>
       )}

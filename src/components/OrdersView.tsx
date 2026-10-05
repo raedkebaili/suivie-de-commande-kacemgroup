@@ -898,10 +898,10 @@ export default function OrdersView({ user }: { user: User }) {
       </fieldset>}
 
       </div>
-      {/* DOCUMENTS DE L'AFFAIRE — réutilise le module Stockage (Google Drive) existant.
+      {/* DOCUMENTS DE L&apos;AFFAIRE — réutilise le module Stockage (Google Drive) existant.
           En modification : upload/lien immédiat ; en création : les fichiers sont
           mis en attente puis envoyés juste après l'enregistrement de la commande. */}
-      {(editingOrder||["superadmin","commercial","technique"].includes(user.role))&&<fieldset className="border border-indigo-200 dark:border-indigo-800 rounded-xl p-4 bg-indigo-50/30 dark:bg-indigo-900/10"><legend className="text-sm font-bold text-indigo-700 dark:text-indigo-300 px-2">📎 DOCUMENTS DE L'AFFAIRE</legend>
+      {(editingOrder||["superadmin","commercial","technique"].includes(user.role))&&<fieldset className="border border-indigo-200 dark:border-indigo-800 rounded-xl p-4 bg-indigo-50/30 dark:bg-indigo-900/10"><legend className="text-sm font-bold text-indigo-700 dark:text-indigo-300 px-2">📎 DOCUMENTS DE L&apos;AFFAIRE</legend>
         {editingOrder?(
           <DocumentsPanel entity="order" entityId={editingOrder.id} user={user}
             canAdd={["superadmin","commercial","technique"].includes(user.role)}

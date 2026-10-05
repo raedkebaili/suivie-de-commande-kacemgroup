@@ -291,7 +291,7 @@ export default function CategoryMaterialSelect({
       {isOpen && !loading && suggestions.length === 0 && query.length > 0 && !query.includes("—") && (
         <div className="mt-1 bg-white border border-gray-300 rounded-lg shadow-lg p-2">
           <div className="text-xs text-gray-500 text-center">
-            Aucune matière trouvée pour "{query}"
+            Aucune matière trouvée pour &quot;{query}&quot;
           </div>
         </div>
       )}

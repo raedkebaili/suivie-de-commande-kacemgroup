@@ -172,7 +172,7 @@ export default function ColorsView({ user }: { user: User }) {
         <div>
           <h2 className="text-xl font-bold text-gray-800 dark:text-white">🎨 Gestion des Couleurs</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Personnalisez les couleurs des statuts et indicateurs de l'application
+            Personnalisez les couleurs des statuts et indicateurs de l&apos;application
           </p>
         </div>
         <button
@@ -344,9 +344,9 @@ export default function ColorsView({ user }: { user: User }) {
         <h4 className="font-medium text-blue-800 dark:text-blue-300 mb-2">💡 Conseils</h4>
         <ul className="text-sm text-blue-700 dark:text-blue-400 space-y-1">
           <li>• La couleur du texte est calculée automatiquement pour garantir une bonne lisibilité</li>
-          <li>• Les modifications sont appliquées immédiatement dans toute l'application</li>
+          <li>• Les modifications sont appliquées immédiatement dans toute l&apos;application</li>
           <li>• Utilisez des couleurs contrastées pour une meilleure accessibilité</li>
-          <li>• Cliquez sur "↺" pour restaurer une couleur à sa valeur par défaut</li>
+          <li>• Cliquez sur &quot;↺&quot; pour restaurer une couleur à sa valeur par défaut</li>
         </ul>
       </div>
 
