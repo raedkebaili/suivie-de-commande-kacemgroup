@@ -494,8 +494,10 @@ export default function OrdersView({ user }: { user: User }) {
   // Charger les études indépendantes au montage
   useEffect(() => { fetchStandaloneStudies(); }, [fetchStandaloneStudies]);
 
-  const lensCategory = materialCategories.find(c => c.key === "lens" || c.name.toLowerCase().includes("lentille"));
-  const lensMaterials = lensCategory ? materials.filter(m => m.categoryId === lensCategory.id) : [];
+  const lensMaterials = useMemo(() => {
+    const lensCategory = materialCategories.find(c => c.key === "lens" || c.name.toLowerCase().includes("lentille"));
+    return lensCategory ? materials.filter(m => m.categoryId === lensCategory.id) : [];
+  }, [materialCategories, materials]);
 
   // ── ÉVOLUTION ÉTUDES §3-§5 : articles strictement ∈ commande sélectionnée ──
   // Au changement de commande : recharger les articles, invalider les lignes
@@ -556,7 +558,6 @@ export default function OrdersView({ user }: { user: User }) {
       }
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPhotoStudyModal, photoStudyMode, photoStudyForm.orderId]);
 
   // Options de recherche (listes contrôlées + SearchSelect).

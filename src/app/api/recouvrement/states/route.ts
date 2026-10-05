@@ -68,7 +68,6 @@ export async function POST(request: NextRequest) {
     const baseKey = recouvrementKeyFromLabel(label);
     let key = baseKey;
     let suffix = 2;
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       const [dup] = await db.select({ id: recouvrementStates.id }).from(recouvrementStates).where(eq(recouvrementStates.key, key)).limit(1);
       if (!dup) break;

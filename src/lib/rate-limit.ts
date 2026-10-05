@@ -6,7 +6,6 @@
 type Bucket = { count: number; resetAt: number };
 
 declare global {
-  // eslint-disable-next-line no-var
   var __rateLimitBuckets: Map<string, Bucket> | undefined;
 }
 

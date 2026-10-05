@@ -163,7 +163,6 @@ export async function POST(request: NextRequest) {
     if (rows.length === 0) return;
     const chunkSize = 200;
     for (let i = 0; i < rows.length; i += chunkSize) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await tx.insert(table).values(rows.slice(i, i + chunkSize) as any);
     }
   };
