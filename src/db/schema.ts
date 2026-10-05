@@ -386,9 +386,10 @@ export const storageConfig = pgTable("storage_config", {
 
 // ── Usines (unités de production) ───────────────────────────────────
 // Chaque usine possède son propre planning de production.
-// Le NOM de l'usine est recopié dans order_items.production_unit lors de la
-// planification, afin que le tableau des commandes et l'export Excel
-// continuent d'afficher l'unité de production exactement comme avant.
+// Le NOM de l'usine est recopié dans order_items.production_unit lors de
+// la présélection/modification par le service planification ou lors de
+// l'ajout au planning, afin que le tableau des commandes et l'export Excel
+// affichent la même unité de production.
 export const factories = pgTable("factories", {
   id: serial("id").primaryKey(),
   code: text("code").notNull().unique(),

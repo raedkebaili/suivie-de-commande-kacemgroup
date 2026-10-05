@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { orders, orderItems, productionBatches, expeditionBatches, modificationLogs, notifications, itemTechnicalComponents, matieres, materialCategories } from "@/db/schema";
+import { orders, orderItems, productionBatches, expeditionBatches, modificationLogs, notifications, itemTechnicalComponents, matieres, materialCategories, factories } from "@/db/schema";
 import { eq, count } from "drizzle-orm";
 import { logActivity, logModification, getUserFromHeaders, notifyUser } from "@/lib/auth";
 
@@ -254,12 +254,36 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       if (body.productionStatus === "ANNULEE") { updates.cancelReason = body.cancelReason || null; updates.cancelledBy = a.user.fullName; updates.cancelledAt = now; }
     }
     if (body.itemUpdates && Array.isArray(body.itemUpdates)) {
+      // Préparer et valider toutes les unités avant la moindre écriture.
+      // L'unité est la copie métier du nom d'une usine configurée ; une valeur
+      // libre ne doit pas pouvoir contourner le référentiel des usines.
+      const preparedItemUpdates: { itemId: number; set: Record<string, unknown> }[] = [];
       for (const iu of body.itemUpdates) {
         if (!iu.itemId) continue;
+        const itemId = parseInt(String(iu.itemId));
+        if (!Number.isFinite(itemId)) continue;
+        const [ownedItem] = await db.select({ id: orderItems.id, orderId: orderItems.orderId })
+          .from(orderItems).where(eq(orderItems.id, itemId)).limit(1);
+        if (!ownedItem || ownedItem.orderId !== oid) continue;
+
         const set: Record<string, unknown> = {};
-        if (iu.productionUnit !== undefined) set.productionUnit = iu.productionUnit || null;
+        if (iu.productionUnit !== undefined) {
+          const productionUnit = String(iu.productionUnit || "").trim();
+          if (productionUnit) {
+            const [factory] = await db.select({ name: factories.name, active: factories.active })
+              .from(factories).where(eq(factories.name, productionUnit)).limit(1);
+            if (!factory) return NextResponse.json({ error: `Unité de production inconnue : ${productionUnit}` }, { status: 400 });
+            if (!factory.active) return NextResponse.json({ error: `Cette unité de production est désactivée : ${productionUnit}` }, { status: 400 });
+            set.productionUnit = factory.name;
+          } else {
+            set.productionUnit = null;
+          }
+        }
         if (iu.plannedLoadingDate !== undefined) set.plannedLoadingDate = iu.plannedLoadingDate || null;
-        if (Object.keys(set).length > 0) await db.update(orderItems).set(set).where(eq(orderItems.id, parseInt(iu.itemId)));
+        if (Object.keys(set).length > 0) preparedItemUpdates.push({ itemId, set });
+      }
+      for (const update of preparedItemUpdates) {
+        await db.update(orderItems).set(update.set).where(eq(orderItems.id, update.itemId));
       }
     }
     updates.planifCompleted = true;

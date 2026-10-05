@@ -152,9 +152,9 @@ export async function POST(request: NextRequest) {
       }).returning();
 
       // L'unité de production de l'article reçoit le NOM DE L'USINE : le
-      // tableau des commandes et l'export Excel continuent de l'afficher
-      // exactement comme avant (colonne « Unité »), désormais alimentée
-      // automatiquement par la planification.
+      // tableau des commandes et l'export Excel affichent ainsi la même
+      // valeur que celle éventuellement présélectionnée dans les détails
+      // de la commande.
       await db.update(orderItems).set({ productionUnit: factory.name }).where(eq(orderItems.id, row.itemId));
 
       created.push(entry);

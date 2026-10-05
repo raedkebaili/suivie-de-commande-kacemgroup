@@ -202,7 +202,7 @@ export default function OrdersView({ user }: { user: User }) {
   // Visibilité des colonnes (admin) — défaut : toutes visibles (comportement historique)
   const [ff, setFf] = useState(""); // filtre par usine (unité de production)
   const [ftel, setFtel] = useState(false); // filtre famille télégestion
-  const [factoryList, setFactoryList] = useState<{id:number;code:string;name:string}[]>([]);
+  const [factoryList, setFactoryList] = useState<{id:number;code:string;name:string;active:boolean}[]>([]);
   const [hiddenCols, setHiddenCols] = useState<string[]>([]);
   const [hiddenProdStates, setHiddenProdStates] = useState<string[]>([]);
   const [hideTotalRow, setHideTotalRow] = useState(false);
@@ -316,7 +316,7 @@ export default function OrdersView({ user }: { user: User }) {
     apiFetch<{hiddenColumns:string[];hiddenProductionStates?:string[];hideTotalRow?:boolean}>("/api/orders/column-visibility").then(d=>{setHiddenCols(d.hiddenColumns||[]);setHiddenProdStates(d.hiddenProductionStates||[]);setHideTotalRow(!!d.hideTotalRow)}).catch(()=>{}),
     apiFetch<{assignments:ClientRecouvrementAssignment[]}>("/api/recouvrement/client-states").then(d=>setRecouvByClient(new Map(d.assignments.map(a=>[a.clientId,a])))).catch(()=>{}),
     apiFetch<{itemIds:number[]}>("/api/production-planning/active").then(d=>setPlanningActiveItems(new Set(d.itemIds||[]))).catch(()=>{}),
-    apiFetch<{factories:{id:number;code:string;name:string}[]}>("/api/factories").then(d=>setFactoryList(d.factories)).catch(()=>{}),
+    apiFetch<{factories:{id:number;code:string;name:string;active:boolean}[]}>("/api/factories").then(d=>setFactoryList(d.factories)).catch(()=>{}),
   ]).finally(()=>setLoading(false))},[fetchOrders]);
   // Planning actif : recalculé à chaque rafraîchissement des commandes (temps réel)
   const refreshPlanningActive=useCallback(async()=>{
@@ -494,10 +494,23 @@ export default function OrdersView({ user }: { user: User }) {
       await apiFetch(`/api/orders/${editingOrder.id}`,{method:"PUT",body:JSON.stringify({dynamicTechItems})});
     }
     if(cp()&&editingOrder){
-      // Send per-item productionUnit + plannedLoadingDate
-      // L'unité de production n'est plus envoyée depuis ce formulaire : elle est
-      // pilotée par l'usine choisie dans le planning de production.
-      const itemUpdates = Object.keys(itemLoadingDates).map(k => ({itemId: parseInt(k), plannedLoadingDate: itemLoadingDates[parseInt(k)] || undefined}));
+      // Le responsable planification peut présélectionner ou modifier l'usine
+      // directement depuis les détails de la commande. Le planning continue à
+      // utiliser la même valeur order_items.production_unit.
+      const itemUpdates = formItems
+        .filter(item => item.id)
+        .map(item => {
+          const original = editingOrder.items?.find(existing => existing.id === item.id);
+          const update: { itemId: number; productionUnit?: string | null; plannedLoadingDate?: string } = { itemId: item.id! };
+          if ((item.productionUnit || "") !== (original?.productionUnit || "")) {
+            update.productionUnit = item.productionUnit || null;
+          }
+          if (itemLoadingDates[item.id!] !== undefined) {
+            update.plannedLoadingDate = itemLoadingDates[item.id!] || undefined;
+          }
+          return update;
+        })
+        .filter(update => update.productionUnit !== undefined || update.plannedLoadingDate !== undefined);
       await apiFetch(`/api/orders/${editingOrder.id}`,{method:"PUT",body:JSON.stringify({priority:form.priority,productionStatus:form.productionStatus,statusReason:form.statusReason,cancelReason:form.cancelReason,itemUpdates})});
     }
     setShowModal(false);rf();fetchOrders()}catch(err:unknown){setError(err instanceof Error?err.message:"Erreur");setSaving(false)}};
@@ -1196,16 +1209,33 @@ export default function OrdersView({ user }: { user: User }) {
         {form.productionStatus==="ANNULEE"&&<div className="md:col-span-2"><F l="Cause annulation" v={form.cancelReason} onChange={v=>setForm({...form,cancelReason:v})}/></div>}
       </div>
       <div className="text-xs font-medium text-gray-600 mb-2">Unité Production par article :</div>
-      {/* L'unité de production n'est plus saisie ici : elle est désormais
-          déterminée par l'USINE choisie dans l'onglet « Planning production ».
-          Elle reste affichée (lecture seule) et continue d'apparaître dans le
-          tableau des commandes et l'export, comme auparavant. */}
-      {editingOrder.items?.filter(i=>i.id).map(it=><div key={it.id} className="flex items-center gap-2 mb-2">
-        <span className="text-[11px] text-gray-600 w-24 truncate">{it.articleName}</span>
-        <span className="flex-1 px-2 py-1 border border-gray-200 bg-gray-50 rounded text-xs text-gray-600" title="Usine définie lors de la planification de production">
-          🏭 {it.productionUnit || <span className="italic text-gray-400">Usine non planifiée</span>}
-        </span>
-      </div>)}
+      <p className="text-[10px] text-gray-500 mb-2">
+        Le responsable planification peut présélectionner ou modifier l&apos;unité ici ; le planning de production peut ensuite la reprendre ou la changer.
+      </p>
+      {editingOrder.items?.filter(i=>i.id).map(it=>{
+        const selectedUnit = formItems.find(item => item.id === it.id)?.productionUnit ?? it.productionUnit ?? "";
+        const activeFactories = factoryList.filter(factory => factory.active);
+        return <div key={it.id} className="flex items-center gap-2 mb-2">
+          <span className="text-[11px] text-gray-600 w-24 truncate" title={it.articleName}>{it.articleName}</span>
+          <select
+            value={selectedUnit}
+            onChange={event => setFormItems(current => current.map(item => item.id === it.id
+              ? { ...item, productionUnit: event.target.value }
+              : item
+            ))}
+            className="flex-1 px-2 py-1 border border-emerald-300 bg-white rounded text-xs text-gray-700"
+            title="Unité de production de l'article"
+          >
+            <option value="">— Non affectée —</option>
+            {selectedUnit && !activeFactories.some(factory => factory.name === selectedUnit) && (
+              <option value={selectedUnit}>{selectedUnit} (ancienne unité)</option>
+            )}
+            {activeFactories.map(factory => (
+              <option key={factory.id} value={factory.name}>🏭 {factory.name} ({factory.code})</option>
+            ))}
+          </select>
+        </div>;
+      })}
       </fieldset>}
 
       </div>
