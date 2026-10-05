@@ -29,7 +29,7 @@ Sur votre ordinateur, vous avez besoin de :
 
 | Outil | Pourquoi | Vérifier |
 |-------|----------|----------|
-| **Node.js 18+** | Pour exécuter les migrations | `node --version` |
+| **Node.js 20.9+** | Requis par Next.js 16 et pour exécuter les migrations | `node --version` |
 | **npm** | Pour installer les dépendances | `npm --version` |
 | **Git** | Pour pousser le code sur GitHub | `git --version` |
 
@@ -153,7 +153,9 @@ C'est l'étape la plus importante. Sur l'écran de configuration du projet :
 | Name | Value |
 |------|-------|
 | `DATABASE_URL` | *(collez l'URL Neon copiée à l'étape 2.3)* |
-| `JWT_SECRET` | *(voir ci-dessous pour générer)* |
+| `JWT_SECRET` | *(secret aléatoire d'au moins 32 caractères)* |
+| `APP_ENCRYPTION_KEY` | *(clé hexadécimale aléatoire de 64 caractères)* |
+| `BACKUP_SECRET` | *(secret aléatoire pour les sauvegardes automatiques)* |
 
 **Pour générer le JWT_SECRET**, ouvrez un terminal et exécutez :
 
@@ -162,6 +164,15 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```
 
 Copiez la chaîne de 96 caractères affichée et collez-la comme valeur de `JWT_SECRET`.
+
+Générez également les deux secrets suivants et renseignez-les dans Vercel :
+
+```bash
+# APP_ENCRYPTION_KEY — 32 octets, soit 64 caractères hexadécimaux
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+# BACKUP_SECRET — secret indépendant pour les sauvegardes automatiques
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
 
 **Exemple** (ne pas utiliser cette valeur, générez la vôtre) :
 ```
@@ -266,7 +277,9 @@ L'écran de connexion s'affiche. Utilisez les identifiants par défaut :
 
 ```
 Identifiant : admin
-Mot de passe : admin123
+Mot de passe temporaire : communiqué par la procédure d’installation
+
+Le changement du mot de passe est obligatoire lors de la première connexion.
 ```
 
 > ⚠️ **CHANGEZ IMMÉDIATEMENT le mot de passe** après la première connexion
@@ -445,7 +458,7 @@ git push
 
 # ── 8. Ouvrir l'application ──
 # → https://votre-projet.vercel.app
-# → Compte : admin / admin123
+# → Compte : admin ; mot de passe temporaire, changement obligatoire
 ```
 
 ---

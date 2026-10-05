@@ -17,7 +17,7 @@
 
 | Composant | Version | Téléchargement |
 |-----------|---------|----------------|
-| Node.js | 18+ LTS | https://nodejs.org |
+| Node.js | 20.9+ LTS | https://nodejs.org |
 | PostgreSQL | 14+ | https://www.postgresql.org |
 | Inno Setup | 7.x | https://jrsoftware.org/isinfo.php |
 | Git | (optionnel) | https://git-scm.com |
@@ -157,7 +157,7 @@ Identifiants par défaut :
 
 ```
 Compte       : admin
-Mot de passe : admin123
+Mot de passe temporaire : communiqué par la procédure d’installation
 ```
 
 ⚠️ **CHANGEZ LE MOT DE PASSE IMMÉDIATEMENT** depuis l'onglet Utilisateurs.

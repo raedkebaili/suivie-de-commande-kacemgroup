@@ -97,14 +97,22 @@ if not exist ".env.example" (
 )
 if not exist ".env" (
     copy /Y ".env.example" ".env" >nul
-    REM Generer automatiquement un JWT_SECRET securise
-    for /f "delims=" %%S in ('node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"') do (
-        powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Content '.env') -replace 'change-this-to-a-random-secret-string-at-least-32-chars', '%%S' | Set-Content '.env'"
-    )
-    echo [OK] Fichier .env cree avec cle JWT securisee.
+    echo [OK] Fichier .env cree depuis le modele.
 ) else (
     echo [OK] Fichier .env existant conserve.
 )
+REM Remplacer uniquement les marqueurs du modele : une configuration existante
+REM contenant deja des secrets valides reste intacte.
+for /f "delims=" %%S in ('node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"') do (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Content '.env') -replace 'change-this-to-a-random-secret-string-at-least-32-chars', '%%S' | Set-Content '.env'"
+)
+for /f "delims=" %%S in ('node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"') do (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Content '.env') -replace 'change-this-to-64-hexadecimal-chars-from-randombytes32', '%%S' | Set-Content '.env'"
+)
+for /f "delims=" %%S in ('node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"') do (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Content '.env') -replace 'change-this-to-a-random-hex-string', '%%S' | Set-Content '.env'"
+)
+echo [OK] Secrets JWT, chiffrement et sauvegarde verifies/generes si necessaire.
 if not exist "backups" mkdir backups
 
 REM Lire DATABASE_URL sans supposer le nom de la base.
@@ -192,7 +200,7 @@ echo ============================================================
 echo Installation terminee.
 echo Adresse      : http://localhost:3000
 echo Compte       : admin
-echo Mot de passe : admin123
+echo Mot de passe : temporaire, changement obligatoire
 echo Pour arreter : fermer la fenetre du serveur.
 echo ============================================================
 echo.

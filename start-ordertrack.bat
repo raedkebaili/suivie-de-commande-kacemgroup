@@ -83,7 +83,7 @@ if not errorlevel 1 (
         echo   OrderTrack Pro demarre [SERVICE WINDOWS]
         echo   Adresse locale  : http://localhost:3000
         if defined LOCAL_IP echo   Adresse reseau  : http://!LOCAL_IP!:3000
-        echo   Compte          : admin / admin123
+        echo   Compte          : admin / mot de passe temporaire
         echo ============================================================
         start "" "http://localhost:3000"
         timeout /t 3 /nobreak >nul 2>&1
@@ -115,7 +115,7 @@ if not errorlevel 1 (
         echo   OrderTrack Pro demarre [TACHE PLANIFIEE]
         echo   Adresse locale  : http://localhost:3000
         if defined LOCAL_IP echo   Adresse reseau  : http://!LOCAL_IP!:3000
-        echo   Compte          : admin / admin123
+        echo   Compte          : admin / mot de passe temporaire
         echo ============================================================
         start "" "http://localhost:3000"
         timeout /t 3 /nobreak >nul 2>&1
@@ -133,7 +133,7 @@ echo.
 echo ============================================================
 echo   Adresse locale  : http://localhost:3000
 if defined LOCAL_IP echo   Adresse reseau  : http://!LOCAL_IP!:3000
-echo   Compte          : admin / admin123
+echo   Compte          : admin / mot de passe temporaire
 echo ============================================================
 echo.
 echo ATTENTION: Ne fermez pas cette fenetre.
