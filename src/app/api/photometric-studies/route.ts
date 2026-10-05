@@ -142,18 +142,18 @@ export async function GET(request: NextRequest) {
   if (orderIds.length > 0) {
     studiesQuery = db.select().from(photometricStudies)
       .where(inArray(photometricStudies.orderId, orderIds))
-      .orderBy(desc(photometricStudies.createdAt));
+      .orderBy(desc(photometricStudies.updatedAt), desc(photometricStudies.createdAt));
   } else if (orderId) {
     studiesQuery = db.select().from(photometricStudies)
       .where(eq(photometricStudies.orderId, parseInt(orderId)))
-      .orderBy(desc(photometricStudies.createdAt));
+      .orderBy(desc(photometricStudies.updatedAt), desc(photometricStudies.createdAt));
   } else if (standalone === "1") {
     studiesQuery = db.select().from(photometricStudies)
       .where(isNull(photometricStudies.orderId))
-      .orderBy(desc(photometricStudies.createdAt)).limit(500);
+      .orderBy(desc(photometricStudies.updatedAt), desc(photometricStudies.createdAt)).limit(500);
   } else {
     studiesQuery = db.select().from(photometricStudies)
-      .orderBy(desc(photometricStudies.createdAt)).limit(500);
+      .orderBy(desc(photometricStudies.updatedAt), desc(photometricStudies.createdAt)).limit(500);
   }
 
   const studyRows = await studiesQuery;
@@ -228,7 +228,9 @@ export async function GET(request: NextRequest) {
     studyDocument: docByStudy.get(s.id)?.latest || null,
   }));
 
-  return NextResponse.json({ studies });
+  return NextResponse.json({ studies }, {
+    headers: { "Cache-Control": "private, no-store, max-age=0" },
+  });
 }
 
 /**

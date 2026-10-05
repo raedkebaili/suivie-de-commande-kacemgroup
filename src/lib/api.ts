@@ -11,6 +11,9 @@ export async function apiFetch<T = unknown>(url: string, options: RequestInit = 
 
   const res = await fetch(url, {
     ...options,
+    // Les tableaux opérationnels (notamment les études photométriques) doivent
+    // toujours relire l'état serveur après une création ou une modification.
+    cache: options.cache ?? "no-store",
     credentials: options.credentials ?? "same-origin",
     headers,
   });

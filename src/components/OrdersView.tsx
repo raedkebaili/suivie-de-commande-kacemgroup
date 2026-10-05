@@ -7,7 +7,7 @@ import ArticleGroupingView from "@/components/ArticleGroupingView";
 import AutocompleteInput from "@/components/AutocompleteInput";
 import CategoryMaterialSelect from "@/components/CategoryMaterialSelect";
 import SearchSelect, { type SearchOption } from "@/components/SearchSelect";
-import { articleLensToValue, LENS_OVERRIDE_MESSAGE, lensSourceBadge, resolveStudyLens } from "@/lib/study-lens";
+import { articleLensToValue, LENS_OVERRIDE_MESSAGE, lensSourceBadge, latestStudyItemForOrderItem, resolveStudyLens } from "@/lib/study-lens";
 import { sanitizeItemsOnOrderChange, type ArticleOption } from "@/lib/study-search";
 import { PRIORITY_LABELS } from "@/lib/types";
 import { PRIORITY_OPTIONS, priorityColorKey, priorityLabel } from "@/lib/priority";
@@ -561,8 +561,8 @@ export default function OrdersView({ user }: { user: User }) {
     });
   }, [orderStudies]);
 
-  const loadStudiesForOrder = useCallback(async (orderId: number): Promise<PhotoStudy[]> => {
-    if (orderStudies.has(orderId)) return orderStudies.get(orderId) || [];
+  const loadStudiesForOrder = useCallback(async (orderId: number, force = false): Promise<PhotoStudy[]> => {
+    if (!force && orderStudies.has(orderId)) return orderStudies.get(orderId) || [];
     try {
       const d = await apiFetch<{ studies: PhotoStudy[] }>(`/api/photometric-studies?orderId=${orderId}`);
       setOrderStudies(prev => new Map(prev).set(orderId, d.studies));
@@ -631,13 +631,18 @@ export default function OrdersView({ user }: { user: User }) {
         if (up.failed.length > 0) alert(`Étude enregistrée, mais ${up.failed.length} document(s) n'ont pas pu être envoyés :\n` + up.failed.map(f => `• ${f.name}: ${f.reason}`).join("\n"));
         setPendingStudyDocs([]);
       }
+      // Recharger immédiatement le cache affiché après l'enregistrement.
+      // L'ancienne version supprimait seulement l'entrée du cache : une ligne
+      // d'étude pouvait donc rester absente jusqu'au prochain dépliage.
+      if (photoStudyMode === "order" && photoStudyForm.orderId) {
+        await loadStudiesForOrder(parseInt(photoStudyForm.orderId), true);
+      }
+      if (photoStudyMode === "standalone") {
+        await fetchStandaloneStudies();
+      }
       setShowPhotoStudyModal(false);
       setEditingStudy(null);
-      if (photoStudyMode === "order" && photoStudyForm.orderId) {
-        setOrderStudies(prev => { const n = new Map(prev); n.delete(parseInt(photoStudyForm.orderId)); return n; });
-      }
-      fetchStandaloneStudies();
-      fetchOrders();
+      await fetchOrders();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Erreur");
     } finally {
@@ -647,11 +652,16 @@ export default function OrdersView({ user }: { user: User }) {
 
   const deletePhotoStudy = async (studyId: number) => {
     if (!confirm("Supprimer cette étude photométrique ?")) return;
+    const linkedOrderId = [...orderStudies.entries()]
+      .find(([, studies]) => studies.some(study => study.id === studyId))?.[0] || null;
     try {
       await apiFetch("/api/photometric-studies", { method: "DELETE", body: JSON.stringify({ id: studyId }) });
-      setOrderStudies(new Map()); // Invalider tout le cache
-      fetchStandaloneStudies();
-      fetchOrders();
+      if (linkedOrderId !== null) {
+        await loadStudiesForOrder(linkedOrderId, true);
+      } else {
+        await fetchStandaloneStudies();
+      }
+      await fetchOrders();
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : "Erreur");
     }
@@ -673,16 +683,17 @@ export default function OrdersView({ user }: { user: User }) {
     return lensCategory ? materials.filter(m => m.categoryId === lensCategory.id) : [];
   }, [materialCategories, materials]);
 
-  // Une commande peut contenir plusieurs études historiques. L'API les
-  // renvoie par date décroissante : la première lentille renseignée pour un
-  // article est l'imposition courante affichée dans le formulaire technique.
+  // L'API renvoie les études par dernière modification décroissante. Une seule
+  // étude est retenue par article : une étude récente sans lentille neutralise
+  // l'imposition d'une étude plus ancienne, au lieu de laisser apparaître une
+  // lentille historique par erreur.
   const studyLensByItem = useMemo(() => {
-    const result = new Map<number, PhotoStudyItem>();
+    const result = new Map<number, PhotoStudyItem | null>();
     if (!editingOrder) return result;
     for (const study of orderStudies.get(editingOrder.id) || []) {
       for (const studyItem of study.items) {
         if (studyItem.orderItemId == null || result.has(studyItem.orderItemId)) continue;
-        if (studyItem.lensId || studyItem.lensReference) result.set(studyItem.orderItemId, studyItem);
+        result.set(studyItem.orderItemId, studyItem.lensId || studyItem.lensReference ? studyItem : null);
       }
     }
     return result;
@@ -961,7 +972,10 @@ export default function OrdersView({ user }: { user: User }) {
             fmtDate={fmtDate}
             onShowExpeditionHistory={showExpeditionHistory}
             planningInProgress={!!it.id&&planningActiveItems.has(it.id)}
-            studyLens={!!it.id && (orderStudies.get(o.id) || []).some(study => study.items.some(studyItem => studyItem.orderItemId === it.id && !!(studyItem.lensReference || studyItem.lensId)))}
+            studyLens={!!it.id && (() => {
+              const imposed = latestStudyItemForOrderItem(orderStudies.get(o.id) || [], it.id!);
+              return !!imposed && !!(imposed.lensReference || imposed.lensId);
+            })()}
           />
         ))}
         {!hideTotalRow&&<tr className="bg-white/60 text-[10px] text-black"><td className="px-1 py-1 font-semibold">TOTAL</td><td className="px-1 py-1">{ordered}</td><td className="px-1 py-1"></td><td className="px-1 py-1">{produced}</td><td className="px-1 py-1">{delivered}</td><td className="px-1 py-1">{Math.max(0,produced-delivered)}</td><td className="px-1 py-1"><span className="remaining-to-deliver">{Math.max(0,ordered-delivered)}</span></td><td className="px-1 py-1" colSpan={4}></td></tr>}
@@ -1083,6 +1097,7 @@ export default function OrdersView({ user }: { user: User }) {
         const telegestionCategory=materialCategories.find(category=>category.active&&category.isTelegestion);
         const telegestionMaterials=materials.filter(material=>material.categoryId===telegestionCategory?.id);
         const studyLens=studyLensByItem.get(it.id!);
+        const hasStudyLens=!!studyLens && !!(studyLens.lensId || studyLens.lensReference);
         const studyLensId=studyLens?.lensId ? parseInt(studyLens.lensId) : null;
         const studyLensMaterialId=studyLensId || (studyLens?.lensReference
           ? lensMaterials.find(material=>material.reference.toLowerCase()===studyLens.lensReference!.toLowerCase())?.id || null
@@ -1098,7 +1113,7 @@ export default function OrdersView({ user }: { user: User }) {
             {normalCategories.map(category=>{
               const categoryMaterials=materials.filter(material=>material.categoryId===category.id);
               const isLensCategory=category.key === "lens" || category.name.toLowerCase().includes("lentille");
-              const selected=isLensCategory && studyLens
+              const selected=isLensCategory && hasStudyLens
                 ? studyLensMaterialId
                 : isLensCategory
                   ? articleLensMaterialId || selectedIds.find(id=>categoryMaterials.some(material=>material.id===id)) || null
@@ -1106,12 +1121,12 @@ export default function OrdersView({ user }: { user: User }) {
               return <CategoryMaterialSelect
                 key={category.id}
                 categoryId={category.id}
-                categoryName={isLensCategory && studyLens ? `${category.name} 🔒 (étude photométrique)` : category.name}
+                categoryName={isLensCategory && hasStudyLens ? `${category.name} 🔒 (étude photométrique)` : category.name}
                 selectedMaterialId={selected}
                 selectedMaterial={selected ? materials.find(material=>material.id===selected) || null : null}
-                disabled={isLensCategory && !!studyLens}
+                disabled={isLensCategory && hasStudyLens}
                 onSelect={(materialId)=>{
-                  if (isLensCategory && studyLens) return;
+                  if (isLensCategory && hasStudyLens) return;
                   selectCategoryMaterial(it.id!,category.id,materialId);
                 }}
               />})}
