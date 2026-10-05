@@ -3,6 +3,7 @@
 import React from "react";
 import type { OrderItem, TechnicalComponent } from "@/lib/types";
 import { useColors } from "@/lib/color-context";
+import { getContrastTextColor } from "@/lib/color-utils";
 import { ORDER_STATE_PANEL_CLASSES, OrderVisualState } from "@/lib/order-visual-state";
 
 type OrderItemRowProps = {
@@ -16,6 +17,8 @@ type OrderItemRowProps = {
   onShowExpeditionHistory: (itemId: number) => void;
   /** true si l'article est EN COURS DE PRODUCTION d'après le planning (clignotement) */
   planningInProgress?: boolean;
+  /** true si la lentille affichée est imposée par une étude photométrique */
+  studyLens?: boolean;
 };
 
 /**
@@ -31,6 +34,7 @@ function OrderItemRow({
   fmtDate,
   onShowExpeditionHistory,
   planningInProgress = false,
+  studyLens = false,
 }: OrderItemRowProps) {
   const { getModifiedCellStyle, getColor } = useColors();
   // Alerte visuelle « en cours de production » (couleur administrable)
@@ -120,18 +124,28 @@ function OrderItemRow({
         className="px-1 py-1 text-[9px] min-w-[260px]"
         style={isTechModified ? { borderLeft: `4px solid ${modStyle.backgroundColor}` } : undefined}
       >
-        {item.technicalComponents && item.technicalComponents.length > 0 ? (
+        {item.lens || (item.technicalComponents && item.technicalComponents.length > 0) ? (
           <div className="grid gap-1">
+            {item.lens && (
+              <div
+                className={`rounded border px-2 py-1 font-semibold ${studyLens ? "border-sky-700" : "border-black/20 bg-sky-50"}`}
+                style={studyLens ? { backgroundColor: getColor("ETUDE_PHOTOMETRIQUE"), color: getContrastTextColor(getColor("ETUDE_PHOTOMETRIQUE")) } : undefined}
+                title={studyLens ? "Lentille imposée par une étude photométrique" : item.lensBy ? `Lentille renseignée par ${item.lensBy}` : "Lentille technique"}
+              >
+                {studyLens ? "🔒 Lentille étude" : "Lentille"} : <b>{item.lens}</b>
+                {item.lensBy && <span className="ml-1 text-[8px] font-normal">({item.lensBy})</span>}
+              </div>
+            )}
             {isTechModified && (
-              <div 
+              <div
                 className="text-[8px] px-1.5 py-0.5 rounded inline-flex items-center gap-1 w-fit mb-1"
                 style={modStyle}
               >
                 ✏️ Composants modifiés
               </div>
             )}
-            {item.technicalComponents.map(component => (
-              <div 
+            {item.technicalComponents?.map(component => (
+              <div
                 key={component.id}
                 className={`rounded border px-2 py-1 text-black ${
                   component.isTelegestion ? "bg-sky-100 border-sky-500" : "bg-white/70 border-black/20"

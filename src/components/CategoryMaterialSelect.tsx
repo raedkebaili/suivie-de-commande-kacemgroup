@@ -17,6 +17,7 @@ type Props = {
   categoryId: number;
   categoryName: string;
   selectedMaterialId: number | null;
+  selectedMaterial?: Material | null;
   onSelect: (materialId: number | null) => void;
   disabled?: boolean;
 };
@@ -29,6 +30,7 @@ export default function CategoryMaterialSelect({
   categoryId,
   categoryName,
   selectedMaterialId,
+  selectedMaterial: selectedMaterialProp = null,
   onSelect,
   disabled = false,
 }: Props) {
@@ -52,9 +54,13 @@ export default function CategoryMaterialSelect({
         );
         setAllMaterials(data.results);
         
-        // Si une matière est déjà sélectionnée, la trouver
+        // Si une matière est déjà sélectionnée, la trouver. Le parent peut
+        // fournir l'objet complet lorsque la matière ne fait pas partie des
+        // 50 premières suggestions de la catégorie.
         if (selectedMaterialId) {
-          const selected = data.results.find(m => m.id === selectedMaterialId);
+          const selected = selectedMaterialProp?.id === selectedMaterialId
+            ? selectedMaterialProp
+            : data.results.find(m => m.id === selectedMaterialId) || null;
           if (selected) {
             setSelectedMaterial(selected);
             setQuery(`${selected.reference} — ${selected.name}`);
@@ -65,7 +71,7 @@ export default function CategoryMaterialSelect({
       }
     };
     loadMaterials();
-  }, [categoryId, selectedMaterialId]);
+  }, [categoryId, selectedMaterialId, selectedMaterialProp]);
 
   // Recherche avec debounce
   const searchMaterials = useCallback(async (searchQuery: string) => {
@@ -227,8 +233,9 @@ export default function CategoryMaterialSelect({
           <button
             type="button"
             onClick={handleClear}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-            title="Effacer la sélection"
+            disabled={disabled}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
+            title={disabled ? "Lentille imposée par l'étude photométrique" : "Effacer la sélection"}
           >
             ✕
           </button>

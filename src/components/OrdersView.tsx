@@ -15,7 +15,7 @@ import { getOrderVisualState, ORDER_STATE_LABELS, ORDER_STATE_PANEL_CLASSES, ORD
 import { useColors } from "@/lib/color-context";
 import { darkenColor, getContrastTextColor } from "@/lib/color-utils";
 import OrderItemRow from "@/components/OrderItemRow";
-import DocumentsPanel, { PendingDocumentsZone, uploadPendingDocuments, type PendingDocument } from "@/components/DocumentsPanel";
+import DocumentsPanel, { PendingDocumentsZone, uploadPendingDocuments, documentDownloadUrl, type PendingDocument } from "@/components/DocumentsPanel";
 
 type FullOrder = Order & { totalQty?: number; totalDelivered?: number; totalProduced?: number; totalRemaining?: number; documentCount?: number; hasCahierDesCharges?: boolean };
 
@@ -230,7 +230,7 @@ export default function OrdersView({ user }: { user: User }) {
   // ÉVOLUTION §3-§21 : orderItemId = lien strict article ∈ commande ;
   // effectiveLens/lensSource/overridden = résolution backend (additifs).
   type PhotoStudyItem = { id?: number; orderItemId?: number | null; productName: string; lensId: string; lensReference?: string | null; lensLabel?: string | null; note: string; articleLens?: string | null; effectiveLens?: { reference: string; label: string } | null; lensSource?: "study" | "article" | null; overridden?: boolean };
-  type PhotoStudy = { id: number; studyNumber: string; affaireName: string | null; orderId: number | null; clientId: number | null; clientName: string | null; note: string | null; createdByName: string; createdAt: string; documentCount?: number; items: PhotoStudyItem[] };
+  type PhotoStudy = { id: number; studyNumber: string; affaireName: string | null; orderId: number | null; clientId: number | null; clientName: string | null; note: string | null; createdByName: string; createdAt: string; documentCount?: number; studyDocument?: { driveFileId: string; fileName: string; mimeType: string | null } | null; items: PhotoStudyItem[] };
   const [showPhotoStudyModal, setShowPhotoStudyModal] = useState(false);
   const [photoStudyMode, setPhotoStudyMode] = useState<"order" | "standalone">("order");
   const [photoStudyForm, setPhotoStudyForm] = useState({ id: "", orderId: "", clientId: "", affaireName: "", studyNumber: "", note: "" });
@@ -449,6 +449,9 @@ export default function OrdersView({ user }: { user: User }) {
     // Always fetch fresh data from API to get latest items + tech specs
     const fresh = await apiFetch<{order:FullOrder}>(`/api/orders/${o.id}`);
     const order = fresh.order;
+    // Le formulaire technique doit connaître l'étude imposée avant d'afficher
+    // la catégorie Lentille afin d'éviter une modification transitoire possible.
+    await loadStudiesForOrder(order.id);
     setEditingOrder(order);
     setPendingOrderDocs([]);
     const prodStatus = order.productionStatus || "EN_INSTANCE";
@@ -558,12 +561,15 @@ export default function OrdersView({ user }: { user: User }) {
     });
   }, [orderStudies]);
 
-  const loadStudiesForOrder = useCallback(async (orderId: number) => {
-    if (orderStudies.has(orderId)) return;
+  const loadStudiesForOrder = useCallback(async (orderId: number): Promise<PhotoStudy[]> => {
+    if (orderStudies.has(orderId)) return orderStudies.get(orderId) || [];
     try {
       const d = await apiFetch<{ studies: PhotoStudy[] }>(`/api/photometric-studies?orderId=${orderId}`);
       setOrderStudies(prev => new Map(prev).set(orderId, d.studies));
-    } catch { /* ok */ }
+      return d.studies;
+    } catch {
+      return [];
+    }
   }, [orderStudies]);
 
   const openPhotoStudyModal = (study?: PhotoStudy) => {
@@ -667,6 +673,55 @@ export default function OrdersView({ user }: { user: User }) {
     return lensCategory ? materials.filter(m => m.categoryId === lensCategory.id) : [];
   }, [materialCategories, materials]);
 
+  // Une commande peut contenir plusieurs études historiques. L'API les
+  // renvoie par date décroissante : la première lentille renseignée pour un
+  // article est l'imposition courante affichée dans le formulaire technique.
+  const studyLensByItem = useMemo(() => {
+    const result = new Map<number, PhotoStudyItem>();
+    if (!editingOrder) return result;
+    for (const study of orderStudies.get(editingOrder.id) || []) {
+      for (const studyItem of study.items) {
+        if (studyItem.orderItemId == null || result.has(studyItem.orderItemId)) continue;
+        if (studyItem.lensId || studyItem.lensReference) result.set(studyItem.orderItemId, studyItem);
+      }
+    }
+    return result;
+  }, [editingOrder, orderStudies]);
+
+  // Si une ancienne ligne Lentille existe déjà, synchroniser son identifiant
+  // dans le payload technique : la sauvegarde remplacera la même ligne au lieu
+  // d'ajouter un second composant. Sans ligne historique, la lentille reste
+  // affichée depuis l'étude/order_items.lens sans insertion artificielle.
+  useEffect(() => {
+    if (!editingOrder || studyLensByItem.size === 0) return;
+    const lensCategoryIds = new Set(materialCategories
+      .filter(category => category.key === "lens" || category.name.toLowerCase().includes("lentille"))
+      .map(category => category.id));
+    if (lensCategoryIds.size === 0) return;
+
+    setItemMaterialSelections(previous => {
+      const next = { ...previous };
+      let changed = false;
+      for (const item of editingOrder.items || []) {
+        if (!item.id) continue;
+        const studyLens = studyLensByItem.get(item.id);
+        const forcedLensId = studyLens?.lensId ? parseInt(studyLens.lensId) : null;
+        const hasExistingLensLine = (item.technicalComponents || []).some(component =>
+          component.categoryKey === "lens" || (component.categoryId !== null && lensCategoryIds.has(component.categoryId)),
+        );
+        if (!forcedLensId || !hasExistingLensLine) continue;
+        const current = next[item.id] || [];
+        const kept = current.filter(id => !lensCategoryIds.has(id));
+        const nextIds = kept.includes(forcedLensId) ? kept : [...kept, forcedLensId];
+        if (nextIds.length !== current.length || nextIds.some((id, index) => id !== current[index])) {
+          next[item.id] = nextIds;
+          changed = true;
+        }
+      }
+      return changed ? next : previous;
+    });
+  }, [editingOrder, studyLensByItem, materialCategories]);
+
   // ── ÉVOLUTION ÉTUDES §3-§5 : articles strictement ∈ commande sélectionnée ──
   // Au changement de commande : recharger les articles, invalider les lignes
   // devenues hors périmètre (jamais Commande B + article de Commande A),
@@ -760,6 +815,8 @@ export default function OrdersView({ user }: { user: User }) {
     if (idx < 0) return text;
     return <>{text.slice(0, idx)}<mark className="bg-yellow-300 dark:bg-yellow-500 text-black px-0.5 rounded">{text.slice(idx, idx + searchTerm.length)}</mark>{text.slice(idx + searchTerm.length)}</>;
   }, [searchTerm]);
+  const photometricLensColor = getColor("ETUDE_PHOTOMETRIQUE");
+  const photometricLensTextColor = getContrastTextColor(photometricLensColor);
 
   return (<div className="space-y-3 operational-content">
     <div className="flex flex-wrap gap-2 items-center">
@@ -904,6 +961,7 @@ export default function OrdersView({ user }: { user: User }) {
             fmtDate={fmtDate}
             onShowExpeditionHistory={showExpeditionHistory}
             planningInProgress={!!it.id&&planningActiveItems.has(it.id)}
+            studyLens={!!it.id && (orderStudies.get(o.id) || []).some(study => study.items.some(studyItem => studyItem.orderItemId === it.id && !!(studyItem.lensReference || studyItem.lensId)))}
           />
         ))}
         {!hideTotalRow&&<tr className="bg-white/60 text-[10px] text-black"><td className="px-1 py-1 font-semibold">TOTAL</td><td className="px-1 py-1">{ordered}</td><td className="px-1 py-1"></td><td className="px-1 py-1">{produced}</td><td className="px-1 py-1">{delivered}</td><td className="px-1 py-1">{Math.max(0,produced-delivered)}</td><td className="px-1 py-1"><span className="remaining-to-deliver">{Math.max(0,ordered-delivered)}</span></td><td className="px-1 py-1" colSpan={4}></td></tr>}
@@ -911,7 +969,7 @@ export default function OrdersView({ user }: { user: User }) {
         {(orderStudies.get(o.id) || []).map(study => (
           <React.Fragment key={`study-${study.id}`}>
             <tr className="border-b border-black/10" style={{ backgroundColor: getColor("ETUDE_PHOTOMETRIQUE"), color: "#000" }}>
-              <td className="px-1 py-1.5 text-[10px] font-bold" colSpan={2}>🔬 Étude #{study.studyNumber}{(study.documentCount||0)>0&&<button onClick={(e)=>{e.stopPropagation();setDocsTarget({entity:"study",id:study.id,label:study.studyNumber})}} className="ml-1.5 doc-blink inline-flex items-center gap-0.5 px-1 py-0.5 text-[8px] font-bold bg-blue-100 border border-blue-500 rounded text-blue-900 align-middle cursor-pointer" title="Étude disponible (document associé)">📎 Étude dispo</button>}</td>
+              <td className="px-1 py-1.5 text-[10px] font-bold" colSpan={2}>🔬 Étude #{study.studyNumber}{(study.documentCount||0)>0&&<><button onClick={(e)=>{e.stopPropagation();setDocsTarget({entity:"study",id:study.id,label:study.studyNumber})}} className="ml-1.5 doc-blink inline-flex items-center gap-0.5 px-1 py-0.5 text-[8px] font-bold bg-blue-100 border border-blue-500 rounded text-blue-900 align-middle cursor-pointer" title="Afficher les documents associés">📎 Étude dispo</button>{study.studyDocument&&<a href={documentDownloadUrl(study.studyDocument.driveFileId,"attachment")} download onClick={e=>e.stopPropagation()} className="ml-1 inline-flex items-center px-1 py-0.5 text-[10px] font-bold text-blue-700 hover:text-blue-900 align-middle" title={`Télécharger ${study.studyDocument.fileName}`}>⬇</a>}</>}</td>
               <td className="px-1 py-1.5 text-[10px]" colSpan={2}>{study.clientName && <><b>Client:</b> {study.clientName}</>}</td>
               <td className="px-1 py-1.5 text-[10px]" colSpan={2}>{study.note || ""}</td>
               <td className="px-1 py-1.5 text-[8px]" colSpan={3}>Par {study.createdByName} • {fmtDate(study.createdAt)}</td>
@@ -924,7 +982,7 @@ export default function OrdersView({ user }: { user: User }) {
               <tr key={`si-${study.id}-${idx}`} className="border-b border-black/10" style={{ backgroundColor: getColor("ETUDE_PHOTOMETRIQUE") + "88", color: "#000" }}>
                 <td className="px-1 py-1 text-[9px]"></td>
                 <td className="px-1 py-1 text-[10px] font-medium" colSpan={2}>↳ {si.productName}</td>
-                <td className="px-1 py-1 text-[10px]" colSpan={2}>{si.lensReference ? <span><b>{si.lensReference}</b>{si.overridden ? <span title="Imposée par l'étude photométrique (priorité sur la spec article)"> 🔒</span> : ""}</span> : (si.effectiveLens ? <span className="italic">défaut: {si.effectiveLens.reference}</span> : "")}</td>
+                <td className="px-1 py-1 text-[10px]" colSpan={2}>{si.lensReference ? <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-bold" style={{ backgroundColor: photometricLensColor, color: photometricLensTextColor }}><b>{si.lensReference}</b>{si.overridden ? <span title="Imposée par l'étude photométrique (priorité sur la spécification article)">🔒</span> : ""}</span> : (si.effectiveLens ? <span className="italic text-sky-800">défaut: {si.effectiveLens.reference}</span> : "")}</td>
                 <td className="px-1 py-1 text-[10px]" colSpan={2}>{si.lensLabel || <span className="italic text-gray-600">—</span>}</td>
                 <td className="px-1 py-1 text-[9px]" colSpan={4}>{si.note || ""}</td>
               </tr>
@@ -1024,6 +1082,14 @@ export default function OrdersView({ user }: { user: User }) {
         const normalCategories=materialCategories.filter(category=>category.active&&!category.isTelegestion);
         const telegestionCategory=materialCategories.find(category=>category.active&&category.isTelegestion);
         const telegestionMaterials=materials.filter(material=>material.categoryId===telegestionCategory?.id);
+        const studyLens=studyLensByItem.get(it.id!);
+        const studyLensId=studyLens?.lensId ? parseInt(studyLens.lensId) : null;
+        const studyLensMaterialId=studyLensId || (studyLens?.lensReference
+          ? lensMaterials.find(material=>material.reference.toLowerCase()===studyLens.lensReference!.toLowerCase())?.id || null
+          : null);
+        const articleLensMaterialId=it.lens
+          ? lensMaterials.find(material=>material.reference.toLowerCase()===it.lens!.trim().toLowerCase())?.id || null
+          : null;
         return <div key={it.id} className="mb-4 border-2 border-gray-300 rounded-xl p-4 bg-white text-black">
           <div className="flex items-center justify-between gap-3 mb-3"><div><div className="font-bold text-base text-black">{it.articleName}</div><div className="text-xs text-black">Quantité commandée : {it.quantity}</div></div>
             {telegestionCategory&&<button type="button" onClick={()=>setOpenTelegestionItem(openTelegestionItem===it.id?null:it.id!)} className="px-3 py-2 rounded-lg border-2 border-sky-700 bg-sky-200 text-black text-xs font-bold">📡 Options de télégestion ({selectedIds.filter(id=>telegestionMaterials.some(material=>material.id===id)).length})</button>}
@@ -1031,13 +1097,23 @@ export default function OrdersView({ user }: { user: User }) {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             {normalCategories.map(category=>{
               const categoryMaterials=materials.filter(material=>material.categoryId===category.id);
-              const selected=selectedIds.find(id=>categoryMaterials.some(material=>material.id===id))||null;
+              const isLensCategory=category.key === "lens" || category.name.toLowerCase().includes("lentille");
+              const selected=isLensCategory && studyLens
+                ? studyLensMaterialId
+                : isLensCategory
+                  ? articleLensMaterialId || selectedIds.find(id=>categoryMaterials.some(material=>material.id===id)) || null
+                  : selectedIds.find(id=>categoryMaterials.some(material=>material.id===id)) || null;
               return <CategoryMaterialSelect
                 key={category.id}
                 categoryId={category.id}
-                categoryName={category.name}
+                categoryName={isLensCategory && studyLens ? `${category.name} 🔒 (étude photométrique)` : category.name}
                 selectedMaterialId={selected}
-                onSelect={(materialId)=>selectCategoryMaterial(it.id!,category.id,materialId)}
+                selectedMaterial={selected ? materials.find(material=>material.id===selected) || null : null}
+                disabled={isLensCategory && !!studyLens}
+                onSelect={(materialId)=>{
+                  if (isLensCategory && studyLens) return;
+                  selectCategoryMaterial(it.id!,category.id,materialId);
+                }}
               />})}
           </div>
           {openTelegestionItem===it.id&&telegestionCategory&&<div className="mt-3 rounded-xl border-2 border-sky-600 bg-sky-50 p-3"><div className="font-bold text-black mb-2">Accessoires de télégestion à ajouter</div>
@@ -1292,7 +1368,7 @@ export default function OrdersView({ user }: { user: User }) {
               <tbody>
                 {standaloneStudies.map(study => (
                   <tr key={study.id} className="border-b border-black/10 hover:opacity-90 align-top" style={{ backgroundColor: getColor("ETUDE_PHOTOMETRIQUE") + "33" }}>
-                    <td className="px-2 py-1.5 font-bold text-[11px] text-black">🔬 {study.studyNumber}{(study.documentCount||0)>0&&<button onClick={(e)=>{e.stopPropagation();setDocsTarget({entity:"study",id:study.id,label:study.studyNumber})}} className="doc-blink block mt-0.5 inline-flex items-center gap-0.5 px-1 py-0.5 text-[8px] font-bold bg-blue-100 border border-blue-500 rounded text-blue-900 cursor-pointer" title="Étude disponible (document associé)">📎 Étude disponible</button>}</td>
+                    <td className="px-2 py-1.5 font-bold text-[11px] text-black">🔬 {study.studyNumber}{(study.documentCount||0)>0&&<span className="block mt-0.5"><button onClick={(e)=>{e.stopPropagation();setDocsTarget({entity:"study",id:study.id,label:study.studyNumber})}} className="doc-blink inline-flex items-center gap-0.5 px-1 py-0.5 text-[8px] font-bold bg-blue-100 border border-blue-500 rounded text-blue-900 cursor-pointer" title="Afficher les documents associés">📎 Étude disponible</button>{study.studyDocument&&<a href={documentDownloadUrl(study.studyDocument.driveFileId,"attachment")} download onClick={e=>e.stopPropagation()} className="ml-1 inline-flex items-center px-1 py-0.5 text-[10px] font-bold text-blue-700 hover:text-blue-900" title={`Télécharger ${study.studyDocument.fileName}`}>⬇</a>}</span>}</td>
                     <td className="px-2 py-1.5 text-[11px] text-black">{study.clientName || "-"}</td>
                     <td className="px-2 py-1.5 font-medium text-[11px] text-black">{study.affaireName || "-"}</td>
                     <td className="px-2 py-1.5 text-[10px] text-black">
@@ -1303,7 +1379,7 @@ export default function OrdersView({ user }: { user: User }) {
                     </td>
                     <td className="px-2 py-1.5 text-[10px] text-black">
                       {study.items.map((si, idx) => (
-                        <div key={idx} className="mb-0.5">{si.lensReference ? <><b>{si.lensReference}</b> — {si.lensLabel}{si.overridden ? <span title="Imposée par l'étude photométrique (priorité sur la spec article)"> 🔒</span> : ""}</> : (si.effectiveLens ? <span className="italic">défaut: {si.effectiveLens.reference}</span> : <span className="text-gray-400">—</span>)}</div>
+                        <div key={idx} className="mb-0.5">{si.lensReference ? <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-bold" style={{ backgroundColor: photometricLensColor, color: photometricLensTextColor }}><b>{si.lensReference}</b> — {si.lensLabel}{si.overridden ? <span title="Imposée par l'étude photométrique (priorité sur la spécification article)">🔒</span> : ""}</span> : (si.effectiveLens ? <span className="italic text-sky-800">défaut: {si.effectiveLens.reference}</span> : <span className="text-gray-400">—</span>)}</div>
                       ))}
                     </td>
                     <td className="px-2 py-1.5 text-[10px] text-black max-w-[120px] truncate" title={study.note || ""}>{study.note || "-"}</td>

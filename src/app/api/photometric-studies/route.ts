@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { photometricStudies, photometricStudyItems, orders, orderItems, matieres, materialCategories, clients, driveDocuments } from "@/db/schema";
-import { eq, desc, isNull, inArray, sql } from "drizzle-orm";
+import { photometricStudies, photometricStudyItems, orders, orderItems, itemTechnicalComponents, matieres, materialCategories, clients, driveDocuments } from "@/db/schema";
+import { eq, desc, isNull, inArray } from "drizzle-orm";
 import { getUserFromHeaders, logActivity, logModification } from "@/lib/auth";
 import { articleLensToValue, resolveStudyLens } from "@/lib/study-lens";
 
@@ -44,7 +44,7 @@ async function resolveOrderItem(orderId: number, input: StudyItemInput) {
 // (fail-open) pour ne jamais bloquer l'enregistrement sur un problème de config.
 async function resolveLensSnapshot(lensId: string | number | null | undefined) {
   if (!lensId || !parseInt(String(lensId))) {
-    return { id: null as number | null, reference: null as string | null, label: null as string | null };
+    return { id: null as number | null, reference: null as string | null, label: null as string | null, categoryId: null as number | null };
   }
   const lid = parseInt(String(lensId));
   const [lens] = await db.select().from(matieres).where(eq(matieres.id, lid)).limit(1);
@@ -54,7 +54,7 @@ async function resolveLensSnapshot(lensId: string | number | null | undefined) {
   if (lensCat && lens.categoryId !== lensCat.id) {
     return { error: "La matière choisie n'est pas une lentille" } as const;
   }
-  return { id: lens.id, reference: lens.reference, label: lens.name };
+  return { id: lens.id, reference: lens.reference, label: lens.name, categoryId: lens.categoryId };
 }
 
 /**
@@ -65,30 +65,54 @@ async function resolveLensSnapshot(lensId: string | number | null | undefined) {
 async function applyStudyLensToArticle(
   orderId: number,
   orderItemId: number,
-  lensReference: string | null,
+  lens: { id: number | null; reference: string | null; label: string | null; categoryId: number | null },
   studyNumber: string,
   user: { id: number; fullName: string },
 ) {
-  const reference = lensReference?.trim();
-  if (!reference) return;
+  const reference = lens.reference?.trim();
+  if (!reference || lens.id === null) return;
 
   const [article] = await db.select().from(orderItems)
     .where(eq(orderItems.id, orderItemId)).limit(1);
-  if (!article || article.orderId !== orderId || article.lens === reference) return;
+  if (!article || article.orderId !== orderId) return;
+
+  const components = await db.select().from(itemTechnicalComponents)
+    .where(eq(itemTechnicalComponents.itemId, orderItemId));
+  const existingLensComponent = components.find((component) =>
+    component.categoryKey === "lens" || (lens.categoryId !== null && component.categoryId === lens.categoryId),
+  );
+  const componentChanged = !!existingLensComponent && existingLensComponent.materialId !== lens.id;
+  const articleChanged = article.lens !== reference;
+  if (!componentChanged && !articleChanged) return;
 
   const appliedAt = new Date().toISOString();
-  await db.update(orderItems).set({
-    lens: reference,
-    lensBy: user.fullName,
-    lensAt: appliedAt,
-  }).where(eq(orderItems.id, orderItemId));
+  if (articleChanged) {
+    await db.update(orderItems).set({
+      lens: reference,
+      lensBy: user.fullName,
+      lensAt: appliedAt,
+    }).where(eq(orderItems.id, orderItemId));
+  }
+
+  // Remplacer la valeur de la ligne Lentille existante, sans INSERT. Les
+  // métadonnées de saisie conservent la traçabilité de l'application par étude.
+  if (existingLensComponent && componentChanged) {
+    await db.update(itemTechnicalComponents).set({
+      materialId: lens.id,
+      materialReference: reference,
+      materialLabel: lens.label || reference,
+      enteredById: user.id,
+      enteredByName: user.fullName,
+      enteredAt: appliedAt,
+    }).where(eq(itemTechnicalComponents.id, existingLensComponent.id));
+  }
 
   await logModification(
     orderId,
     user.id,
     user.fullName,
     `Lentille ${article.articleName} (étude #${studyNumber})`,
-    article.lens || "",
+    existingLensComponent?.materialReference || article.lens || "",
     reference,
   );
 }
@@ -150,15 +174,38 @@ export async function GET(request: NextRequest) {
   const byArticle = new Map(linkedArticles.map((a) => [a.id, a]));
 
   // ── Documents associés (ajout rétrocompatible, champs additifs) ──────
-  const docStats = studyIds.length > 0
+  // Le dernier document est renvoyé pour permettre le téléchargement direct
+  // depuis la ligne d'étude ; la liste complète reste disponible via DocumentsPanel.
+  const documentRows = studyIds.length > 0
     ? await db.select({
         studyId: driveDocuments.studyId,
-        totalCount: sql<number>`count(*)::int`,
+        driveFileId: driveDocuments.driveFileId,
+        fileName: driveDocuments.fileName,
+        mimeType: driveDocuments.mimeType,
       }).from(driveDocuments)
         .where(inArray(driveDocuments.studyId, studyIds))
-        .groupBy(driveDocuments.studyId)
+        .orderBy(desc(driveDocuments.createdAt))
     : [];
-  const docByStudy = new Map(docStats.map(d => [d.studyId, d]));
+  const docByStudy = new Map<number, {
+    totalCount: number;
+    latest: { driveFileId: string; fileName: string; mimeType: string | null };
+  }>();
+  for (const document of documentRows) {
+    if (document.studyId === null) continue;
+    const current = docByStudy.get(document.studyId);
+    if (current) {
+      current.totalCount += 1;
+    } else {
+      docByStudy.set(document.studyId, {
+        totalCount: 1,
+        latest: {
+          driveFileId: document.driveFileId,
+          fileName: document.fileName,
+          mimeType: document.mimeType,
+        },
+      });
+    }
+  }
 
   const studies = studyRows.map(s => ({
     ...s,
@@ -177,7 +224,8 @@ export async function GET(request: NextRequest) {
         overridden: resolved.overridden,
       };
     }),
-    documentCount: Number(docByStudy.get(s.id)?.totalCount || 0),
+    documentCount: docByStudy.get(s.id)?.totalCount || 0,
+    studyDocument: docByStudy.get(s.id)?.latest || null,
   }));
 
   return NextResponse.json({ studies });
@@ -217,7 +265,7 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Validation de chaque ligne AVANT toute insertion (tout-ou-rien) ──
-  const prepared: { orderItemId: number | null; productName: string; lens: { id: number | null; reference: string | null; label: string | null }; note: string | null }[] = [];
+  const prepared: { orderItemId: number | null; productName: string; lens: { id: number | null; reference: string | null; label: string | null; categoryId: number | null }; note: string | null }[] = [];
   for (const item of studyItems) {
     const snap = await resolveLensSnapshot(item.lensId ?? null);
     if ("error" in snap) return NextResponse.json({ error: snap.error }, { status: 422 });
@@ -270,7 +318,7 @@ export async function POST(request: NextRequest) {
     for (const p of prepared) {
       if (p.orderItemId === null || !p.lens.reference || appliedArticleIds.has(p.orderItemId)) continue;
       appliedArticleIds.add(p.orderItemId);
-      await applyStudyLensToArticle(resolvedOrderId, p.orderItemId, p.lens.reference, studyNumber.trim(), user);
+      await applyStudyLensToArticle(resolvedOrderId, p.orderItemId, p.lens, studyNumber.trim(), user);
     }
   }
 
@@ -317,7 +365,7 @@ export async function PUT(request: NextRequest) {
     // Le snapshot de l'étude reste conservé, et une lentille sélectionnée pour
     // une étude liée remplace aussi la valeur technique de l'article existant.
     // lensId=null ne crée ni ne supprime aucune ligne technique.
-    const prepared: { orderItemId: number | null; productName: string; lens: { id: number | null; reference: string | null; label: string | null }; note: string | null }[] = [];
+    const prepared: { orderItemId: number | null; productName: string; lens: { id: number | null; reference: string | null; label: string | null; categoryId: number | null }; note: string | null }[] = [];
     for (const item of items as StudyItemInput[]) {
       const snap = await resolveLensSnapshot(item.lensId ?? null);
       if ("error" in snap) return NextResponse.json({ error: snap.error }, { status: 422 });
@@ -349,7 +397,7 @@ export async function PUT(request: NextRequest) {
       for (const p of prepared) {
         if (p.orderItemId === null || !p.lens.reference || appliedArticleIds.has(p.orderItemId)) continue;
         appliedArticleIds.add(p.orderItemId);
-        await applyStudyLensToArticle(study.orderId, p.orderItemId, p.lens.reference, effectiveStudyNumber, user);
+        await applyStudyLensToArticle(study.orderId, p.orderItemId, p.lens, effectiveStudyNumber, user);
       }
     }
   }
