@@ -6,6 +6,7 @@ import type { User } from "@/lib/types";
 import { useColors } from "@/lib/color-context";
 import { getContrastTextColor } from "@/lib/color-utils";
 import { priorityColorKey, priorityLabel } from "@/lib/priority";
+import DocumentsPanel from "@/components/DocumentsPanel";
 
 type TelComponent = {
   id: number; categoryName: string; materialReference: string; materialLabel: string;
@@ -141,6 +142,7 @@ export default function TelegestionView({ user }: { user: User }) {
                 </button>
 
                 {!isCollapsed && (
+                  <>
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead>
@@ -182,6 +184,17 @@ export default function TelegestionView({ user }: { user: User }) {
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Documents du projet — la commande contient des articles de la
+                      famille Télégestion : ses documents (Stockage central) sont donc
+                      accessibles ici (§ règle métier Télégestion). Association logique
+                      uniquement : le fichier physique reste unique dans Google Drive. */}
+                  <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-3 bg-slate-50/60 dark:bg-gray-800/40">
+                    <DocumentsPanel entity="order" entityId={g.orderId} user={user}
+                      canAdd={isTech} title="Documents du projet"
+                      defaultCategory="TELEGESTION" compact />
+                  </div>
+                  </>
                 )}
               </div>
             );

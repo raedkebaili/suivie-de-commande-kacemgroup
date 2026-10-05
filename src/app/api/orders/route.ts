@@ -1,8 +1,8 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { orders, orderItems, clients, agencies, itemTechnicalComponents } from "@/db/schema";
-import { eq, desc, and, inArray } from "drizzle-orm";
+import { orders, orderItems, clients, agencies, itemTechnicalComponents, driveDocuments } from "@/db/schema";
+import { eq, desc, and, inArray, sql } from "drizzle-orm";
 import { logActivity, getUserFromHeaders, notifyRole } from "@/lib/auth";
 import { generateOrderNumber } from "@/lib/order-number";
 
@@ -67,12 +67,27 @@ export async function GET(request: NextRequest) {
     ? await db.select().from(itemTechnicalComponents).where(inArray(itemTechnicalComponents.itemId, itemIds))
     : [];
 
+  // ── Documents associés (gestion documentaire contextuelle) ──────────
+  // AJOUT rétrocompatible : 1 requête groupée, champs additifs. Si la table
+  // est vide, documentCount = 0 et rien ne change à l'affichage existant.
+  const docStats = oids.length > 0
+    ? await db.select({
+        orderId: driveDocuments.orderId,
+        totalCount: sql<number>`count(*)::int`,
+        cahierCount: sql<number>`count(*) filter (where ${driveDocuments.category} = 'CAHIER_DES_CHARGES')::int`,
+      }).from(driveDocuments)
+        .where(inArray(driveDocuments.orderId, oids))
+        .groupBy(driveDocuments.orderId)
+    : [];
+  const docByOrder = new Map(docStats.map(d => [d.orderId, d]));
+
   return NextResponse.json({
     orders: data.map(o => {
       const items = allItems.filter(i => i.orderId === o.id).map(item => ({
         ...item,
         technicalComponents: allTechnicalComponents.filter(component => component.itemId === item.id),
       }));
+      const docStat = docByOrder.get(o.id);
       return {
         ...o,
         items,
@@ -80,6 +95,8 @@ export async function GET(request: NextRequest) {
         totalDelivered: items.reduce((s, i) => s + (i.deliveredQty || 0), 0),
         totalProduced: items.reduce((s, i) => s + (i.producedQty || 0), 0),
         totalRemaining: items.reduce((s, i) => s + i.quantity - (i.deliveredQty || 0), 0),
+        documentCount: docStat ? Number(docStat.totalCount) : 0,
+        hasCahierDesCharges: docStat ? Number(docStat.cahierCount) > 0 : false,
       };
     })
   });

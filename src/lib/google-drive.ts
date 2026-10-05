@@ -180,6 +180,59 @@ export function bufferToStream(buffer: Buffer): Readable {
   return Readable.from(buffer);
 }
 
+// ── Dossiers CONTEXTUELS (gestion documentaire affaires / études) ──────
+// AJOUT pour la gestion documentaire contextuelle : les fichiers joints
+// depuis une commande ou une étude sont rangés dans des sous-dossiers de
+// la racine « ORDERTRACK STORAGE » existante — ils restent donc visibles
+// dans l'onglet Stockage. Aucun changement du fonctionnement existant.
+
+/** Dossiers de premier niveau dédiés aux documents contextuels */
+export const CONTEXT_ROOT_FOLDERS = {
+  order: "AFFAIRES",
+  study: "ETUDES PHOTOMETRIQUES",
+} as const;
+
+export type DocumentEntityKind = keyof typeof CONTEXT_ROOT_FOLDERS;
+
+/** Nettoie un libellé pour en faire un nom de dossier Drive sûr et lisible */
+export function sanitizeFolderLabel(label: string): string {
+  const cleaned = label.replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim();
+  return (cleaned || "SANS-NUMERO").slice(0, 120);
+}
+
+/** Recherche (ou crée) un dossier `name` situé directement sous `parentId` */
+async function ensureFolderIn(
+  drive: Awaited<ReturnType<typeof getDriveClient>>["drive"],
+  name: string,
+  parentId: string,
+): Promise<{ id: string; name: string }> {
+  const q = `mimeType='${FOLDER_MIME}' and name='${name.replace(/'/g, "\\'")}' and '${parentId}' in parents and trashed=false`;
+  const found = await drive.files.list({ q, fields: "files(id,name)", pageSize: 10, spaces: "drive" });
+  const existing = found.data.files?.[0];
+  if (existing?.id) return { id: existing.id, name: existing.name || name };
+  const created = await drive.files.create({
+    requestBody: { name, mimeType: FOLDER_MIME, parents: [parentId] },
+    fields: "id,name",
+  });
+  return { id: created.data.id!, name: created.data.name || name };
+}
+
+/**
+ * Dossier physique d'une entité métier :
+ *   ORDERTRACK STORAGE / AFFAIRES / <n° commande>
+ *   ORDERTRACK STORAGE / ETUDES PHOTOMETRIQUES / <n° étude>
+ * Réutilisé s'il existe, créé sinon — jamais dupliqué.
+ */
+export async function ensureContextFolder(
+  entity: DocumentEntityKind,
+  label: string,
+): Promise<{ id: string; name: string }> {
+  const { drive } = await getDriveClient();
+  const root = await ensureRootFolder();
+  const contextRoot = await ensureFolderIn(drive, CONTEXT_ROOT_FOLDERS[entity], root.id);
+  return ensureFolderIn(drive, sanitizeFolderLabel(label), contextRoot.id);
+}
+
 /** Vérifie qu'un fichier appartient bien à l'arborescence du dossier racine */
 export async function assertInsideRoot(fileId: string): Promise<boolean> {
   const { drive, cfg } = await getDriveClient();

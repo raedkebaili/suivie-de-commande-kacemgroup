@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, boolean, timestamp, doublePrecision, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, boolean, timestamp, doublePrecision, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const users = pgTable("users", {
@@ -449,3 +449,34 @@ export const clientRecouvrementLogs = pgTable("client_recouvrement_logs", {
   username: text("username").notNull(),
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
 });
+
+// ── Documents contextuels (gestion documentaire basée sur le Stockage) ──
+// Association LOGIQUE entre un fichier Google Drive existant et une entité
+// métier (commande OU étude photométrique). Le fichier physique reste géré
+// par le module Stockage (dossier racine ORDERTRACK STORAGE) : jamais de
+// duplication physique — une seule copie Drive, N associations possibles.
+// Exactly one of order_id / study_id is set (contrôle effectué côté API).
+export const driveDocuments = pgTable("drive_documents", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").references(() => orders.id, { onDelete: "cascade" }),
+  studyId: integer("study_id").references(() => photometricStudies.id, { onDelete: "cascade" }),
+  driveFileId: text("drive_file_id").notNull(),           // Identifiant Google Drive
+  driveFolderId: text("drive_folder_id"),                 // Dossier physique (traçabilité)
+  fileName: text("file_name").notNull(),                  // Copie pour l'affichage
+  mimeType: text("mime_type"),
+  fileSize: integer("file_size"),                         // Octets
+  webViewLink: text("web_view_link"),                     // Lien de visualisation Drive
+  // Catégorie texte extensible (cf. src/lib/document-categories.ts)
+  category: text("category").notNull().default("AUTRE"),
+  uploadedById: integer("uploaded_by_id").references(() => users.id, { onDelete: "set null" }),
+  uploadedByName: text("uploaded_by_name").notNull(),
+  createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+}, (table) => [
+  // Un même fichier Drive ne peut être associé qu'une fois à une même entité.
+  // (order_id/study_id NULL restent distincts en PostgreSQL — pas de conflit.)
+  uniqueIndex("drive_documents_order_file_uq").on(table.orderId, table.driveFileId),
+  uniqueIndex("drive_documents_study_file_uq").on(table.studyId, table.driveFileId),
+  // Index de recherche par entité (N documents par entité).
+  index("drive_documents_order_idx").on(table.orderId),
+  index("drive_documents_study_idx").on(table.studyId),
+]);

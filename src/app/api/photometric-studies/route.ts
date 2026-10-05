@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { photometricStudies, photometricStudyItems, orders, matieres, clients } from "@/db/schema";
-import { eq, desc, isNull, inArray } from "drizzle-orm";
+import { photometricStudies, photometricStudyItems, orders, matieres, clients, driveDocuments } from "@/db/schema";
+import { eq, desc, isNull, inArray, sql } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -46,9 +46,21 @@ export async function GET(request: NextRequest) {
       .where(inArray(photometricStudyItems.studyId, studyIds));
   }
 
+  // ── Documents associés (ajout rétrocompatible, champs additifs) ──────
+  const docStats = studyIds.length > 0
+    ? await db.select({
+        studyId: driveDocuments.studyId,
+        totalCount: sql<number>`count(*)::int`,
+      }).from(driveDocuments)
+        .where(inArray(driveDocuments.studyId, studyIds))
+        .groupBy(driveDocuments.studyId)
+    : [];
+  const docByStudy = new Map(docStats.map(d => [d.studyId, d]));
+
   const studies = studyRows.map(s => ({
     ...s,
     items: allItems.filter(i => i.studyId === s.id),
+    documentCount: Number(docByStudy.get(s.id)?.totalCount || 0),
   }));
 
   return NextResponse.json({ studies });

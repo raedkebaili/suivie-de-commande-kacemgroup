@@ -12,8 +12,9 @@ import { getOrderVisualState, ORDER_STATE_LABELS, ORDER_STATE_PANEL_CLASSES, ORD
 import { useColors } from "@/lib/color-context";
 import { darkenColor, getContrastTextColor } from "@/lib/color-utils";
 import OrderItemRow from "@/components/OrderItemRow";
+import DocumentsPanel, { PendingDocumentsZone, uploadPendingDocuments, type PendingDocument } from "@/components/DocumentsPanel";
 
-type FullOrder = Order & { totalQty?: number; totalDelivered?: number; totalProduced?: number; totalRemaining?: number };
+type FullOrder = Order & { totalQty?: number; totalDelivered?: number; totalProduced?: number; totalRemaining?: number; documentCount?: number; hasCahierDesCharges?: boolean };
 
 type SortField = "date" | "alpha" | "number";
 type SortDir = "asc" | "desc";
@@ -112,7 +113,7 @@ export default function OrdersView({ user }: { user: User }) {
   
   // Études photométriques
   type PhotoStudyItem = { id?: number; productName: string; lensId: string; lensReference?: string | null; lensLabel?: string | null; note: string };
-  type PhotoStudy = { id: number; studyNumber: string; affaireName: string | null; orderId: number | null; clientId: number | null; clientName: string | null; note: string | null; createdByName: string; createdAt: string; items: PhotoStudyItem[] };
+  type PhotoStudy = { id: number; studyNumber: string; affaireName: string | null; orderId: number | null; clientId: number | null; clientName: string | null; note: string | null; createdByName: string; createdAt: string; documentCount?: number; items: PhotoStudyItem[] };
   const [showPhotoStudyModal, setShowPhotoStudyModal] = useState(false);
   const [photoStudyMode, setPhotoStudyMode] = useState<"order" | "standalone">("order");
   const [photoStudyForm, setPhotoStudyForm] = useState({ id: "", orderId: "", clientId: "", affaireName: "", studyNumber: "", note: "" });
@@ -121,6 +122,12 @@ export default function OrdersView({ user }: { user: User }) {
   const [editingStudy, setEditingStudy] = useState<PhotoStudy | null>(null);
   const [orderStudies, setOrderStudies] = useState<Map<number, PhotoStudy[]>>(new Map());
   const [standaloneStudies, setStandaloneStudies] = useState<PhotoStudy[]>([]);
+  // ── Documents contextuels (Stockage Google Drive existant) ──
+  // Cible du panneau de consultation/ajout (affaire ou étude)
+  const [docsTarget, setDocsTarget] = useState<{ entity: "order" | "study"; id: number; label: string } | null>(null);
+  // Fichiers en attente uploadés juste après l'enregistrement (flux « création »)
+  const [pendingOrderDocs, setPendingOrderDocs] = useState<PendingDocument[]>([]);
+  const [pendingStudyDocs, setPendingStudyDocs] = useState<PendingDocument[]>([]);
   
   // Hook pour les couleurs
   const { getModifiedCellStyle, getColor } = useColors();
@@ -295,7 +302,7 @@ export default function OrdersView({ user }: { user: User }) {
     }
   };
 
-  const rf=async()=>{try{const n=await apiFetch<{orderNumber:string}>("/api/orders/next-number");setForm({orderNumber:n.orderNumber,orderDate:new Date().toISOString().split("T")[0],priority:"NORMALE",clientId:"",agencyId:"",affaire:"",commercialStatus:planifStockOnly?"SUR_STOCK":"PREVISION",productionStatus:"EN_INSTANCE",cancelReason:"",statusReason:""})}catch{setForm({orderNumber:"",orderDate:new Date().toISOString().split("T")[0],priority:"NORMALE",clientId:"",agencyId:"",affaire:"",commercialStatus:planifStockOnly?"SUR_STOCK":"PREVISION",productionStatus:"EN_INSTANCE",cancelReason:"",statusReason:""})};setFormItems([]);setTechItems({});setItemMaterialSelections({});setOpenTelegestionItem(null);setEditingOrder(null);setError("");setSaving(false)};
+  const rf=async()=>{try{const n=await apiFetch<{orderNumber:string}>("/api/orders/next-number");setForm({orderNumber:n.orderNumber,orderDate:new Date().toISOString().split("T")[0],priority:"NORMALE",clientId:"",agencyId:"",affaire:"",commercialStatus:planifStockOnly?"SUR_STOCK":"PREVISION",productionStatus:"EN_INSTANCE",cancelReason:"",statusReason:""})}catch{setForm({orderNumber:"",orderDate:new Date().toISOString().split("T")[0],priority:"NORMALE",clientId:"",agencyId:"",affaire:"",commercialStatus:planifStockOnly?"SUR_STOCK":"PREVISION",productionStatus:"EN_INSTANCE",cancelReason:"",statusReason:""})};setFormItems([]);setTechItems({});setItemMaterialSelections({});setOpenTelegestionItem(null);setEditingOrder(null);setError("");setSaving(false);setPendingOrderDocs([])};
   // Initialisation du formulaire pour une NOUVELLE commande : au moins une ligne
   // d'article prête à la saisie (le commercial disposait du bouton « + Ajouter »,
   // mais un formulaire vide sans aucune ligne n'est pas utilisable).
@@ -320,6 +327,7 @@ export default function OrdersView({ user }: { user: User }) {
     const fresh = await apiFetch<{order:FullOrder}>(`/api/orders/${o.id}`);
     const order = fresh.order;
     setEditingOrder(order);
+    setPendingOrderDocs([]);
     const prodStatus = order.productionStatus || "EN_INSTANCE";
     setForm({orderNumber:order.orderNumber,orderDate:order.orderDate,priority:order.priority,clientId:String(order.clientId),agencyId:String(order.agencyId),affaire:order.affaire||"",commercialStatus:order.status||"PREVISION",productionStatus:order.productionStatus||"EN_INSTANCE",cancelReason:order.cancelReason||"",statusReason:order.statusReason||""});
     setFormItems(order.items&&order.items.length>0?order.items.map(i=>({id:i.id,articleName:i.articleName,quantity:i.quantity,unitPrice:i.unitPrice||"",description:i.description||"",note:i.note||"",clientSpec:i.clientSpec||"",isTelegestion:!!i.isTelegestion,productionUnit:i.productionUnit||"",plannedLoadingDate:i.plannedLoadingDate||""})):[{articleName:"",quantity:1,unitPrice:"",description:""}]);
@@ -343,8 +351,16 @@ export default function OrdersView({ user }: { user: User }) {
       // Ajouter orderNumber seulement pour les modifications
       if(editingOrder){pl.orderNumber=form.orderNumber;}
       if(form.commercialStatus==="ANNULEE"&&form.cancelReason)pl.cancelReason=form.cancelReason;
-      if(editingOrder){await apiFetch(`/api/orders/${editingOrder.id}`,{method:"PUT",body:JSON.stringify(pl)})}else{await apiFetch("/api/orders",{method:"POST",body:JSON.stringify(pl)})}
+      let savedOrderId=editingOrder?.id;
+      if(editingOrder){await apiFetch(`/api/orders/${editingOrder.id}`,{method:"PUT",body:JSON.stringify(pl)})}else{const created=await apiFetch<{order:FullOrder}>("/api/orders",{method:"POST",body:JSON.stringify(pl)});savedOrderId=created.order?.id;}
       for(const item of vi){try{await apiFetch("/api/library/articles",{method:"POST",body:JSON.stringify({name:item.articleName})})}catch{}}
+      // Documents en attente : envoyés vers Google Drive puis associés à la
+      // commande (jamais l'inverse — aucune association fictive en cas d'échec)
+      if(pendingOrderDocs.length>0&&savedOrderId){
+        const up=await uploadPendingDocuments("order",savedOrderId,pendingOrderDocs);
+        if(up.failed.length>0)alert(`Commande enregistrée, mais ${up.failed.length} document(s) n'ont pas pu être envoyés :\n`+up.failed.map(f=>`• ${f.name}: ${f.reason}`).join("\n"));
+        setPendingOrderDocs([]);
+      }
     }
     if(ct()&&editingOrder){
       const dynamicTechItems=(editingOrder.items||[]).filter(item=>item.id).map(item=>({itemId:item.id!,materialIds:itemMaterialSelections[item.id!]||[]}));
@@ -399,6 +415,7 @@ export default function OrdersView({ user }: { user: User }) {
       setPhotoStudyItems([{ productName: "", lensId: "", note: "" }]);
       setPhotoStudyMode("order");
     }
+    setPendingStudyDocs([]);
     setShowPhotoStudyModal(true);
     setError("");
   };
@@ -409,7 +426,7 @@ export default function OrdersView({ user }: { user: User }) {
     if (validItems.length === 0) { setError("Au moins un produit requis"); return; }
     if (photoStudyMode === "order" && !photoStudyForm.orderId) { setError("Sélectionnez une commande"); return; }
     if (photoStudyMode === "standalone" && !photoStudyForm.affaireName.trim()) { setError("Saisissez le nom de l'affaire"); return; }
-    setPhotoStudySaving(true);
+      setPhotoStudySaving(true);
     setError("");
     try {
       const payload: Record<string, unknown> = {
@@ -421,11 +438,21 @@ export default function OrdersView({ user }: { user: User }) {
       if (photoStudyMode === "order") payload.orderId = photoStudyForm.orderId;
       else payload.affaireName = photoStudyForm.affaireName;
 
+      let savedStudyId = editingStudy?.id;
       if (editingStudy) {
         payload.id = editingStudy.id;
         await apiFetch("/api/photometric-studies", { method: "PUT", body: JSON.stringify(payload) });
       } else {
-        await apiFetch("/api/photometric-studies", { method: "POST", body: JSON.stringify(payload) });
+        const created = await apiFetch<{ study: PhotoStudy }>("/api/photometric-studies", { method: "POST", body: JSON.stringify(payload) });
+        savedStudyId = created.study?.id;
+      }
+      // Documents joints au formulaire : upload Google Drive puis association
+      // automatique à l'étude (en cas d'échec, l'étude reste enregistrée et le
+      // message détaille précisément les fichiers non envoyés).
+      if (pendingStudyDocs.length > 0 && savedStudyId) {
+        const up = await uploadPendingDocuments("study", savedStudyId, pendingStudyDocs);
+        if (up.failed.length > 0) alert(`Étude enregistrée, mais ${up.failed.length} document(s) n'ont pas pu être envoyés :\n` + up.failed.map(f => `• ${f.name}: ${f.reason}`).join("\n"));
+        setPendingStudyDocs([]);
       }
       setShowPhotoStudyModal(false);
       setEditingStudy(null);
@@ -593,7 +620,7 @@ export default function OrdersView({ user }: { user: User }) {
       const operationalLabel=visualState==="neutral"?(o.productionStatus==="EN_PRODUCTION"?"En production":"En instance"):ORDER_STATE_LABELS[visualState];
       return (<React.Fragment key={o.id}><tr className={`cursor-pointer border-l-4 text-black [&_td]:text-black [&_span]:text-black [&_b]:text-black ${orderRowClass(visualState,o.status)}`} onClick={()=>toggleExpand(o.id)}>
         <td className="px-2 py-1.5 text-center font-bold">{expanded?"▾":"▸"}</td>
-        <td className="px-2 py-1.5 font-medium">{highlight(o.orderNumber)}{(o.items||[]).some(i=>!!i.id&&planningActiveItems.has(i.id))&&<span className="planning-blink ml-1 inline-block px-1 text-[8px] font-bold align-middle" style={{["--planning-color"]:getColor("PLANNING_EN_COURS"),["--planning-text"]:"#000000"} as React.CSSProperties} title="Production en cours (planning)">PROD</span>}</td>
+        <td className="px-2 py-1.5 font-medium">{highlight(o.orderNumber)}{(o.items||[]).some(i=>!!i.id&&planningActiveItems.has(i.id))&&<span className="planning-blink ml-1 inline-block px-1 text-[8px] font-bold align-middle" style={{["--planning-color"]:getColor("PLANNING_EN_COURS"),["--planning-text"]:"#000000"} as React.CSSProperties} title="Production en cours (planning)">PROD</span>}{(o.documentCount||0)>0&&<span onClick={(e)=>{e.stopPropagation();setDocsTarget({entity:"order",id:o.id,label:o.orderNumber})}} className={`ml-1 inline-flex items-center gap-0.5 px-1 py-0.5 text-[8px] font-bold align-middle border cursor-pointer rounded ${o.hasCahierDesCharges?"doc-blink bg-blue-100 border-blue-500 text-blue-900":"bg-blue-50 border-blue-300 text-blue-800"}`} title={o.hasCahierDesCharges?"Cahier des charges disponible":"Documents disponibles"}>📄 {o.hasCahierDesCharges?"Cahier des charges":"Docs"}{o.documentCount!>1?` (${o.documentCount})`:""}</span>}</td>
         {isColVisible("date")&&<td className="px-2 py-1.5 text-[10px]">{o.orderDate}</td>}
         <td className="px-2 py-1.5"><RecouvrementAlertCell name={highlight(o.clientName||"")} assignment={recouvByClient.get(o.clientId)} /></td>
         {isColVisible("agence")&&<td className="px-2 py-1.5 text-[10px]">{o.agencyName}</td>}
@@ -628,7 +655,7 @@ export default function OrdersView({ user }: { user: User }) {
         {(orderStudies.get(o.id) || []).map(study => (
           <React.Fragment key={`study-${study.id}`}>
             <tr className="border-b border-black/10" style={{ backgroundColor: getColor("ETUDE_PHOTOMETRIQUE"), color: "#000" }}>
-              <td className="px-1 py-1.5 text-[10px] font-bold" colSpan={2}>🔬 Étude #{study.studyNumber}</td>
+              <td className="px-1 py-1.5 text-[10px] font-bold" colSpan={2}>🔬 Étude #{study.studyNumber}{(study.documentCount||0)>0&&<button onClick={(e)=>{e.stopPropagation();setDocsTarget({entity:"study",id:study.id,label:study.studyNumber})}} className="ml-1.5 doc-blink inline-flex items-center gap-0.5 px-1 py-0.5 text-[8px] font-bold bg-blue-100 border border-blue-500 rounded text-blue-900 align-middle cursor-pointer" title="Étude disponible (document associé)">📎 Étude dispo</button>}</td>
               <td className="px-1 py-1.5 text-[10px]" colSpan={2}>{study.clientName && <><b>Client:</b> {study.clientName}</>}</td>
               <td className="px-1 py-1.5 text-[10px]" colSpan={2}>{study.note || ""}</td>
               <td className="px-1 py-1.5 text-[8px]" colSpan={3}>Par {study.createdByName} • {fmtDate(study.createdAt)}</td>
@@ -791,6 +818,21 @@ export default function OrdersView({ user }: { user: User }) {
       </fieldset>}
 
       </div>
+      {/* DOCUMENTS DE L'AFFAIRE — réutilise le module Stockage (Google Drive) existant.
+          En modification : upload/lien immédiat ; en création : les fichiers sont
+          mis en attente puis envoyés juste après l'enregistrement de la commande. */}
+      {(editingOrder||["superadmin","commercial","technique"].includes(user.role))&&<fieldset className="border border-indigo-200 dark:border-indigo-800 rounded-xl p-4 bg-indigo-50/30 dark:bg-indigo-900/10"><legend className="text-sm font-bold text-indigo-700 dark:text-indigo-300 px-2">📎 DOCUMENTS DE L'AFFAIRE</legend>
+        {editingOrder?(
+          <DocumentsPanel entity="order" entityId={editingOrder.id} user={user}
+            canAdd={["superadmin","commercial","technique"].includes(user.role)}
+            defaultCategory="CAHIER_DES_CHARGES" onChanged={fetchOrders} />
+        ):(<>
+          <PendingDocumentsZone pending={pendingOrderDocs} onChange={setPendingOrderDocs}
+            defaultCategory="CAHIER_DES_CHARGES" title="Cahier des charges / documents du projet" />
+          <p className="text-[10px] text-gray-400 mt-1">Envoyés sur Google Drive (onglet Stockage) puis associés automatiquement à la commande à l&apos;enregistrement.</p>
+        </>)}
+      </fieldset>}
+
       <div className="sticky bottom-0 bg-white dark:bg-gray-900 border-t px-5 py-3 rounded-b-2xl flex justify-end gap-2"><button onClick={()=>setShowModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Annuler</button><button onClick={handleSave} disabled={saving} className="px-6 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving?"...":editingOrder?"Enregistrer":"Créer"}</button></div></div></div>)}
 
     {showImport&&<div className="fixed inset-0 z-50 flex items-center justify-center"><div className="absolute inset-0 bg-black/50" onClick={()=>setShowImport(false)}/><div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6"><h4 className="text-lg font-semibold mb-4">📥 Import Excel</h4>{importMsg&&<div className="mb-3 p-2 rounded-lg bg-green-50 text-green-700 text-sm">{importMsg}</div>}<div className="space-y-3"><div><label className="block text-xs font-medium text-gray-600 mb-1">Type</label><select value={importType} onChange={e=>setImportType(e.target.value)} className="w-full px-3 py-2 bg-white border rounded-lg text-sm"><option value="clients">Clients</option><option value="agencies">Agences</option></select></div><div><label className="block text-xs font-medium text-gray-600 mb-1">Fichier .xlsx</label><input type="file" accept=".xlsx,.xls" ref={fileRef} className="w-full text-sm"/></div></div><div className="flex justify-end gap-2 mt-6"><button onClick={()=>setShowImport(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Annuler</button><button onClick={hi} className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700">Importer</button></div></div></div>}
@@ -902,6 +944,21 @@ export default function OrdersView({ user }: { user: User }) {
           <button onClick={() => setPhotoStudyItems([...photoStudyItems, { productName: "", lensId: "", note: "" }])} className="mt-2 text-xs text-sky-600 hover:underline">+ Ajouter un produit</button>
           {lensMaterials.length === 0 && <p className="text-[10px] text-amber-600 mt-1">Aucune lentille dans la table Matières.</p>}
         </div>
+
+        {/* Étude photométrique / Document associé — module Stockage existant.
+            En modification : ajout immédiat ; en création : upload après enregistrement. */}
+        {editingStudy ? (
+          <div className="border border-sky-200 dark:border-sky-800 rounded-xl p-3 bg-sky-50/40 dark:bg-sky-900/10">
+            <DocumentsPanel entity="study" entityId={editingStudy.id} user={user}
+              canAdd={["superadmin","technique"].includes(user.role)}
+              title="Étude photométrique / Document associé"
+              defaultCategory="ETUDE_PHOTOMETRIQUE" />
+          </div>
+        ) : (
+          <PendingDocumentsZone pending={pendingStudyDocs} onChange={setPendingStudyDocs}
+            defaultCategory="ETUDE_PHOTOMETRIQUE"
+            title="Étude photométrique / Document associé (PDF, plan…)"/>
+        )}
       </div>
       <div className="flex justify-end gap-2 mt-6">
         <button onClick={() => { setShowPhotoStudyModal(false); setEditingStudy(null); }} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Annuler</button>
@@ -939,7 +996,7 @@ export default function OrdersView({ user }: { user: User }) {
               <tbody>
                 {standaloneStudies.map(study => (
                   <tr key={study.id} className="border-b border-black/10 hover:opacity-90 align-top" style={{ backgroundColor: getColor("ETUDE_PHOTOMETRIQUE") + "33" }}>
-                    <td className="px-2 py-1.5 font-bold text-[11px] text-black">🔬 {study.studyNumber}</td>
+                    <td className="px-2 py-1.5 font-bold text-[11px] text-black">🔬 {study.studyNumber}{(study.documentCount||0)>0&&<button onClick={(e)=>{e.stopPropagation();setDocsTarget({entity:"study",id:study.id,label:study.studyNumber})}} className="doc-blink block mt-0.5 inline-flex items-center gap-0.5 px-1 py-0.5 text-[8px] font-bold bg-blue-100 border border-blue-500 rounded text-blue-900 cursor-pointer" title="Étude disponible (document associé)">📎 Étude disponible</button>}</td>
                     <td className="px-2 py-1.5 text-[11px] text-black">{study.clientName || "-"}</td>
                     <td className="px-2 py-1.5 font-medium text-[11px] text-black">{study.affaireName || "-"}</td>
                     <td className="px-2 py-1.5 text-[10px] text-black">
@@ -975,6 +1032,28 @@ export default function OrdersView({ user }: { user: User }) {
     {/* dataVersion (incrémenté à chaque rafraîchissement des commandes).  */}
     {/* ═══════════════════════════════════════════════════════════════════ */}
     <ArticleGroupingView filters={{ status: fs, agency: fa, priority: fp }} refreshKey={dataVersion} />
+    {/* MODAL DOCUMENTS CONTEXTUELS — consultation/ajout depuis l'indicateur 📄/📎.
+        Réutilise DocumentsPanel (et donc le Stockage Google Drive existant). */}
+    {docsTarget&&(
+      <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={e=>e.stopPropagation()}>
+        <div className="absolute inset-0 bg-black/50" onClick={()=>setDocsTarget(null)}/>
+        <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-xl mx-4 max-h-[80vh] overflow-y-auto p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-lg font-semibold text-gray-800 dark:text-white">
+              📄 {docsTarget.entity==="order"?`Documents — Commande #${docsTarget.label}`:`Documents — Étude ${docsTarget.label}`}
+            </h4>
+            <button onClick={()=>setDocsTarget(null)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg">
+              <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <DocumentsPanel entity={docsTarget.entity} entityId={docsTarget.id} user={user}
+            canAdd={docsTarget.entity==="order"?["superadmin","commercial","technique"].includes(user.role):["superadmin","technique"].includes(user.role)}
+            defaultCategory={docsTarget.entity==="study"?"ETUDE_PHOTOMETRIQUE":"AUTRE"}
+            onChanged={()=>{fetchOrders();fetchStandaloneStudies();}} />
+        </div>
+      </div>
+    )}
+
 </div>);
 }
 function F({l,type="text",v,onChange,disabled}:{l:string;type?:string;v:string;onChange:(v:string)=>void;disabled?:boolean}){return <div><label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">{l}</label><input type={type} value={v} onChange={e=>onChange(e.target.value)} disabled={disabled} className={`w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm ${disabled?"bg-gray-100":"bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200"}`}/></div>}
