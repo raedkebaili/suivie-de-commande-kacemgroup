@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { getUserFromHeaders } from "@/lib/auth";
-import { DRIVE_SCOPES, buildRedirectUri, makeOAuthClient, updateConfig } from "@/lib/google-drive";
+import { DRIVE_SCOPES, buildRedirectUri, makeOAuthClient, storeOAuthState } from "@/lib/google-drive";
 
 /**
  * POST /api/storage/oauth/start — SUPERADMIN UNIQUEMENT
@@ -24,10 +24,11 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // State signé : protège le callback contre les requêtes forgées
+    // State signé : protège le callback contre les requêtes forgées.
+    // Stocké dans un paramètre système dédié (et non plus dans last_error).
     const nonce = crypto.randomBytes(16).toString("hex");
     const state = `${user.id}.${nonce}`;
-    await updateConfig({ lastError: `oauth_state:${state}` });
+    await storeOAuthState(state);
 
     const url = client.generateAuthUrl({
       access_type: "offline",      // indispensable pour recevoir un refresh token

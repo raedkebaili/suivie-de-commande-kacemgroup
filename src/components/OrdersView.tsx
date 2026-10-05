@@ -308,20 +308,6 @@ export default function OrdersView({ user }: { user: User }) {
   // mais un formulaire vide sans aucune ligne n'est pas utilisable).
   const aiInit=()=>setFormItems([{articleName:"",quantity:1,unitPrice:"",description:""}]);
 
-  // Electron keyboard shortcuts (dispatched from page.tsx as custom DOM events):
-  // F2 = Nouvelle commande, F5 = Actualiser. No-op in a regular browser tab.
-  useEffect(() => {
-    // Raccourci F2 : même accès limité que le bouton (planification = Sur Stock)
-    const onNewOrder = () => { if (canCreateOrder()) { rf(); aiInit(); setShowModal(true); } };
-    const onRefresh = () => { fetchOrders(); };
-    window.addEventListener("shortcut:new-order", onNewOrder);
-    window.addEventListener("shortcut:refresh", onRefresh);
-    return () => {
-      window.removeEventListener("shortcut:new-order", onNewOrder);
-      window.removeEventListener("shortcut:refresh", onRefresh);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchOrders]);
   const oe=async(o:FullOrder)=>{
     // Always fetch fresh data from API to get latest items + tech specs
     const fresh = await apiFetch<{order:FullOrder}>(`/api/orders/${o.id}`);

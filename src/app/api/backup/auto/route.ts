@@ -7,6 +7,23 @@ import { backupHistory, systemSettings } from "@/db/schema";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 import { collectBackupData } from "@/lib/backup-data";
 import { eq } from "drizzle-orm";
+import crypto from "crypto";
+
+// CORRECTIF (R3) : comparaison résistante aux attaques temporelles + repli
+// sur JWT_SECRET quand BACKUP_SECRET n'est pas défini (le planificateur
+// serveur built-in utilise la même résolution).
+function isCronAuthorized(header: string | null): boolean {
+  const expected = process.env.BACKUP_SECRET || process.env.JWT_SECRET || "";
+  if (!header || !expected) return false;
+  const a = Buffer.from(String(header));
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  try {
+    return crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
 
 export const dynamic = "force-dynamic";
 
@@ -70,7 +87,7 @@ export async function POST(request: NextRequest) {
 
   // Permettre l'appel sans authentification pour les cron jobs (avec secret)
   const authHeader = request.headers.get("x-backup-secret");
-  const isValidCron = authHeader === process.env.BACKUP_SECRET;
+  const isValidCron = isCronAuthorized(authHeader);
 
   if (!user && !isValidCron) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });

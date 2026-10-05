@@ -27,7 +27,13 @@ import {
 
 export async function collectBackupData() {
   const data = {
-    users: await db.select().from(users),
+    // CORRECTIF SÉCURITÉ (R8) : les sauvegardes JSON ne contiennent JAMAIS
+    // les condensats de mots de passe. À la restauration, les comptes
+    // concernés reçoivent un mot de passe temporaire + mustChangePassword.
+    users: (await db.select().from(users)).map(({ passwordHash, ...safeUser }) => ({
+      ...safeUser,
+      passwordHash: null, // jamais exporté (champ conservé pour compat restauration)
+    })) as unknown as (typeof users.$inferSelect)[],
     agencies: await db.select().from(agencies),
     clients: await db.select().from(clients),
     orders: await db.select().from(orders),

@@ -5,7 +5,10 @@ import { productionUnitLib } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { getUserFromHeaders } from "@/lib/auth";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // CORRECTIF SÉCURITÉ (R11) : cet endpoint était public sans authentification.
+  const u = await getUserFromHeaders(request);
+  if (!u) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   const data = await db.select().from(productionUnitLib).orderBy(desc(productionUnitLib.usageCount)).limit(50);
   return NextResponse.json({ units: data });
 }

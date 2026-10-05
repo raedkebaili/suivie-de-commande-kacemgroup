@@ -1,20 +1,10 @@
-// Type declarations for the API exposed by electron-app/preload.js on
-// `window.electronAPI` when the Next.js app runs inside the Electron desktop
-// shell. In a regular browser, `window.electronAPI` is simply `undefined`,
-// so all consumers must optional-chain (`window.electronAPI?.foo`).
+// Déclarations de types pour la File System Access API (navigateurs Chromium),
+// utilisée par le planificateur de sauvegarde automatique
+// (src/lib/backup-scheduler.ts). Non couvertes par la lib TS standard actuelle.
 export {};
 
 declare global {
   interface Window {
-    electronAPI?: {
-      platform: string;
-      isElectron: true;
-      minimize: () => void;
-      maximize: () => void;
-      close: () => void;
-      notify: (title: string, body: string) => void;
-      onShortcut: (callback: (action: string) => void) => () => void;
-    };
     /** File System Access API — showDirectoryPicker */
     showDirectoryPicker?: (options?: {
       id?: string;
@@ -23,7 +13,6 @@ declare global {
     }) => Promise<FileSystemDirectoryHandle>;
   }
 
-  // File System Access API extensions (not yet in standard TS lib)
   interface FileSystemDirectoryHandle {
     getFileHandle(name: string, options?: { create?: boolean }): Promise<FileSystemFileHandle>;
     getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<FileSystemDirectoryHandle>;

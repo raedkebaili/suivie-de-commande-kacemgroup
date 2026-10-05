@@ -20,7 +20,7 @@ import { drive as driveApi } from "@googleapis/drive";
 import { OAuth2Client } from "google-auth-library";
 import { Readable } from "stream";
 import { db } from "@/db";
-import { storageConfig } from "@/db/schema";
+import { storageConfig, systemSettings } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 
@@ -53,6 +53,29 @@ export async function updateConfig(patch: Partial<typeof storageConfig.$inferIns
     .where(eq(storageConfig.id, cfg.id))
     .returning();
   return updated;
+}
+
+// ── Jeton anti-forge OAuth (`state`) — CORRECTIF (R11) ─────────────────
+// Avant : stocké dans le champ détourné `storage_config.last_error`.
+// Désormais : paramètre système dédié, supprimé après consommation.
+const OAUTH_STATE_KEY = "gdrive_oauth_state";
+
+/** Persiste le `state` OAuth émis au démarrage du flux. */
+export async function storeOAuthState(state: string): Promise<void> {
+  const [existing] = await db.select().from(systemSettings).where(eq(systemSettings.key, OAUTH_STATE_KEY)).limit(1);
+  if (existing) {
+    await db.update(systemSettings).set({ value: state, updatedAt: new Date().toISOString() }).where(eq(systemSettings.key, OAUTH_STATE_KEY));
+  } else {
+    await db.insert(systemSettings).values({ key: OAUTH_STATE_KEY, value: state, description: "Jeton anti-forge OAuth Google Drive (usage unique)" });
+  }
+}
+
+/** Lit et CONSOMME le `state` OAuth (usage unique). */
+export async function consumeOAuthState(): Promise<string | null> {
+  const [row] = await db.select().from(systemSettings).where(eq(systemSettings.key, OAUTH_STATE_KEY)).limit(1);
+  if (!row) return null;
+  await db.delete(systemSettings).where(eq(systemSettings.key, OAUTH_STATE_KEY));
+  return row.value;
 }
 
 /** Identifiants OAuth effectifs : base de données d'abord, variables d'env en secours */

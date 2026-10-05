@@ -7,7 +7,7 @@ import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { logActivity } from "@/lib/auth";
 import { encryptSecret } from "@/lib/crypto";
-import { buildRedirectUri, ensureRootFolder, getConfig, getCredentials, updateConfig } from "@/lib/google-drive";
+import { buildRedirectUri, consumeOAuthState, ensureRootFolder, getConfig, getCredentials, updateConfig } from "@/lib/google-drive";
 
 /**
  * GET /api/google-drive/oauth/callback
@@ -28,7 +28,7 @@ body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0f172a;
 .card{background:#1e293b;border:1px solid #334155;border-radius:16px;padding:32px;max-width:460px;text-align:center}
 .icon{font-size:44px}h1{font-size:18px;margin:12px 0 8px}p{font-size:14px;color:#94a3b8;line-height:1.5}
 a{display:inline-block;margin-top:18px;background:#2563eb;color:#fff;text-decoration:none;padding:10px 18px;border-radius:10px;font-size:14px}
-</style></head><body><div class="card"><div class="icon">${ok ? "🟢" : "🔴"}</div>
+</style></head><body><div class="card"><div class="icon"><svg width="44" height="44" viewBox="0 0 24 24" fill="none" style="display:inline-block" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke="${ok ? "#22c55e" : "#ef4444"}" stroke-width="2"/><path d="${ok ? "M8 12.5l2.5 2.5L16 9.5" : "M9 9l6 6M15 9l-6 6"}" stroke="${ok ? "#22c55e" : "#ef4444"}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
 <h1>${title}</h1><p>${message}</p><a href="/">Retourner à la plateforme</a>
 <script>try{if(window.opener){window.opener.postMessage({source:"ordertrack-gdrive",ok:${ok}},"*");setTimeout(()=>window.close(),1200)}}catch(e){}</script>
 </div></body></html>`;
@@ -50,8 +50,9 @@ export async function GET(request: NextRequest) {
   try {
     const cfg = await getConfig();
 
-    // Vérification du state émis au démarrage du flux
-    const expected = (cfg.lastError || "").startsWith("oauth_state:") ? (cfg.lastError || "").slice(12) : null;
+    // Vérification du state émis au démarrage du flux (usage unique, stocké
+    // dans un paramètre système dédié — correctif R11).
+    const expected = await consumeOAuthState();
     if (!expected || expected !== state) {
       return closePage("Connexion refusée", "La demande de connexion n'a pas pu être vérifiée (session expirée). Relancez la connexion depuis l'onglet Stockage.", false);
     }

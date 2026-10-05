@@ -9,6 +9,10 @@ export const users = pgTable("users", {
   fullName: text("full_name").notNull(),
   active: boolean("active").notNull().default(true),
   darkMode: boolean("dark_mode").notNull().default(false),
+  // CORRECTIF SÉCURITÉ (R2) : à true, l'utilisateur doit choisir un nouveau
+  // mot de passe avant tout accès aux modules (compte semé, créé par admin,
+  // ou mot de passe réinitialisé par admin).
+  mustChangePassword: boolean("must_change_password").notNull().default(false),
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
 });
 
@@ -57,7 +61,13 @@ export const orders = pgTable("orders", {
   updatedBy: text("updated_by"),
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
-});
+}, (table) => [
+  // CORRECTIF PERF (P1) : index sur les filtres et jointures fréquents.
+  index("orders_client_idx").on(table.clientId),
+  index("orders_agency_idx").on(table.agencyId),
+  index("orders_production_status_idx").on(table.productionStatus),
+  index("orders_created_at_idx").on(table.createdAt),
+]);
 
 export const orderItems = pgTable("order_items", {
   id: serial("id").primaryKey(),
@@ -86,7 +96,10 @@ export const orderItems = pgTable("order_items", {
   deliveryDate: text("delivery_date"),
   unitPrice: doublePrecision("unit_price"),
   description: text("description"),
-});
+}, (table) => [
+  // CORRECTIF PERF (P1) : toutes les requêtes articles filtrent par order_id.
+  index("order_items_order_idx").on(table.orderId),
+]);
 
 export const productionBatches = pgTable("production_batches", {
   id: serial("id").primaryKey(),
@@ -97,7 +110,10 @@ export const productionBatches = pgTable("production_batches", {
   producedBy: text("produced_by").notNull(),
   productionDate: text("production_date").notNull(),
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("production_batches_item_idx").on(table.itemId),
+  index("production_batches_order_idx").on(table.orderId),
+]);
 
 export const expeditionBatches = pgTable("expedition_batches", {
   id: serial("id").primaryKey(),
@@ -111,7 +127,10 @@ export const expeditionBatches = pgTable("expedition_batches", {
   deliveryDate: text("delivery_date").notNull(),
   note: text("note"),
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("expedition_batches_item_idx").on(table.itemId),
+  index("expedition_batches_order_idx").on(table.orderId),
+]);
 
 export const productionUnitLib = pgTable("production_unit_lib", {
   id: serial("id").primaryKey(),
@@ -170,7 +189,10 @@ export const itemTechnicalComponents = pgTable("item_technical_components", {
   enteredById: integer("entered_by_id").references(() => users.id, { onDelete: "set null" }),
   enteredByName: text("entered_by_name").notNull(),
   enteredAt: timestamp("entered_at", { mode: "string" }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("item_technical_components_item_idx").on(table.itemId),
+  index("item_technical_components_order_idx").on(table.orderId),
+]);
 
 export const activityLogs = pgTable("activity_logs", {
   id: serial("id").primaryKey(),
@@ -179,7 +201,10 @@ export const activityLogs = pgTable("activity_logs", {
   action: text("action").notNull(),
   details: text("details"),
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("activity_logs_user_idx").on(table.userId),
+  index("activity_logs_created_at_idx").on(table.createdAt),
+]);
 
 export const modificationLogs = pgTable("modification_logs", {
   id: serial("id").primaryKey(),
@@ -190,7 +215,9 @@ export const modificationLogs = pgTable("modification_logs", {
   oldValue: text("old_value"),
   newValue: text("new_value"),
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("modification_logs_order_idx").on(table.orderId),
+]);
 
 export const notifications = pgTable("notifications", {
   id: serial("id").primaryKey(),
@@ -201,7 +228,10 @@ export const notifications = pgTable("notifications", {
   orderId: integer("order_id").references(() => orders.id),
   read: boolean("read").notNull().default(false),
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("notifications_user_read_idx").on(table.userId, table.read),
+  index("notifications_order_idx").on(table.orderId),
+]);
 
 // Table pour gérer les compteurs de numéros de commande par année
 // Permet une génération thread-safe avec FOR UPDATE
@@ -269,7 +299,9 @@ export const photometricStudies = pgTable("photometric_studies", {
   createdByName: text("created_by_name").notNull(),        // Traçabilité du responsable
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("photometric_studies_order_idx").on(table.orderId),
+]);
 
 // Articles d'une étude photométrique (N articles par étude)
 export const photometricStudyItems = pgTable("photometric_study_items", {
@@ -281,7 +313,9 @@ export const photometricStudyItems = pgTable("photometric_study_items", {
   lensLabel: text("lens_label"),                           // Copie du libellé pour historique
   note: text("note"),                                      // Note par article
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("photometric_study_items_study_idx").on(table.studyId),
+]);
 
 // ── Recouvrement (ajout) ────────────────────────────────────────────
 // Catalogue dynamique des états de recouvrement.
@@ -383,7 +417,11 @@ export const productionPlanEntries = pgTable("production_plan_entries", {
   updatedByName: text("updated_by_name"),
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("production_plan_entries_date_factory_idx").on(table.planDate, table.factoryId),
+  index("production_plan_entries_status_idx").on(table.status),
+  index("production_plan_entries_item_idx").on(table.itemId),
+]);
 
 // ── Archive commandes (module indépendant) ──────────────────────────
 // Données historiques importées depuis Excel. STRICTEMENT SÉPARÉES des
@@ -422,7 +460,9 @@ export const archiveRows = pgTable("archive_rows", {
   updatedById: integer("updated_by_id").references(() => users.id, { onDelete: "set null" }),
   updatedByName: text("updated_by_name"),
   updatedAt: timestamp("updated_at", { mode: "string" }),
-});
+}, (table) => [
+  index("archive_rows_sheet_idx").on(table.sheetId),
+]);
 
 // Couleur personnalisée d'UNE cellule précise (prioritaire sur la couleur de ligne).
 // Unicité garantie par (rowId, columnIndex) : deux cellules identiques de
@@ -448,7 +488,9 @@ export const clientRecouvrementLogs = pgTable("client_recouvrement_logs", {
   userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
   username: text("username").notNull(),
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("client_recouvrement_logs_client_idx").on(table.clientId),
+]);
 
 // ── Documents contextuels (gestion documentaire basée sur le Stockage) ──
 // Association LOGIQUE entre un fichier Google Drive existant et une entité

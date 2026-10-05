@@ -5,16 +5,38 @@ import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { verifyPassword, createToken, logActivity, seedDefaultUser } from "@/lib/auth";
 import { friendlyDbErrorMessage } from "@/lib/db-error";
+import { clientIp, consumeRateLimit, resetRateLimit } from "@/lib/rate-limit";
+
+// CORRECTIF SÉCURITÉ (R4) : anti force-brute — 5 échecs / 15 min par
+// combinaison (IP + identifiant). Réinitialisé à chaque succès.
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 
 export async function POST(request: NextRequest) {
   try {
-    // db is synchronous
     await seedDefaultUser();
 
-    const { username, password } = await request.json();
+    let body: { username?: string; password?: string };
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Requête invalide" }, { status: 400 });
+    }
+
+    const username = String(body.username || "").trim();
+    const password = String(body.password || "");
 
     if (!username || !password) {
       return NextResponse.json({ error: "Nom d'utilisateur et mot de passe requis" }, { status: 400 });
+    }
+
+    const rlKey = `login:${clientIp(request)}:${username.toLowerCase()}`;
+    const rl = consumeRateLimit(rlKey, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: "Trop de tentatives. Réessayez dans quelques minutes." },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } },
+      );
     }
 
     const rows = await db.select().from(users).where(eq(users.username, username)).limit(1);
@@ -24,8 +46,11 @@ export async function POST(request: NextRequest) {
 
     const valid = await verifyPassword(password, rows[0].passwordHash);
     if (!valid) {
+      try { await logActivity(rows[0].id, rows[0].username, "LOGIN_FAILED", `Tentative de connexion échouée (${clientIp(request)})`); } catch { /* ok */ }
       return NextResponse.json({ error: "Identifiants invalides" }, { status: 401 });
     }
+
+    resetRateLimit(rlKey);
 
     const payload = {
       id: rows[0].id,
@@ -39,7 +64,12 @@ export async function POST(request: NextRequest) {
 
     try { await logActivity(rows[0].id, rows[0].username, "LOGIN", "Connexion"); } catch { /* ok */ }
 
-    return NextResponse.json({ token, user: payload });
+    // CORRECTIF (R2) : le drapeau mustChangePassword force l'écran de
+    // changement de mot de passe (compte semé ou mot de passe réinitialisé).
+    return NextResponse.json({
+      token,
+      user: { ...payload, mustChangePassword: rows[0].mustChangePassword },
+    });
   } catch (error) {
     console.error("Login error:", error);
     return NextResponse.json({ error: friendlyDbErrorMessage(error) }, { status: 500 });

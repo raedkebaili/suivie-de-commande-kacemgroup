@@ -10,8 +10,9 @@ import {
   archiveSheets, archiveRows, archiveCellColors,
   productionPlanEntries, factories, storageConfig,
 } from "@/db/schema";
-import { getUserFromHeaders, logActivity } from "@/lib/auth";
+import { getUserFromHeaders, logActivity, hashPassword } from "@/lib/auth";
 import { collectBackupData } from "@/lib/backup-data";
+import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
 
@@ -93,7 +94,19 @@ export async function POST(request: NextRequest) {
     return Array.isArray(v) ? (v as T[]) : [];
   };
 
-  const usersRows = arr<typeof users.$inferInsert>("users");
+  // CORRECTIF SÉCURITÉ (R8) : les sauvegardes récentes n'exportent plus les
+  // condensats de mots de passe. À la restauration, tout compte sans hash
+  // reçoit un mot de passe temporaire aléatoire (journalisé ci-dessous) et
+  // devra le changer à la première connexion.
+  const rawUsersRows = arr<Record<string, unknown>>("users");
+  const needsPasswordReset = rawUsersRows.some(u => !u.passwordHash);
+  const temporaryPassword = needsPasswordReset ? crypto.randomBytes(9).toString("base64url") : null;
+  const temporaryPasswordHash = temporaryPassword ? await hashPassword(temporaryPassword) : null;
+  const usersRows = rawUsersRows.map(u => ({
+    ...u,
+    passwordHash: (u.passwordHash as string | null) ?? temporaryPasswordHash,
+    mustChangePassword: u.passwordHash ? (u.mustChangePassword ?? false) : true,
+  })) as (typeof users.$inferInsert)[];
   const agenciesRows = arr<typeof agencies.$inferInsert>("agencies");
   const clientsRows = arr<typeof clients.$inferInsert>("clients");
   const ordersRows = arr<typeof orders.$inferInsert>("orders");
@@ -266,5 +279,13 @@ export async function POST(request: NextRequest) {
 
   await logActivity(user.id, user.username, "BACKUP_RESTORE", `Restauration effectuée: ${totalRestored} enregistrements`);
 
-  return NextResponse.json({ ok: true, restored: totalRestored });
+  return NextResponse.json({
+    ok: true,
+    restored: totalRestored,
+    // Affiché une seule fois à l'administrateur quand la sauvegarde ne
+    // contenait pas les hash (export sécurisé) : à communiquer aux comptes.
+    ...(needsPasswordReset && temporaryPassword
+      ? { temporaryPassword, temporaryPasswordNotice: "Les comptes restaurés sans mot de passe devront utiliser ce mot de passe temporaire, puis le changer à la première connexion." }
+      : {}),
+  });
 }

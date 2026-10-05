@@ -2,26 +2,41 @@
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { useAuth } from "@/lib/auth-context";
 import { apiFetch } from "@/lib/api";
 import Sidebar from "@/components/Sidebar";
-import DashboardView from "@/components/DashboardView";
-import OrdersView from "@/components/OrdersView";
-import AgenciesView from "@/components/AgenciesView";
-import ClientsView from "@/components/ClientsView";
-import UsersView from "@/components/UsersView";
-import WatchdogView from "@/components/WatchdogView";
-import ProductionView from "@/components/ProductionView";
-import ExpeditionView from "@/components/ExpeditionView";
-import MatiereView from "@/components/MatiereView";
-import BackupView from "@/components/BackupView";
-import ColorsView from "@/components/ColorsView";
-import RecouvrementView from "@/components/RecouvrementView";
-import ArchiveView from "@/components/ArchiveView";
-import PlanningProductionView from "@/components/PlanningProductionView";
-import FactoriesView from "@/components/FactoriesView";
-import TelegestionView from "@/components/TelegestionView";
-import StorageView from "@/components/StorageView";
+
+// CORRECTIF PERF (R10) : chaque onglet est chargé à la demande (code-splitting)
+// au lieu d'embarquer les 17 vues — recharts, éditeurs, panneaux — dans le
+// bundle initial. Comportement fonctionnel identique ; fallback visuel léger.
+const TabLoader = () => (
+  <div className="flex h-64 items-center justify-center">
+    <svg className="animate-spin h-7 w-7 text-blue-600" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    </svg>
+  </div>
+);
+
+const DashboardView = dynamic(() => import("@/components/DashboardView"), { loading: TabLoader });
+const OrdersView = dynamic(() => import("@/components/OrdersView"), { loading: TabLoader });
+const AgenciesView = dynamic(() => import("@/components/AgenciesView"), { loading: TabLoader });
+const ClientsView = dynamic(() => import("@/components/ClientsView"), { loading: TabLoader });
+const UsersView = dynamic(() => import("@/components/UsersView"), { loading: TabLoader });
+const WatchdogView = dynamic(() => import("@/components/WatchdogView"), { loading: TabLoader });
+const ProductionView = dynamic(() => import("@/components/ProductionView"), { loading: TabLoader });
+const ExpeditionView = dynamic(() => import("@/components/ExpeditionView"), { loading: TabLoader });
+const MatiereView = dynamic(() => import("@/components/MatiereView"), { loading: TabLoader });
+const BackupView = dynamic(() => import("@/components/BackupView"), { loading: TabLoader });
+const ColorsView = dynamic(() => import("@/components/ColorsView"), { loading: TabLoader });
+const RecouvrementView = dynamic(() => import("@/components/RecouvrementView"), { loading: TabLoader });
+const ArchiveView = dynamic(() => import("@/components/ArchiveView"), { loading: TabLoader });
+const PlanningProductionView = dynamic(() => import("@/components/PlanningProductionView"), { loading: TabLoader });
+const FactoriesView = dynamic(() => import("@/components/FactoriesView"), { loading: TabLoader });
+const TelegestionView = dynamic(() => import("@/components/TelegestionView"), { loading: TabLoader });
+const StorageView = dynamic(() => import("@/components/StorageView"), { loading: TabLoader });
+import ForcePasswordChange from "@/components/ForcePasswordChange";
 import type { Notification } from "@/lib/types";
 import { startBackupScheduler, stopBackupScheduler } from "@/lib/backup-scheduler";
 
@@ -67,9 +82,6 @@ export default function HomePage() {
   const [searchResults, setSearchResults] = useState<{orders: unknown[]; items: unknown[]; clients: unknown[]} | null>(null);
   const [showSearch, setShowSearch] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  // Tracks a shortcut action (e.g. "new-order") that needs the target tab to
-  // finish mounting before it can be dispatched to the child view.
-  const pendingShortcutRef = useRef<string | null>(null);
 
   const availableTabs = useMemo(() => (user ? TABS.filter(t => t.roles.includes(user.role)) : []), [user]);
 
@@ -116,63 +128,6 @@ export default function HomePage() {
     }
   }, [user?.role]);
 
-  // Once the "orders" tab has actually mounted, flush any pending shortcut
-  // action (e.g. F2 pressed while on another tab) to OrdersView via a custom
-  // DOM event — this decouples page.tsx from OrdersView's internals.
-  useEffect(() => {
-    if (activeTab === "orders" && pendingShortcutRef.current) {
-      const action = pendingShortcutRef.current;
-      pendingShortcutRef.current = null;
-      requestAnimationFrame(() => window.dispatchEvent(new CustomEvent(`shortcut:${action}`)));
-    }
-  }, [activeTab]);
-
-  // ── Electron keyboard shortcuts (F2 = new order, F6 = dashboard, etc.) ──
-  // window.electronAPI is only defined when running inside the Electron
-  // desktop shell (see electron-app/preload.js); it's a no-op in the browser.
-  useEffect(() => {
-    const unsubscribe = window.electronAPI?.onShortcut((action: string) => {
-      if (!user) return;
-      const allowedKeys = new Set(availableTabs.map(t => t.key));
-
-      if ((TABS.some(t => t.key === action)) && allowedKeys.has(action as Tab)) {
-        setActiveTab(action as Tab);
-        return;
-      }
-
-      switch (action) {
-        case "new-order":
-          if (allowedKeys.has("orders")) {
-            if (activeTab === "orders") {
-              window.dispatchEvent(new CustomEvent("shortcut:new-order"));
-            } else {
-              pendingShortcutRef.current = "new-order";
-              setActiveTab("orders");
-            }
-          }
-          break;
-        case "refresh":
-          window.dispatchEvent(new CustomEvent("shortcut:refresh"));
-          break;
-        case "search":
-          searchInputRef.current?.focus();
-          break;
-        case "notifications":
-          setShowNotifs(v => !v);
-          break;
-        case "toggle-dark":
-          setDarkMode(d => !d);
-          break;
-        case "logout":
-          logout().then(() => router.push("/login"));
-          break;
-        default:
-          break;
-      }
-    });
-    return unsubscribe;
-  }, [user, availableTabs, activeTab, logout, router]);
-
   const markRead = async (id: number) => {
     await apiFetch(`/api/notifications/${id}`, { method: "PUT", body: JSON.stringify({ read: true }) });
     fetchNotifications();
@@ -180,6 +135,10 @@ export default function HomePage() {
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950"><div className="flex flex-col items-center gap-3"><svg className="animate-spin w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg><span className="text-sm text-gray-500 dark:text-gray-400">Chargement...</span></div></div>;
   if (!user) return null;
+
+  // CORRECTIF SÉCURITÉ (R2) : tant que le mot de passe temporaire n'est pas
+  // remplacé, aucun module n'est accessible (barrière applicative complète).
+  if (user.mustChangePassword) return <ForcePasswordChange />;
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -216,7 +175,7 @@ export default function HomePage() {
             <span className="text-xs bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full font-medium">KACEM GROUP</span>
             {/* Search bar */}
             <div className="hidden md:flex items-center gap-2 flex-1 max-w-md mx-4 relative">
-              <input ref={searchInputRef} type="text" placeholder="🔍 Rechercher commande, client, affaire, article... (F3)"
+              <input ref={searchInputRef} type="text" placeholder="Rechercher commande, client, affaire, article…"
                 value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                 onFocus={() => searchResults && setShowSearch(true)}
                 onBlur={() => setTimeout(() => setShowSearch(false), 200)}
