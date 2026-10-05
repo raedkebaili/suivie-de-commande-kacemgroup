@@ -798,6 +798,14 @@ export default function OrdersView({ user }: { user: User }) {
   const studyOrderOptions: SearchOption[] = useMemo(() =>
     orders.map(o => ({ id: o.id, label: o.orderNumber, sub: `${o.affaire || "Sans affaire"} · ${o.clientName || "Sans client"}` })),
   [orders]);
+  const studyClientOptions: SearchOption[] = useMemo(() =>
+    clients.map(client => ({
+      id: client.id,
+      label: client.name,
+      sub: `Code client : ${client.code}`,
+      hint: [client.contactName, client.email, client.phone].filter(Boolean).join(" · ") || null,
+    })),
+  [clients]);
   const studyLensOptions: SearchOption[] = useMemo(() =>
     lensMaterials.map(m => ({ id: m.id, label: `${m.reference} — ${m.name}`, sub: m.specs || undefined })),
   [lensMaterials]);
@@ -1243,11 +1251,13 @@ export default function OrdersView({ user }: { user: User }) {
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Client</label>
-            <select value={photoStudyForm.clientId} onChange={e=>setPhotoStudyForm({...photoStudyForm, clientId: e.target.value})}
-              className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm">
-              <option value="">— Aucun client —</option>
-              {clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            <SearchSelect
+              options={studyClientOptions}
+              value={photoStudyForm.clientId ? parseInt(photoStudyForm.clientId) : null}
+              onChange={id => setPhotoStudyForm({ ...photoStudyForm, clientId: id ? String(id) : "" })}
+              placeholder="Rechercher par nom, code, contact…"
+              emptyText="Aucun client trouvé"
+            />
           </div>
         </div>
         {/* Note globale */}
