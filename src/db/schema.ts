@@ -73,6 +73,9 @@ export const orderItems = pgTable("order_items", {
   id: serial("id").primaryKey(),
   orderId: integer("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),
   articleName: text("article_name").notNull(),
+  // ÉVOLUTION ÉTUDES (§7) : référence article (ex. NLX100) — recherche intelligente.
+  // NULLable : les articles existants restent valides sans migration de données.
+  reference: text("reference"),
   quantity: integer("quantity").notNull().default(1),
   note: text("note"),
   clientSpec: text("client_spec"),
@@ -307,7 +310,15 @@ export const photometricStudies = pgTable("photometric_studies", {
 export const photometricStudyItems = pgTable("photometric_study_items", {
   id: serial("id").primaryKey(),
   studyId: integer("study_id").notNull().references(() => photometricStudies.id, { onDelete: "cascade" }),
-  productName: text("product_name").notNull(),             // Produit concerné
+  // ÉVOLUTION ÉTUDES (§3-§5) : lien STRICT vers l'article réel de la commande.
+  // NULL = étude indépendante (cas 2) OU ligne historique (avant l'évolution).
+  // SET NULL : si l'article disparaît, productName (snapshot) préserve l'historique.
+  orderItemId: integer("order_item_id").references(() => orderItems.id, { onDelete: "set null" }),
+  productName: text("product_name").notNull(),             // Produit concerné (snapshot serveur en mode commande)
+  // ÉVOLUTION ÉTUDES (§10-§21) : lens_id (EXISTANT) devient officiellement
+  // l'OVERRIDE imposé par l'étude — priorité absolue sur order_items.lens
+  // pour cette étude uniquement (cf. src/lib/study-lens.ts). La fiche article
+  // n'est JAMAIS modifiée par une étude.
   lensId: integer("lens_id").references(() => matieres.id, { onDelete: "set null" }),
   lensReference: text("lens_reference"),                   // Copie de la référence pour historique
   lensLabel: text("lens_label"),                           // Copie du libellé pour historique
@@ -315,6 +326,7 @@ export const photometricStudyItems = pgTable("photometric_study_items", {
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
 }, (table) => [
   index("photometric_study_items_study_idx").on(table.studyId),
+  index("photometric_study_items_order_item_idx").on(table.orderItemId),
 ]);
 
 // ── Recouvrement (ajout) ────────────────────────────────────────────

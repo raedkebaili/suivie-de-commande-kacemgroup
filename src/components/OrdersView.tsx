@@ -6,6 +6,9 @@ import RecouvrementAlertCell from "@/components/RecouvrementAlertCell";
 import ArticleGroupingView from "@/components/ArticleGroupingView";
 import AutocompleteInput from "@/components/AutocompleteInput";
 import CategoryMaterialSelect from "@/components/CategoryMaterialSelect";
+import SearchSelect, { type SearchOption } from "@/components/SearchSelect";
+import { articleLensToValue, LENS_OVERRIDE_MESSAGE, lensSourceBadge, resolveStudyLens } from "@/lib/study-lens";
+import { sanitizeItemsOnOrderChange, type ArticleOption } from "@/lib/study-search";
 import { PRIORITY_LABELS } from "@/lib/types";
 import { PRIORITY_OPTIONS, priorityColorKey, priorityLabel } from "@/lib/priority";
 import { getOrderVisualState, ORDER_STATE_LABELS, ORDER_STATE_PANEL_CLASSES, ORDER_STATE_ROW_CLASSES, OrderVisualState } from "@/lib/order-visual-state";
@@ -112,12 +115,18 @@ export default function OrdersView({ user }: { user: User }) {
   const [orderModificationsCache, setOrderModificationsCache] = useState<Map<number, Map<string, Set<string>>>>(new Map());
   
   // Études photométriques
-  type PhotoStudyItem = { id?: number; productName: string; lensId: string; lensReference?: string | null; lensLabel?: string | null; note: string };
+  // ÉVOLUTION §3-§21 : orderItemId = lien strict article ∈ commande ;
+  // effectiveLens/lensSource/overridden = résolution backend (additifs).
+  type PhotoStudyItem = { id?: number; orderItemId?: number | null; productName: string; lensId: string; lensReference?: string | null; lensLabel?: string | null; note: string; articleLens?: string | null; effectiveLens?: { reference: string; label: string } | null; lensSource?: "study" | "article" | null; overridden?: boolean };
   type PhotoStudy = { id: number; studyNumber: string; affaireName: string | null; orderId: number | null; clientId: number | null; clientName: string | null; note: string | null; createdByName: string; createdAt: string; documentCount?: number; items: PhotoStudyItem[] };
   const [showPhotoStudyModal, setShowPhotoStudyModal] = useState(false);
   const [photoStudyMode, setPhotoStudyMode] = useState<"order" | "standalone">("order");
   const [photoStudyForm, setPhotoStudyForm] = useState({ id: "", orderId: "", clientId: "", affaireName: "", studyNumber: "", note: "" });
-  const [photoStudyItems, setPhotoStudyItems] = useState<PhotoStudyItem[]>([{ productName: "", lensId: "", note: "" }]);
+  const [photoStudyItems, setPhotoStudyItems] = useState<PhotoStudyItem[]>([{ orderItemId: null, productName: "", lensId: "", note: "" }]);
+  // ÉVOLUTION §3-§5 : articles de la commande sélectionnée (filtrage strict).
+  const [studyOrderArticles, setStudyOrderArticles] = useState<ArticleOption[]>([]);
+  const [studyArticlesLoading, setStudyArticlesLoading] = useState(false);
+  const [studyInvalidatedMsg, setStudyInvalidatedMsg] = useState("");
   const [photoStudySaving, setPhotoStudySaving] = useState(false);
   const [editingStudy, setEditingStudy] = useState<PhotoStudy | null>(null);
   const [orderStudies, setOrderStudies] = useState<Map<number, PhotoStudy[]>>(new Map());
@@ -393,14 +402,17 @@ export default function OrdersView({ user }: { user: User }) {
     if (study) {
       setEditingStudy(study);
       setPhotoStudyForm({ id: String(study.id), orderId: study.orderId ? String(study.orderId) : "", clientId: study.clientId ? String(study.clientId) : "", affaireName: study.affaireName || "", studyNumber: study.studyNumber, note: study.note || "" });
-      setPhotoStudyItems(study.items.length > 0 ? study.items.map(i => ({ productName: i.productName, lensId: i.lensId ? String(i.lensId) : "", note: i.note || "" })) : [{ productName: "", lensId: "", note: "" }]);
+      // §18 : récupérer la lentille existante, conserver l'override (lensId renvoyé tel quel).
+      setPhotoStudyItems(study.items.length > 0 ? study.items.map(i => ({ orderItemId: i.orderItemId ?? null, productName: i.productName, lensId: i.lensId ? String(i.lensId) : "", lensReference: i.lensReference ?? null, lensLabel: i.lensLabel ?? null, note: i.note || "" })) : [{ orderItemId: null, productName: "", lensId: "", note: "" }]);
       setPhotoStudyMode(study.orderId ? "order" : "standalone");
     } else {
       setEditingStudy(null);
       setPhotoStudyForm({ id: "", orderId: "", clientId: "", affaireName: "", studyNumber: "", note: "" });
-      setPhotoStudyItems([{ productName: "", lensId: "", note: "" }]);
+      setPhotoStudyItems([{ orderItemId: null, productName: "", lensId: "", note: "" }]);
       setPhotoStudyMode("order");
+      setStudyOrderArticles([]);
     }
+    setStudyInvalidatedMsg("");
     setPendingStudyDocs([]);
     setShowPhotoStudyModal(true);
     setError("");
@@ -408,10 +420,15 @@ export default function OrdersView({ user }: { user: User }) {
 
   const savePhotoStudy = async () => {
     if (!photoStudyForm.studyNumber.trim()) { setError("N° d'étude requis"); return; }
-    const validItems = photoStudyItems.filter(i => i.productName.trim());
-    if (validItems.length === 0) { setError("Au moins un produit requis"); return; }
     if (photoStudyMode === "order" && !photoStudyForm.orderId) { setError("Sélectionnez une commande"); return; }
     if (photoStudyMode === "standalone" && !photoStudyForm.affaireName.trim()) { setError("Saisissez le nom de l'affaire"); return; }
+    // §3 : en mode commande, chaque ligne DOIT être un article de la commande
+    // (liste contrôlée — le backend re-vérifie et le serveur fait foi pour le nom).
+    if (photoStudyMode === "order" && photoStudyItems.some(i => !i.orderItemId)) { setError("Chaque produit doit être un article de la commande sélectionnée"); return; }
+    const validItems = photoStudyMode === "order"
+      ? photoStudyItems.filter(i => i.orderItemId)
+      : photoStudyItems.filter(i => i.productName.trim());
+    if (validItems.length === 0) { setError("Au moins un produit requis"); return; }
       setPhotoStudySaving(true);
     setError("");
     try {
@@ -419,7 +436,7 @@ export default function OrdersView({ user }: { user: User }) {
         studyNumber: photoStudyForm.studyNumber,
         note: photoStudyForm.note,
         clientId: photoStudyForm.clientId || null,
-        items: validItems,
+        items: validItems.map(i => ({ orderItemId: i.orderItemId ?? null, productName: i.productName, lensId: i.lensId ? parseInt(i.lensId) : null, note: i.note })),
       };
       if (photoStudyMode === "order") payload.orderId = photoStudyForm.orderId;
       else payload.affaireName = photoStudyForm.affaireName;
@@ -479,6 +496,83 @@ export default function OrdersView({ user }: { user: User }) {
 
   const lensCategory = materialCategories.find(c => c.key === "lens" || c.name.toLowerCase().includes("lentille"));
   const lensMaterials = lensCategory ? materials.filter(m => m.categoryId === lensCategory.id) : [];
+
+  // ── ÉVOLUTION ÉTUDES §3-§5 : articles strictement ∈ commande sélectionnée ──
+  // Au changement de commande : recharger les articles, invalider les lignes
+  // devenues hors périmètre (jamais Commande B + article de Commande A),
+  // et relier automatiquement les lignes historiques par nom exact.
+  useEffect(() => {
+    if (!showPhotoStudyModal || photoStudyMode !== "order" || !photoStudyForm.orderId) {
+      if (!photoStudyForm.orderId) {
+        setStudyOrderArticles([]);
+        // Commande effacée : invalider toutes les lignes liées.
+        setPhotoStudyItems(prev => {
+          if (!prev.some(l => l.orderItemId)) return prev;
+          setStudyInvalidatedMsg("⚠ Commande effacée : les articles sélectionnés ont été invalidés.");
+          return prev.map(l => ({ ...l, orderItemId: null }));
+        });
+      }
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setStudyArticlesLoading(true);
+      try {
+        const d = await apiFetch<{ items: ArticleOption[] }>(`/api/orders/${photoStudyForm.orderId}/items`);
+        if (cancelled) return;
+        const list = d.items || [];
+        setStudyOrderArticles(list);
+        setPhotoStudyItems(prev => {
+          // 1) Invalider les lignes hors périmètre (changement de commande).
+          const cleaned = sanitizeItemsOnOrderChange(
+            prev.map(l => ({ ...l, orderItemId: l.orderItemId ?? null })),
+            list
+          );
+          const dropped = prev.filter((l, i) => l.orderItemId && !cleaned[i].orderItemId).length;
+          // 2) Relier les lignes historiques (nom exact, insensible à la casse).
+          // 3) Backfiller productName depuis l'article (cohérence d'affichage).
+          const byId = new Map(list.map(a => [a.id, a]));
+          const next = cleaned.map(l => {
+            if (!l.orderItemId && l.productName.trim()) {
+              const name = l.productName.trim().toLowerCase();
+              const matches = list.filter(a => a.articleName.trim().toLowerCase() === name);
+              if (matches.length === 1) return { ...l, orderItemId: matches[0].id, productName: matches[0].articleName };
+            }
+            if (l.orderItemId && byId.has(l.orderItemId)) {
+              const a = byId.get(l.orderItemId)!;
+              if (l.productName !== a.articleName) return { ...l, productName: a.articleName };
+            }
+            return l;
+          });
+          if (dropped > 0) {
+            setStudyInvalidatedMsg(`⚠ Commande changée : ${dropped} article(s) n'appartiennent pas à cette commande et ont été invalidés.`);
+          }
+          return next;
+        });
+      } catch {
+        if (!cancelled) setStudyOrderArticles([]);
+      } finally {
+        if (!cancelled) setStudyArticlesLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPhotoStudyModal, photoStudyMode, photoStudyForm.orderId]);
+
+  // Options de recherche (listes contrôlées + SearchSelect).
+  const studyOrderOptions: SearchOption[] = useMemo(() =>
+    orders.map(o => ({ id: o.id, label: o.orderNumber, sub: `${o.affaire || "Sans affaire"} · ${o.clientName || "Sans client"}` })),
+  [orders]);
+  const studyLensOptions: SearchOption[] = useMemo(() =>
+    lensMaterials.map(m => ({ id: m.id, label: `${m.reference} — ${m.name}`, sub: m.specs || undefined })),
+  [lensMaterials]);
+  const studyArticleOptions: SearchOption[] = useMemo(() =>
+    studyOrderArticles.map(a => ({
+      id: a.id,
+      label: `${a.reference ? `${a.reference} · ` : ""}${a.articleName}`,
+      sub: `Qté ${a.quantity}${a.lens ? ` · Lentille article : ${a.lens}` : " · Sans lentille article"}`,
+    })),
+  [studyOrderArticles]);
 
   // Badge de priorité : couleur pilotée par le gestionnaire de couleurs
   // (clés PRIORITY_P1…P10 + valeurs historiques), texte contrasté automatiquement.
@@ -654,7 +748,7 @@ export default function OrdersView({ user }: { user: User }) {
               <tr key={`si-${study.id}-${idx}`} className="border-b border-black/10" style={{ backgroundColor: getColor("ETUDE_PHOTOMETRIQUE") + "88", color: "#000" }}>
                 <td className="px-1 py-1 text-[9px]"></td>
                 <td className="px-1 py-1 text-[10px] font-medium" colSpan={2}>↳ {si.productName}</td>
-                <td className="px-1 py-1 text-[10px]" colSpan={2}>{si.lensReference ? <span><b>{si.lensReference}</b></span> : ""}</td>
+                <td className="px-1 py-1 text-[10px]" colSpan={2}>{si.lensReference ? <span><b>{si.lensReference}</b>{si.overridden ? <span title="Imposée par l'étude photométrique (priorité sur la spec article)"> 🔒</span> : ""}</span> : (si.effectiveLens ? <span className="italic">défaut: {si.effectiveLens.reference}</span> : "")}</td>
                 <td className="px-1 py-1 text-[10px]" colSpan={2}>{si.lensLabel || <span className="italic text-gray-600">—</span>}</td>
                 <td className="px-1 py-1 text-[9px]" colSpan={4}>{si.note || ""}</td>
               </tr>
@@ -851,15 +945,14 @@ export default function OrdersView({ user }: { user: User }) {
       </div>
 
       <div className="space-y-4">
-        {/* Cas 1 : Sélection d'une commande existante */}
+        {/* Cas 1 : Sélection d'une commande existante (recherche intelligente, liste contrôlée) */}
         {photoStudyMode==="order" && (
           <div>
-            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Commande *</label>
-            <select value={photoStudyForm.orderId} onChange={e=>setPhotoStudyForm({...photoStudyForm, orderId: e.target.value})}
-              className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm">
-              <option value="">— Sélectionner une commande —</option>
-              {orders.map(o=><option key={o.id} value={o.id}>{o.orderNumber} — {o.affaire || o.clientName || "Sans affaire"}</option>)}
-            </select>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Commande * (recherche : n°, affaire, client)</label>
+            <SearchSelect options={studyOrderOptions} value={photoStudyForm.orderId ? parseInt(photoStudyForm.orderId) : null}
+              onChange={id => { setStudyInvalidatedMsg(""); setPhotoStudyForm({ ...photoStudyForm, orderId: id ? String(id) : "" }); }}
+              placeholder="Taper pour rechercher une commande… (ex. 125, stade, tunis)" emptyText="Aucune commande trouvée" />
+            {studyInvalidatedMsg && <p className="mt-1.5 rounded-lg bg-amber-50 p-2 text-[12px] font-semibold text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">{studyInvalidatedMsg}</p>}
           </div>
         )}
 
@@ -894,40 +987,79 @@ export default function OrdersView({ user }: { user: User }) {
           <input type="text" value={photoStudyForm.note} onChange={e=>setPhotoStudyForm({...photoStudyForm, note: e.target.value})}
             placeholder="Note libre..." className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"/>
         </div>
-        {/* Produits (N articles) */}
+        {/* Produits (N articles) — ÉVOLUTION : articles ∈ commande + override lentille */}
         <div>
-          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Produits Concernés *</label>
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+            Produits Concernés *{photoStudyMode === "order" && photoStudyForm.orderId && (
+              <span className="font-normal"> — {studyArticlesLoading ? "chargement…" : `${studyOrderArticles.length} article(s) dans cette commande (filtrage strict)`}</span>
+            )}
+          </label>
           <div className="hidden md:flex gap-2 mb-1 px-0.5 text-[10px] font-semibold text-gray-500">
-            <span className="flex-[3]">Produit</span>
-            <span className="flex-[2]">Lentille</span>
+            <span className="flex-[3]">{photoStudyMode === "order" ? "Article (commande uniquement)" : "Produit"}</span>
+            <span className="flex-[2]">Lentille imposée par l&apos;étude</span>
             <span className="flex-[2]">Note produit</span>
             <span className="w-7"></span>
           </div>
           <div className="space-y-2">
-            {photoStudyItems.map((si, idx) => (
-              <div key={idx} className="flex gap-2 items-center">
-                <div className="flex-[3] min-w-0">
-                  <AutocompleteInput value={si.productName} onChange={v => { const u = [...photoStudyItems]; u[idx] = { ...u[idx], productName: v }; setPhotoStudyItems(u); }}
-                    suggestUrl="/api/library/articles" placeholder="Nom du produit"/>
+            {photoStudyItems.map((si, idx) => {
+              const article = studyOrderArticles.find(a => a.id === (si.orderItemId ?? null)) || null;
+              const studyLensMat = si.lensId ? lensMaterials.find(m => m.id === parseInt(si.lensId)) || null : null;
+              const studyLens = studyLensMat
+                ? { reference: studyLensMat.reference, label: studyLensMat.name }
+                : (si.lensReference ? { reference: si.lensReference, label: si.lensLabel || "" } : null);
+              const resolved = resolveStudyLens(articleLensToValue(article?.lens), studyLens);
+              const badge = lensSourceBadge(resolved.source);
+              return (
+              <div key={idx} className="rounded-lg border border-gray-200 dark:border-gray-700 p-2">
+                <div className="flex gap-2 items-center">
+                  <div className="flex-[3] min-w-0">
+                    {photoStudyMode === "order" ? (
+                      <SearchSelect options={studyArticleOptions} value={si.orderItemId ?? null}
+                        onChange={id => { const u = [...photoStudyItems]; const art = studyOrderArticles.find(a => a.id === id); u[idx] = { ...u[idx], orderItemId: id, productName: art ? art.articleName : "" }; setPhotoStudyItems(u); }}
+                        placeholder={!photoStudyForm.orderId ? "Sélectionnez d'abord une commande" : "Taper : net, apollo, NLX100…"}
+                        disabled={!photoStudyForm.orderId || studyArticlesLoading} loading={studyArticlesLoading}
+                        emptyText={!photoStudyForm.orderId ? "Aucune commande sélectionnée" : "Aucun article dans cette commande"} />
+                    ) : (
+                      <AutocompleteInput value={si.productName} onChange={v => { const u = [...photoStudyItems]; u[idx] = { ...u[idx], productName: v }; setPhotoStudyItems(u); }}
+                        suggestUrl="/api/library/articles" placeholder="Nom du produit"/>
+                    )}
+                  </div>
+                  <div className="flex-[2] min-w-0">
+                    <SearchSelect options={studyLensOptions} value={si.lensId ? parseInt(si.lensId) : null}
+                      onChange={id => { const u = [...photoStudyItems]; u[idx] = { ...u[idx], lensId: id ? String(id) : "" }; setPhotoStudyItems(u); }}
+                      placeholder="Lentille : LENS-B, intensive…" emptyText="Aucune lentille trouvée" />
+                  </div>
+                  <div className="flex-[2] min-w-0">
+                    <input type="text" value={si.note} onChange={e => { const u = [...photoStudyItems]; u[idx] = { ...u[idx], note: e.target.value }; setPhotoStudyItems(u); }}
+                      placeholder="Note" className="w-full px-2 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm"/>
+                  </div>
+                  <div className="w-7 shrink-0 flex justify-center">
+                    {photoStudyItems.length > 1 && <button onClick={() => setPhotoStudyItems(photoStudyItems.filter((_, i) => i !== idx))} className="p-1 text-red-500 hover:text-red-700 text-sm">✕</button>}
+                  </div>
                 </div>
-                <div className="flex-[2] min-w-0">
-                  <select value={si.lensId} onChange={e => { const u = [...photoStudyItems]; u[idx] = { ...u[idx], lensId: e.target.value }; setPhotoStudyItems(u); }}
-                    className="w-full px-2 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm">
-                    <option value="">— Lentille —</option>
-                    {lensMaterials.map(m => <option key={m.id} value={m.id}>{m.reference} — {m.name}</option>)}
-                  </select>
-                </div>
-                <div className="flex-[2] min-w-0">
-                  <input type="text" value={si.note} onChange={e => { const u = [...photoStudyItems]; u[idx] = { ...u[idx], note: e.target.value }; setPhotoStudyItems(u); }}
-                    placeholder="Note" className="w-full px-2 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm"/>
-                </div>
-                <div className="w-7 shrink-0 flex justify-center">
-                  {photoStudyItems.length > 1 && <button onClick={() => setPhotoStudyItems(photoStudyItems.filter((_, i) => i !== idx))} className="p-1 text-red-500 hover:text-red-700 text-sm">✕</button>}
-                </div>
+                {photoStudyMode === "order" && article?.lens && (
+                  <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                    Spec article : <strong>{article.lens}</strong>
+                    {article.lensBy ? ` (par ${article.lensBy}${article.lensAt ? `, ${article.lensAt}` : ""})` : ""}
+                  </p>
+                )}
+                {(resolved.effective || si.lensId) && (
+                  <div className="mt-1.5">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-bold ${resolved.source === "study" ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900" : resolved.source === "article" ? "bg-sky-100 text-sky-900 dark:bg-sky-900/40 dark:text-sky-200" : "bg-gray-100 text-gray-500"}`}>
+                      {resolved.effective ? `Lentille applicable : ${resolved.effective.reference}` : "Aucune lentille"} · {badge.text}
+                    </span>
+                  </div>
+                )}
+                {resolved.overridden && (
+                  <div className="mt-1.5 rounded-lg border border-amber-300 bg-amber-50 p-2 text-[12px] leading-snug text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200">
+                    ⚠️ {LENS_OVERRIDE_MESSAGE}
+                  </div>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
-          <button onClick={() => setPhotoStudyItems([...photoStudyItems, { productName: "", lensId: "", note: "" }])} className="mt-2 text-xs text-sky-600 hover:underline">+ Ajouter un produit</button>
+          <button onClick={() => setPhotoStudyItems([...photoStudyItems, { orderItemId: null, productName: "", lensId: "", note: "" }])} className="mt-2 text-xs text-sky-600 hover:underline">+ Ajouter un produit</button>
           {lensMaterials.length === 0 && <p className="text-[10px] text-amber-600 mt-1">Aucune lentille dans la table Matières.</p>}
         </div>
 
@@ -993,7 +1125,7 @@ export default function OrdersView({ user }: { user: User }) {
                     </td>
                     <td className="px-2 py-1.5 text-[10px] text-black">
                       {study.items.map((si, idx) => (
-                        <div key={idx} className="mb-0.5">{si.lensReference ? <><b>{si.lensReference}</b> — {si.lensLabel}</> : <span className="text-gray-400">—</span>}</div>
+                        <div key={idx} className="mb-0.5">{si.lensReference ? <><b>{si.lensReference}</b> — {si.lensLabel}{si.overridden ? <span title="Imposée par l'étude photométrique (priorité sur la spec article)"> 🔒</span> : ""}</> : (si.effectiveLens ? <span className="italic">défaut: {si.effectiveLens.reference}</span> : <span className="text-gray-400">—</span>)}</div>
                       ))}
                     </td>
                     <td className="px-2 py-1.5 text-[10px] text-black max-w-[120px] truncate" title={study.note || ""}>{study.note || "-"}</td>
