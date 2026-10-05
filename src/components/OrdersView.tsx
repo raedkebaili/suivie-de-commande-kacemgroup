@@ -65,6 +65,34 @@ function orderNumericPart(orderNumber: string | undefined): number {
 
 function fmtDate(d: string): string { if (!d || d.startsWith("(datetime")) return new Date().toLocaleString("fr-FR"); try { const dt = new Date(d); if (!isNaN(dt.getTime())) return dt.toLocaleString("fr-FR"); } catch {} const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(d); if (m) return `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}`; return d?.substring(0,16)||""; }
 
+type ModificationLog = { field: string; oldValue: string | null; newValue: string | null };
+
+function groupArticleModifications(logs: ModificationLog[]): Map<string, Set<string>> {
+  const articleModifications = new Map<string, Set<string>>();
+  const mark = (articleName: string, field: string) => {
+    if (!articleModifications.has(articleName)) articleModifications.set(articleName, new Set());
+    articleModifications.get(articleName)!.add(field);
+  };
+
+  for (const log of logs) {
+    if (log.field === "Article renommé" && log.newValue) {
+      mark(log.newValue, "articleName");
+    } else if (log.field === "Article ajouté" && log.newValue) {
+      mark(log.newValue, "added");
+    } else if (log.field.startsWith("Qté ")) {
+      mark(log.field.substring(4), "quantity");
+    } else if (log.field.startsWith("Note ")) {
+      mark(log.field.substring(5), "note");
+    } else if (log.field.startsWith("Besoin ")) {
+      mark(log.field.substring(7), "clientSpec");
+    } else if (log.field.startsWith("Composant ajouté - ") || log.field.startsWith("Composant supprimé - ")) {
+      const articleName = log.field.split(" - ").slice(1).join(" - ");
+      if (articleName) mark(articleName, "technicalComponents");
+    }
+  }
+  return articleModifications;
+}
+
 export default function OrdersView({ user }: { user: User }) {
   const [orders, setOrders] = useState<FullOrder[]>([]);
   const [agencies, setAgencies] = useState<Agency[]>([]);
@@ -219,40 +247,44 @@ export default function OrdersView({ user }: { user: User }) {
   const loadOrderModifications = useCallback(async (orderId: number) => {
     if (orderModificationsCache.has(orderId)) return;
     try {
-      const data = await apiFetch<{ logs: { field: string; oldValue: string | null; newValue: string | null }[] }>(`/api/order-modifications/${orderId}`);
-      const articleModifications = new Map<string, Set<string>>();
-      for (const log of data.logs) {
-        const field = log.field;
-        if (field === "Article renommé" && log.newValue) {
-          if (!articleModifications.has(log.newValue)) articleModifications.set(log.newValue, new Set());
-          articleModifications.get(log.newValue)!.add("articleName");
-        } else if (field === "Article ajouté" && log.newValue) {
-          if (!articleModifications.has(log.newValue)) articleModifications.set(log.newValue, new Set());
-          articleModifications.get(log.newValue)!.add("added");
-        } else if (field.startsWith("Qté ")) {
-          const articleName = field.substring(4);
-          if (!articleModifications.has(articleName)) articleModifications.set(articleName, new Set());
-          articleModifications.get(articleName)!.add("quantity");
-        } else if (field.startsWith("Note ")) {
-          const articleName = field.substring(5);
-          if (!articleModifications.has(articleName)) articleModifications.set(articleName, new Set());
-          articleModifications.get(articleName)!.add("note");
-        } else if (field.startsWith("Besoin ")) {
-          const articleName = field.substring(7);
-          if (!articleModifications.has(articleName)) articleModifications.set(articleName, new Set());
-          articleModifications.get(articleName)!.add("clientSpec");
-        } else if (field.startsWith("Composant ajouté - ") || field.startsWith("Composant supprimé - ")) {
-          const articleName = field.split(" - ").slice(1).join(" - ");
-          if (articleName) {
-            if (!articleModifications.has(articleName)) articleModifications.set(articleName, new Set());
-            articleModifications.get(articleName)!.add("technicalComponents");
-          }
-        }
-      }
-      setOrderModificationsCache(prev => new Map(prev).set(orderId, articleModifications));
+      const data = await apiFetch<{ logs: ModificationLog[] }>(`/api/order-modifications/${orderId}`);
+      setOrderModificationsCache(prev => new Map(prev).set(orderId, groupArticleModifications(data.logs)));
     } catch (err) {
       console.error("Erreur chargement modifications:", err);
     }
+  }, [orderModificationsCache]);
+
+  // Le bouton « Tout déplier » charge par lots pour éviter une requête par
+  // commande. La taille des lots évite aussi de construire une URL excessive
+  // lorsque la liste filtrée contient beaucoup de commandes.
+  const loadOrderModificationsBatch = useCallback(async (orderIds: number[]) => {
+    const missingIds = [...new Set(orderIds)].filter((id) => !orderModificationsCache.has(id));
+    const chunks: number[][] = [];
+    for (let i = 0; i < missingIds.length; i += 100) chunks.push(missingIds.slice(i, i + 100));
+    if (chunks.length === 0) return;
+
+    const results = await Promise.all(chunks.map(async (ids) => {
+      try {
+        const data = await apiFetch<{ modifications: { orderId: number; logs: ModificationLog[] }[] }>(
+          `/api/order-modifications?orderIds=${ids.join(",")}`,
+        );
+        return { data: data.modifications, failed: false };
+      } catch (err) {
+        console.error("Erreur chargement groupé des modifications:", err);
+        return { data: [], failed: true };
+      }
+    }));
+
+    setOrderModificationsCache((previous) => {
+      const next = new Map(previous);
+      for (const result of results) {
+        if (result.failed) continue;
+        for (const modification of result.data) {
+          next.set(modification.orderId, groupArticleModifications(modification.logs));
+        }
+      }
+      return next;
+    });
   }, [orderModificationsCache]);
 
   const toggleExpand = (id: number) => {
@@ -301,13 +333,13 @@ export default function OrdersView({ user }: { user: User }) {
     if (allExpanded) {
       setExpandedOrders(new Set());
     } else {
-      const allIds = new Set(sortedOrders.map(o => o.id));
-      setExpandedOrders(allIds);
-      // Charger les modifications et études pour toutes les commandes pas encore en cache
-      for (const o of sortedOrders) {
-        if (!orderModificationsCache.has(o.id)) loadOrderModifications(o.id);
-        if (!orderStudies.has(o.id)) loadStudiesForOrder(o.id);
-      }
+      const orderIds = sortedOrders.map(o => o.id);
+      setExpandedOrders(new Set(orderIds));
+      // Deux chargements groupés remplacent les 2 requêtes par commande.
+      void Promise.all([
+        loadOrderModificationsBatch(orderIds),
+        loadStudiesForOrders(orderIds),
+      ]);
     }
   };
 
@@ -390,10 +422,45 @@ export default function OrdersView({ user }: { user: User }) {
   const hi=async()=>{const f=fileRef.current?.files?.[0];if(!f)return;const fd=new FormData();fd.append("file",f);fd.append("type",importType);try{const r=await apiFetch<{imported:number}>("/api/import",{method:"POST",body:fd});setImportMsg(`${r.imported} importés!`);if(importType==="clients"){const d=await apiFetch<{clients:Client[]}>("/api/clients");setClients(d.clients)}if(importType==="agencies"){const d=await apiFetch<{agencies:Agency[]}>("/api/agencies");setAgencies(d.agencies)}}catch(err:unknown){setImportMsg(err instanceof Error?err.message:"Erreur")}};
 
   // ── Études photométriques ──
+  const loadStudiesForOrders = useCallback(async (orderIds: number[]) => {
+    const missingIds = [...new Set(orderIds)].filter((id) => !orderStudies.has(id));
+    const chunks: number[][] = [];
+    for (let i = 0; i < missingIds.length; i += 100) chunks.push(missingIds.slice(i, i + 100));
+    if (chunks.length === 0) return;
+
+    const results = await Promise.all(chunks.map(async (ids) => {
+      try {
+        const data = await apiFetch<{ studies: PhotoStudy[] }>(
+          `/api/photometric-studies?orderIds=${ids.join(",")}`,
+        );
+        return { ids, studies: data.studies, failed: false };
+      } catch {
+        return { ids, studies: [] as PhotoStudy[], failed: true };
+      }
+    }));
+
+    setOrderStudies((previous) => {
+      const next = new Map(previous);
+      for (const result of results) {
+        if (result.failed) continue;
+        const studiesByOrder = new Map<number, PhotoStudy[]>();
+        for (const study of result.studies) {
+          if (study.orderId !== null) {
+            const studies = studiesByOrder.get(study.orderId) || [];
+            studies.push(study);
+            studiesByOrder.set(study.orderId, studies);
+          }
+        }
+        for (const orderId of result.ids) next.set(orderId, studiesByOrder.get(orderId) || []);
+      }
+      return next;
+    });
+  }, [orderStudies]);
+
   const loadStudiesForOrder = useCallback(async (orderId: number) => {
     if (orderStudies.has(orderId)) return;
     try {
-      const d = await apiFetch<{ studies: typeof orderStudies extends Map<number, infer V> ? V : never }>(`/api/photometric-studies?orderId=${orderId}`);
+      const d = await apiFetch<{ studies: PhotoStudy[] }>(`/api/photometric-studies?orderId=${orderId}`);
       setOrderStudies(prev => new Map(prev).set(orderId, d.studies));
     } catch { /* ok */ }
   }, [orderStudies]);

@@ -66,10 +66,24 @@ export async function GET(request: NextRequest) {
 
   const sp = new URL(request.url).searchParams;
   const orderId = sp.get("orderId");
+  const rawOrderIds = sp.get("orderIds");
   const standalone = sp.get("standalone");
+  const orderIds = rawOrderIds
+    ? [...new Set(rawOrderIds.split(",")
+        .map((value) => Number.parseInt(value, 10))
+        .filter((value) => Number.isInteger(value) && value > 0))]
+    : [];
+
+  if (rawOrderIds && orderIds.length === 0) {
+    return NextResponse.json({ error: "Au moins une commande est requise" }, { status: 400 });
+  }
 
   let studiesQuery;
-  if (orderId) {
+  if (orderIds.length > 0) {
+    studiesQuery = db.select().from(photometricStudies)
+      .where(inArray(photometricStudies.orderId, orderIds))
+      .orderBy(desc(photometricStudies.createdAt));
+  } else if (orderId) {
     studiesQuery = db.select().from(photometricStudies)
       .where(eq(photometricStudies.orderId, parseInt(orderId)))
       .orderBy(desc(photometricStudies.createdAt));
