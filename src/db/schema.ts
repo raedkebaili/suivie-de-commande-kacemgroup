@@ -317,8 +317,9 @@ export const photometricStudyItems = pgTable("photometric_study_items", {
   productName: text("product_name").notNull(),             // Produit concerné (snapshot serveur en mode commande)
   // ÉVOLUTION ÉTUDES (§10-§21) : lens_id (EXISTANT) devient officiellement
   // l'OVERRIDE imposé par l'étude — priorité absolue sur order_items.lens
-  // pour cette étude uniquement (cf. src/lib/study-lens.ts). La fiche article
-  // n'est JAMAIS modifiée par une étude.
+  // pour la résolution de l'étude (cf. src/lib/study-lens.ts). Lorsqu'une
+  // étude est liée à une commande, l'API recopie aussi la référence dans la
+  // colonne technique existante order_items.lens, sans créer de composant.
   lensId: integer("lens_id").references(() => matieres.id, { onDelete: "set null" }),
   lensReference: text("lens_reference"),                   // Copie de la référence pour historique
   lensLabel: text("lens_label"),                           // Copie du libellé pour historique

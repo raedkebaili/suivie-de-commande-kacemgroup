@@ -5,7 +5,8 @@
 //
 // RÈGLE MÉTIER (priorité absolue) :
 //   lentille choisie dans l'étude  >  lentille générale de l'article
-//   L'override est CONTEXTUEL à l'étude : la fiche article n'est jamais modifiée.
+//   Pour une étude liée à une commande, l'API persiste aussi cette valeur dans
+//   la spécification existante de l'article, avec traçabilité, sans nouvelle ligne.
 // =============================================================================
 
 export type LensValue = { reference: string; label: string } | null;

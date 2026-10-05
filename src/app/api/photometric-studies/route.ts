@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { photometricStudies, photometricStudyItems, orders, orderItems, matieres, materialCategories, clients, driveDocuments } from "@/db/schema";
 import { eq, desc, isNull, inArray, sql } from "drizzle-orm";
-import { getUserFromHeaders, logActivity } from "@/lib/auth";
+import { getUserFromHeaders, logActivity, logModification } from "@/lib/auth";
 import { articleLensToValue, resolveStudyLens } from "@/lib/study-lens";
 
 export const dynamic = "force-dynamic";
@@ -55,6 +55,42 @@ async function resolveLensSnapshot(lensId: string | number | null | undefined) {
     return { error: "La matière choisie n'est pas une lentille" } as const;
   }
   return { id: lens.id, reference: lens.reference, label: lens.name };
+}
+
+/**
+ * Applique la lentille d'une étude liée à une commande sur la spécification
+ * existante de l'article. On met à jour la colonne `order_items.lens` : aucune
+ * ligne de composant technique ou d'article n'est créée.
+ */
+async function applyStudyLensToArticle(
+  orderId: number,
+  orderItemId: number,
+  lensReference: string | null,
+  studyNumber: string,
+  user: { id: number; fullName: string },
+) {
+  const reference = lensReference?.trim();
+  if (!reference) return;
+
+  const [article] = await db.select().from(orderItems)
+    .where(eq(orderItems.id, orderItemId)).limit(1);
+  if (!article || article.orderId !== orderId || article.lens === reference) return;
+
+  const appliedAt = new Date().toISOString();
+  await db.update(orderItems).set({
+    lens: reference,
+    lensBy: user.fullName,
+    lensAt: appliedAt,
+  }).where(eq(orderItems.id, orderItemId));
+
+  await logModification(
+    orderId,
+    user.id,
+    user.fullName,
+    `Lentille ${article.articleName} (étude #${studyNumber})`,
+    article.lens || "",
+    reference,
+  );
 }
 
 /**
@@ -229,6 +265,15 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  if (resolvedOrderId !== null) {
+    const appliedArticleIds = new Set<number>();
+    for (const p of prepared) {
+      if (p.orderItemId === null || !p.lens.reference || appliedArticleIds.has(p.orderItemId)) continue;
+      appliedArticleIds.add(p.orderItemId);
+      await applyStudyLensToArticle(resolvedOrderId, p.orderItemId, p.lens.reference, studyNumber.trim(), user);
+    }
+  }
+
   const context = orderId ? `commande ${orderNumber}` : `affaire "${affaireName?.trim()}"`;
   await logActivity(user.id, user.username, "CREATE_PHOTOMETRIC_STUDY",
     `Étude #${studyNumber} pour ${context} — ${prepared.length} produit(s)`);
@@ -269,9 +314,9 @@ export async function PUT(request: NextRequest) {
   await db.update(photometricStudies).set(updates).where(eq(photometricStudies.id, parseInt(id)));
 
   if (Array.isArray(items)) {
-    // §18-§19 : l'override est conservé car le formulaire renvoie le lensId
-    // existant ; lensId=null explicite = suppression volontaire de l'override
-    // (retour au défaut article). La fiche article n'est jamais écrite ici.
+    // Le snapshot de l'étude reste conservé, et une lentille sélectionnée pour
+    // une étude liée remplace aussi la valeur technique de l'article existant.
+    // lensId=null ne crée ni ne supprime aucune ligne technique.
     const prepared: { orderItemId: number | null; productName: string; lens: { id: number | null; reference: string | null; label: string | null }; note: string | null }[] = [];
     for (const item of items as StudyItemInput[]) {
       const snap = await resolveLensSnapshot(item.lensId ?? null);
@@ -296,6 +341,16 @@ export async function PUT(request: NextRequest) {
         lensLabel: p.lens.label,
         note: p.note,
       });
+    }
+
+    if (study.orderId !== null) {
+      const appliedArticleIds = new Set<number>();
+      const effectiveStudyNumber = typeof studyNumber === "string" ? studyNumber.trim() : study.studyNumber;
+      for (const p of prepared) {
+        if (p.orderItemId === null || !p.lens.reference || appliedArticleIds.has(p.orderItemId)) continue;
+        appliedArticleIds.add(p.orderItemId);
+        await applyStudyLensToArticle(study.orderId, p.orderItemId, p.lens.reference, effectiveStudyNumber, user);
+      }
     }
   }
 
