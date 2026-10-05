@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import type { User } from "./types";
-import { apiFetch, getToken, setToken, removeToken } from "./api";
+import { apiFetch } from "./api";
 
 type AuthContextType = {
   user: User | null;
@@ -27,27 +27,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (checked.current) return;
     checked.current = true;
 
-    const token = getToken();
-    if (!token) {
-      setLoading(false);
-      return;
-    }
-
+    // The HttpOnly cookie is intentionally inaccessible to JavaScript. The
+    // server decides whether the current browser session is authenticated.
     apiFetch<{ user: User }>("/api/auth/me")
       .then((data) => setUser(data.user))
       .catch(() => {
-        removeToken();
         setUser(null);
       })
       .finally(() => setLoading(false));
   }, []);
 
   const login = useCallback(async (username: string, password: string) => {
-    const data = await apiFetch<{ token: string; user: User }>("/api/auth/login", {
+    const data = await apiFetch<{ user: User }>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
     });
-    setToken(data.token);
     setUser(data.user);
   }, []);
 
@@ -57,7 +51,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore
     }
-    removeToken();
     setUser(null);
   }, []);
 

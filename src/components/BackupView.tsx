@@ -1,6 +1,6 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
-import { apiFetch, getToken, removeToken } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
 
 type BackupMeta = {
@@ -139,10 +139,7 @@ export default function BackupView({ user }: { user: User }) {
     setMessage(null);
     setDownloading(true);
     try {
-      const token = getToken();
-      const res = await fetch("/api/backup", {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await fetch("/api/backup", { credentials: "same-origin" });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Erreur inconnue" }));
         throw new Error(err.error || "Erreur lors du téléchargement");
@@ -189,13 +186,10 @@ export default function BackupView({ user }: { user: User }) {
     setMessage(null);
     try {
       const text = await pendingFile.file.text();
-      const token = getToken();
       const res = await fetch("/api/backup", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
         body: text,
       });
       const json = await res.json();
@@ -255,10 +249,7 @@ export default function BackupView({ user }: { user: User }) {
   const downloadFromHistory = async (id: number, filename: string) => {
     setMessage(null);
     try {
-      const token = getToken();
-      const res = await fetch(`/api/backup/download/${id}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await fetch(`/api/backup/download/${id}`, { credentials: "same-origin" });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Erreur inconnue" }));
         throw new Error(err.error || "Erreur lors du téléchargement");
@@ -288,13 +279,10 @@ export default function BackupView({ user }: { user: User }) {
     setResetting(true);
     setMessage(null);
     try {
-      const token = getToken();
       const res = await fetch("/api/admin/reset-database", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           password: resetPassword,
           confirmation: resetConfirmation,
@@ -303,8 +291,8 @@ export default function BackupView({ user }: { user: User }) {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Erreur lors du formatage");
 
-      removeToken();
-      alert("Base réinitialisée. Reconnectez-vous avec admin / admin123.");
+      await apiFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+      alert("Base réinitialisée. Reconnectez-vous avec le compte administrateur temporaire.");
       window.location.assign("/login");
     } catch (err) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : "Erreur lors du formatage" });

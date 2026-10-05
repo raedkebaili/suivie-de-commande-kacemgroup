@@ -1,6 +1,6 @@
 "use client";
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { apiFetch, getToken } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import type { Order, OrderItem, Agency, Client, User, ExpeditionBatch, MaterialCategory, Material, ClientRecouvrementAssignment } from "@/lib/types";
 import RecouvrementAlertCell from "@/components/RecouvrementAlertCell";
 import ArticleGroupingView from "@/components/ArticleGroupingView";
@@ -373,7 +373,7 @@ export default function OrdersView({ user }: { user: User }) {
   const hd=async(id:number)=>{if(!confirm("Supprimer?"))return;await apiFetch(`/api/orders/${id}`,{method:"DELETE"});fetchOrders()};
   const showExpeditionHistory=async(itemId:number)=>{setExpItemId(itemId);const d=await apiFetch<{batches:ExpeditionBatch[]}>(`/api/expedition/${itemId}`);setExpBatches(d.batches);setShowExpHistory(true)};
   const showModifications=async(orderId:number)=>{setModOrderId(orderId);const d=await apiFetch<{logs:typeof modLogs}>(`/api/order-modifications/${orderId}`);setModLogs(d.logs);setShowModHistory(true)};
-  const ee=async()=>{const p=new URLSearchParams();if(fs.startsWith("comm:"))p.set("status",fs.slice(5));if(fa)p.set("agencyId",fa);const token=getToken();const res=await fetch(`/api/orders/export?${p}`,{headers:token?{Authorization:`Bearer ${token}`}:{}});if(!res.ok){alert("Erreur export");return}const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`commandes_${new Date().toISOString().split("T")[0]}.xlsx`;a.click();URL.revokeObjectURL(url)};
+  const ee=async()=>{const p=new URLSearchParams();if(fs.startsWith("comm:"))p.set("status",fs.slice(5));if(fa)p.set("agencyId",fa);const res=await fetch(`/api/orders/export?${p}`,{credentials:"same-origin"});if(!res.ok){alert("Erreur export");return}const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`commandes_${new Date().toISOString().split("T")[0]}.xlsx`;a.click();URL.revokeObjectURL(url)};
   const ai=()=>setFormItems([...formItems,{articleName:"",quantity:1,unitPrice:"",description:""}]);
   const ri=(i:number)=>{if(formItems.length<=1)return;setFormItems(formItems.filter((_,x)=>x!==i))};
   const ui=(i:number,f:keyof OrderItem,v:string|number)=>{const u=[...formItems];(u[i]as Record<string,unknown>)[f]=v;setFormItems(u)};

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { apiFetch, getToken } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
 import GoogleDriveGuide from "@/components/GoogleDriveGuide";
 
@@ -172,7 +172,7 @@ export default function StorageView({ user }: { user: User }) {
 
   const download = async (f: DriveFile, inline = false) => {
     try {
-      const res = await fetch(`/api/storage/download/${f.id}?mode=${inline ? "inline" : "attachment"}`, { headers: { Authorization: `Bearer ${getToken() || ""}` } });
+      const res = await fetch(`/api/storage/download/${f.id}?mode=${inline ? "inline" : "attachment"}`, { credentials: "same-origin" });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Téléchargement impossible");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -533,7 +533,7 @@ export default function StorageView({ user }: { user: User }) {
               </div>
             </div>
             <iframe title={preview.name} className="flex-1 w-full rounded-b-2xl"
-              src={`/api/storage/download/${preview.id}?mode=inline&token=${encodeURIComponent(getToken() || "")}`} />
+              src={`/api/storage/download/${preview.id}?mode=inline`} />
           </div>
         </div>
       )}

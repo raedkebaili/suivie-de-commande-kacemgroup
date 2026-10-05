@@ -12,6 +12,7 @@ import bcrypt from "bcryptjs";
 import { db } from "@/db";
 import { users, activityLogs, modificationLogs, notifications } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { readAuthCookie } from "@/lib/auth-cookie";
 
 const TOKEN_TTL = "12h";
 
@@ -41,9 +42,12 @@ export async function verifyToken(token: string): Promise<UserPayload | null> {
 }
 
 export async function getUserFromHeaders(request: Request): Promise<UserPayload | null> {
-  const h = request.headers.get("authorization");
-  if (!h || !h.startsWith("Bearer ")) return null;
-  const payload = await verifyToken(h.slice(7));
+  const authorization = request.headers.get("authorization");
+  const token = authorization?.startsWith("Bearer ")
+    ? authorization.slice(7)
+    : readAuthCookie(request.headers.get("cookie"));
+  if (!token) return null;
+  const payload = await verifyToken(token);
   if (!payload) return null;
   // R9 — re-validation systématique en base : jeton révoqué de fait si le
   // compte est désactivé ou supprimé ; le rôle est TOUJOURS celui de la base.

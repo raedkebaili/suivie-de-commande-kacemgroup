@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { apiFetch } from "./api";
+import { useAuth } from "./auth-context";
 import { 
   AppColor, 
   DEFAULT_COLORS, 
@@ -64,6 +65,7 @@ function normalizeColorKey(key: string): string {
 }
 
 export function ColorProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
   const [colors, setColors] = useState<AppColor[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -84,13 +86,11 @@ export function ColorProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const fetchColors = useCallback(async () => {
-    // Ne pas appeler l'API si pas de token (pas connecté)
-    if (typeof window !== "undefined") {
-      const token = localStorage.getItem("otp_token");
-      if (!token) {
-        loadDefaults();
-        return;
-      }
+    // Les couleurs sont publiques uniquement pour les utilisateurs de la
+    // plateforme ; avant l'authentification, afficher les valeurs par défaut.
+    if (!user) {
+      loadDefaults();
+      return;
     }
     try {
       setLoading(true);
@@ -103,16 +103,10 @@ export function ColorProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [loadDefaults]);
+  }, [loadDefaults, user]);
 
   useEffect(() => {
     fetchColors();
-    // Écouter les changements de token (login/logout)
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === "otp_token") fetchColors();
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
   }, [fetchColors]);
 
   /**

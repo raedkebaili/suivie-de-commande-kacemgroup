@@ -1,19 +1,15 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromHeaders, logActivity, verifyToken } from "@/lib/auth";
+import { getUserFromHeaders, logActivity } from "@/lib/auth";
 import { friendlyDriveError, getDriveClient } from "@/lib/google-drive";
 
 /**
- * Authentifie la requête via l'en-tête Authorization, ou à défaut via le
- * paramètre `token` — nécessaire pour l'aperçu PDF intégré (<iframe>), qui
- * ne permet pas d'ajouter d'en-tête. Le jeton reste un JWT de la plateforme
- * vérifié normalement : aucun accès anonyme n'est ouvert.
+ * Authentifie la requête via le Bearer legacy ou le cookie HttpOnly de session.
+ * Les aperçus PDF utilisent désormais ce cookie de même origine et n'exposent
+ * plus de JWT dans l'URL.
  */
 async function authenticate(request: NextRequest) {
-  const fromHeader = await getUserFromHeaders(request);
-  if (fromHeader) return fromHeader;
-  const token = new URL(request.url).searchParams.get("token");
-  return token ? verifyToken(token) : null;
+  return getUserFromHeaders(request);
 }
 
 /**

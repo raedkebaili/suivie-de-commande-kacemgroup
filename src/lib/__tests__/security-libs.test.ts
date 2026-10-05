@@ -3,6 +3,7 @@ import { passwordPolicyError, PASSWORD_MIN_LENGTH } from "../password-policy";
 import { consumeRateLimit, resetRateLimit } from "../rate-limit";
 import { decryptSecret, encryptSecret, maskSecret } from "../crypto";
 import { documentCategoryLabel, documentExtensionAllowed } from "../document-categories";
+import { AUTH_COOKIE_NAME, readAuthCookie } from "../auth-cookie";
 
 describe("password-policy (correctif R10)", () => {
   it("rejette les mots de passe faibles", () => {
@@ -84,5 +85,18 @@ describe("document-categories (contrôle d'upload contextuel)", () => {
     expect(documentCategoryLabel("CAHIER_DES_CHARGES")).toBe("Cahier des charges");
     expect(documentCategoryLabel("INCONNUE")).toBe("Autre");
     expect(documentCategoryLabel(null)).toBe("Autre");
+  });
+});
+
+describe("auth-cookie (session HttpOnly)", () => {
+  it("lit uniquement le cookie otp_token exact", () => {
+    expect(readAuthCookie(`other=value; ${AUTH_COOKIE_NAME}=jwt-value; theme=dark`)).toBe("jwt-value");
+    expect(readAuthCookie("otp_token_suffix=not-the-token")).toBeNull();
+  });
+
+  it("décode la valeur et ignore les cookies absents ou invalides", () => {
+    expect(readAuthCookie(`${AUTH_COOKIE_NAME}=jwt%2Evalue`)).toBe("jwt.value");
+    expect(readAuthCookie(null)).toBeNull();
+    expect(readAuthCookie(`${AUTH_COOKIE_NAME}=%E0%A4%A`)).toBeNull();
   });
 });

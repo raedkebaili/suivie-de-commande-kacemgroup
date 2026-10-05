@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiFetch, getToken } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import type { ArticleGroup } from "@/lib/article-grouping";
 
 type Totals = { groups: number; lines: number; quantity: number; produced: number; delivered: number; remaining: number };
@@ -64,7 +64,7 @@ export default function ArticleGroupingView({
   const exportXlsx = async () => {
     try {
       const res = await fetch(`/api/orders/grouped-articles?${query}${query ? "&" : ""}format=xlsx`, {
-        headers: { Authorization: `Bearer ${getToken() || ""}` },
+        credentials: "same-origin",
       });
       if (!res.ok) throw new Error("Export impossible");
       const blob = await res.blob();

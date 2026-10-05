@@ -10,7 +10,7 @@
  *      directement dans le dossier choisi (ou le télécharge si fallback).
  */
 
-import { apiFetch, getToken } from "./api";
+import { apiFetch } from "./api";
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -163,13 +163,8 @@ async function requestBackupFolder(): Promise<boolean> {
  * Si pas de dossier, fait un téléchargement classique.
  */
 async function saveBackupFile(backupId: number, filename: string): Promise<void> {
-  const token = getToken();
-  if (!token) return;
-
   try {
-    const res = await fetch(`/api/backup/download/${backupId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await fetch(`/api/backup/download/${backupId}`, { credentials: "same-origin" });
     if (!res.ok) {
       console.error("[BackupScheduler] Erreur téléchargement backup:", res.status);
       return;
