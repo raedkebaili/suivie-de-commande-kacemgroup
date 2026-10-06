@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { clients, factories, orderItems, orders, productionPlanEntries } from "@/db/schema";
 import { and, asc, eq } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
+import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
 import { ensurePlanningColors } from "@/lib/production-planning";
 import { PLANNING_MANAGER_ROLES, todayISO } from "@/lib/production-planning-constants";
 
@@ -98,7 +99,7 @@ export async function POST(request: NextRequest) {
     if (!factory) return NextResponse.json({ error: "Usine introuvable" }, { status: 400 });
     if (!factory.active) return NextResponse.json({ error: "Cette usine est désactivée" }, { status: 400 });
 
-    const created: unknown[] = [];
+    const created: (typeof productionPlanEntries.$inferSelect)[] = [];
     const skipped: { itemId: number; reason: string }[] = [];
 
     for (const raw of list) {
@@ -163,6 +164,15 @@ export async function POST(request: NextRequest) {
     if (created.length > 0) {
       await logActivity(user.id, user.username, "PLANNING_ADD",
         `${created.length} article(s) planifié(s) le ${date} — usine ${factory.name}`);
+      for (const entry of created) {
+        await notifyRoles(["consultant_prod"], {
+          eventKey: NOTIFICATION_EVENTS.PLANNING_CREATED,
+          title: `Nouveau planning #${entry.orderNumber || entry.orderId}`,
+          message: `${entry.articleName} planifié le ${entry.planDate} par ${user.fullName}`,
+          orderId: entry.orderId,
+          targetTab: "planning",
+        });
+      }
     }
 
     return NextResponse.json({ created, skipped }, { status: created.length > 0 ? 201 : 200 });

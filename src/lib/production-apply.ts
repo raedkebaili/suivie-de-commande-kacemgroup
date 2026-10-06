@@ -13,6 +13,7 @@ import { db } from "@/db";
 import { orderItems, orders, productionBatches } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { logActivity } from "@/lib/auth";
+import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
 import { isOrderFullyProduced, promotePrioritiesAfterCompletion } from "@/lib/priority-promotion";
 
 export type ApplyProductionResult =
@@ -38,7 +39,7 @@ export async function applyProductionQuantity(params: {
   if (!item) return { ok: false, status: 404, error: "Article non trouvé" };
 
   const [order] = await db
-    .select({ productionStatus: orders.productionStatus })
+    .select({ productionStatus: orders.productionStatus, orderNumber: orders.orderNumber })
     .from(orders).where(eq(orders.id, item.orderId)).limit(1);
   if (order?.productionStatus === "ANNULEE") {
     return { ok: false, status: 400, error: "Impossible de produire une commande annulée" };
@@ -76,16 +77,41 @@ export async function applyProductionQuantity(params: {
       await db.update(orders)
         .set({ productionStatus: "LIVREE", updatedAt: new Date().toISOString() })
         .where(eq(orders.id, item.orderId));
+      try {
+        await notifyRoles(["commercial"], {
+          eventKey: NOTIFICATION_EVENTS.ORDER_DELIVERED,
+          type: "success",
+          title: `Commande livrée #${full.orderNumber}`,
+          message: `La commande ${full.orderNumber} a été entièrement livrée`,
+          orderId: item.orderId,
+          targetTab: "orders",
+        });
+      } catch (notificationError) {
+        console.error("Notification de livraison:", notificationError);
+      }
     }
   }
 
   await logActivity(user.id, user.username, "PRODUCTION",
     `+${actualQty} de ${item.articleName} (total: ${newCumulative}/${item.quantity})${logSuffix ? ` ${logSuffix}` : ""}`);
 
-  // Promotion automatique des priorités si la commande est entièrement produite
+  // Une commande devient « prête » lorsque tous ses articles sont produits,
+  // avant la livraison. Cette vérification est faite après chaque lot mais
+  // une ligne déjà entièrement produite est refusée plus haut : aucun doublon.
   let priorityPromotion: Awaited<ReturnType<typeof promotePrioritiesAfterCompletion>> | null = null;
   try {
-    if (await isOrderFullyProduced(item.orderId)) {
+    const fullyProduced = await isOrderFullyProduced(item.orderId);
+    if (fullyProduced && order && order.productionStatus !== "LIVREE") {
+      await notifyRoles(["commercial"], {
+        eventKey: NOTIFICATION_EVENTS.ORDER_READY,
+        type: "success",
+        title: `Commande prête #${order.orderNumber}`,
+        message: `La commande ${order.orderNumber} est entièrement produite et prête à être livrée`,
+        orderId: item.orderId,
+        targetTab: "orders",
+      });
+    }
+    if (fullyProduced) {
       priorityPromotion = await promotePrioritiesAfterCompletion(item.orderId, { id: user.id, fullName: user.fullName });
       if (priorityPromotion.promoted.length > 0) {
         await logActivity(user.id, user.username, "PRIORITY_PROMOTION",
@@ -95,7 +121,7 @@ export async function applyProductionQuantity(params: {
     }
   } catch (e) {
     // Ne doit jamais faire échouer l'enregistrement du lot produit
-    console.error("Promotion des priorités:", e);
+    console.error("Notification ou promotion de production:", e);
   }
 
   return { ok: true, actualQty, cumulative: newCumulative, remaining: item.quantity - newCumulative, articleName: item.articleName, priorityPromotion };

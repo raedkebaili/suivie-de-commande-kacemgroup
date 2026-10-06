@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { orders, orderItems, productionBatches, expeditionBatches, modificationLogs, notifications, itemTechnicalComponents, matieres, materialCategories, factories } from "@/db/schema";
 import { eq, count } from "drizzle-orm";
-import { logActivity, logModification, getUserFromHeaders, notifyUser } from "@/lib/auth";
+import { logActivity, logModification, getUserFromHeaders } from "@/lib/auth";
+import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
 import { agencyScopeForUser } from "@/lib/agency-access";
 
 async function auth(r: Request, roles?: string[]) {
@@ -42,6 +43,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const body = await request.json();
   const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   const now = new Date().toISOString();
+  let technicalChanged = false;
 
   if (existing.lockedBy && existing.lockedBy !== a.user.id && existing.lockedAt && (Date.now() - new Date(existing.lockedAt).getTime() < 5 * 60 * 1000))
     return NextResponse.json({ error: `Verrouillé par ${existing.lockedByName}` }, { status: 423 });
@@ -143,6 +145,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         const oldVal = (current as Record<string, unknown>)[field];
         const normalizedNew = newVal.trim() || null;
         if (normalizedNew !== (oldVal || null)) {
+          technicalChanged = true;
           iu[field] = normalizedNew;
           if (normalizedNew) { iu[byField] = a.user.fullName; iu[atField] = now; }
         }
@@ -157,7 +160,6 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       if (Object.keys(iu).length > 0) await db.update(orderItems).set(iu).where(eq(orderItems.id, parseInt(ti.itemId)));
     }
     updates.techCompleted = true;
-    if (existing.createdBy) await notifyUser(existing.createdBy, "success", `Tech OK #${existing.orderNumber}`, `Spécs techniques mises à jour`, oid);
   }
 
   // ── TECHNIQUE DYNAMIQUE: composants sélectionnés depuis la table Matières ──
@@ -192,6 +194,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
           // Aucun changement pour cet article - PRÉSERVER LA TRAÇABILITÉ EXISTANTE
           continue;
         }
+        technicalChanged = true;
 
         // Identifier les composants à SUPPRIMER (présents avant, absents maintenant)
         const toRemove = existingComponents.filter(c => c.materialId !== null && !newMaterialIds.has(c.materialId));
@@ -252,7 +255,18 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       }
     });
     updates.techCompleted = true;
-    if (existing.createdBy) await notifyUser(existing.createdBy, "success", `Tech OK #${existing.orderNumber}`, `Composants techniques mis à jour par ${a.user.fullName}`, oid);
+  }
+
+  // Une sauvegarde sans changement technique réel ne génère aucune alerte.
+  if (technicalChanged) {
+    await notifyRoles(["planification"], {
+      eventKey: NOTIFICATION_EVENTS.TECHNICAL_INTERVENTION,
+      type: "success",
+      title: `Intervention technique #${existing.orderNumber}`,
+      message: `${a.user.fullName} a effectué une intervention technique sur la commande`,
+      orderId: oid,
+      targetTab: "orders",
+    });
   }
 
   // ── PLANIFICATION: priority + productionStatus (independent from commercial status) ──
@@ -297,11 +311,35 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       }
     }
     updates.planifCompleted = true;
-    if (existing.createdBy) await notifyUser(existing.createdBy, "success", `Planif OK #${existing.orderNumber}`, `${a.user.fullName} a planifié`, oid);
   }
 
   updates.lockedBy = null; updates.lockedByName = null; updates.lockedAt = null;
   const [updated] = await db.update(orders).set(updates).where(eq(orders.id, oid)).returning();
+
+  // Les alertes d'état sont émises uniquement lors d'une transition réelle.
+  // Une simple sauvegarde du formulaire ne recrée donc pas de notification.
+  if (body.productionStatus !== undefined && body.productionStatus !== existing.productionStatus) {
+    if (body.productionStatus === "LIVREE") {
+      await notifyRoles(["commercial"], {
+        eventKey: NOTIFICATION_EVENTS.ORDER_DELIVERED,
+        type: "success",
+        title: `Commande livrée #${existing.orderNumber}`,
+        message: `La commande ${existing.orderNumber} vient d'être livrée`,
+        orderId: oid,
+        targetTab: "orders",
+      });
+    }
+    if (body.productionStatus === "ANNULEE") {
+      await notifyRoles(["commercial"], {
+        eventKey: NOTIFICATION_EVENTS.ORDER_CANCELLED,
+        type: "error",
+        title: `Commande annulée #${existing.orderNumber}`,
+        message: `La commande ${existing.orderNumber} a été annulée`,
+        orderId: oid,
+        targetTab: "orders",
+      });
+    }
+  }
   await logActivity(a.user.id, a.user.username, "UPDATE_ORDER", `Commande: ${existing.orderNumber}`);
   return NextResponse.json({ order: updated });
 }
@@ -318,7 +356,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     await db.delete(productionBatches).where(eq(productionBatches.orderId, oid));
     await db.delete(expeditionBatches).where(eq(expeditionBatches.orderId, oid));
     await db.delete(modificationLogs).where(eq(modificationLogs.orderId, oid));
-    await db.delete(notifications).where(eq(notifications.orderId, oid));
+    // Conserver l'historique des alertes même si la commande est supprimée.
+    // Le lien devient simplement nul pour respecter la clé étrangère.
+    await db.update(notifications).set({ orderId: null }).where(eq(notifications.orderId, oid));
     await db.delete(orderItems).where(eq(orderItems.orderId, oid));
     await db.delete(orders).where(eq(orders.id, oid));
 

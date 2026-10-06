@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { photometricStudies, photometricStudyItems, orders, orderItems, itemTechnicalComponents, matieres, materialCategories, clients, driveDocuments } from "@/db/schema";
 import { eq, desc, isNull, inArray } from "drizzle-orm";
 import { getUserFromHeaders, logActivity, logModification } from "@/lib/auth";
+import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
 import { agencyScopeForUser } from "@/lib/agency-access";
 import { articleLensToValue, resolveStudyLens } from "@/lib/study-lens";
 
@@ -350,6 +351,16 @@ export async function POST(request: NextRequest) {
   const context = orderId ? `commande ${orderNumber}` : `affaire "${affaireName?.trim()}"`;
   await logActivity(user.id, user.username, "CREATE_PHOTOMETRIC_STUDY",
     `Étude #${studyNumber} pour ${context} — ${prepared.length} produit(s)`);
+
+  await notifyRoles(["commercial"], {
+    eventKey: NOTIFICATION_EVENTS.PHOTOMETRIC_STUDY_ADDED,
+    title: `Nouvelle étude photométrique #${studyNumber}`,
+    message: resolvedOrderId !== null
+      ? `Une étude photométrique a été ajoutée à la commande ${orderNumber}`
+      : `Une étude photométrique indépendante a été ajoutée pour l'affaire « ${affaireName?.trim()} »`,
+    orderId: resolvedOrderId,
+    targetTab: "storage",
+  });
 
   return NextResponse.json({ study: { ...created, items: prepared } }, { status: 201 });
 }

@@ -107,6 +107,35 @@ html { transition: background-color 0.3s ease, color 0.3s ease; }
   }
 }
 
+/* Notification métier : alerte discrète, lente, de droite vers la gauche. */
+.notification-ticker {
+  overflow: hidden;
+}
+.notification-ticker-viewport {
+  overflow: hidden;
+  white-space: nowrap;
+}
+.notification-ticker-track {
+  display: inline-flex;
+  align-items: center;
+  min-width: max-content;
+  animation: notificationTicker 30s linear infinite;
+}
+@keyframes notificationTicker {
+  from { transform: translateX(100vw); }
+  to { transform: translateX(-100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notification-ticker-track {
+    animation: none !important;
+    transform: none !important;
+    white-space: normal;
+  }
+  .notification-ticker-viewport {
+    overflow: auto;
+  }
+}
+
 /* Alerte Recouvrement — alternance du CONTENU : le nom du client et son état
    de recouvrement s'affichent en alternance au même emplacement (tableau des
    commandes et tableau des clients). 100 % CSS : aucun timer JS par ligne. */

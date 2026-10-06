@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { orderItems, orders, clients, agencies, expeditionBatches } from "@/db/schema";
 import { eq, desc, sql } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
+import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
 
 export async function GET(request: NextRequest) {
   const user = await getUserFromHeaders(request);
@@ -52,7 +53,7 @@ export async function POST(request: NextRequest) {
 
   const [item] = await db.select().from(orderItems).where(eq(orderItems.id, parseInt(itemId))).limit(1);
   if (!item) return NextResponse.json({ error: "Article non trouvé" }, { status: 404 });
-  const [order] = await db.select({ productionStatus: orders.productionStatus }).from(orders).where(eq(orders.id, item.orderId)).limit(1);
+  const [order] = await db.select({ productionStatus: orders.productionStatus, orderNumber: orders.orderNumber }).from(orders).where(eq(orders.id, item.orderId)).limit(1);
   if (order?.productionStatus === "ANNULEE") {
     return NextResponse.json({ error: "Impossible d'expédier une commande annulée" }, { status: 400 });
   }
@@ -90,6 +91,14 @@ export async function POST(request: NextRequest) {
     const [order] = await db.select().from(orders).where(eq(orders.id, item.orderId)).limit(1);
     if (order && order.productionStatus !== "LIVREE") {
       await db.update(orders).set({ productionStatus: "LIVREE", updatedAt: new Date().toISOString() }).where(eq(orders.id, item.orderId));
+      await notifyRoles(["commercial"], {
+        eventKey: NOTIFICATION_EVENTS.ORDER_DELIVERED,
+        type: "success",
+        title: `Commande livrée #${order.orderNumber}`,
+        message: `La commande ${order.orderNumber} a été entièrement livrée`,
+        orderId: item.orderId,
+        targetTab: "orders",
+      });
     }
   }
 

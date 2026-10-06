@@ -240,14 +240,21 @@ export const modificationLogs = pgTable("modification_logs", {
 export const notifications = pgTable("notifications", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull().references(() => users.id),
-  type: text("type").notNull(),
+  // eventKey identifie l'événement métier à l'origine de la notification.
+  // type reste conservé comme niveau de gravité pour compatibilité client.
+  eventKey: text("event_key").notNull().default("LEGACY_INFO"),
+  type: text("type").notNull().default("info"),
+  severity: text("severity").notNull().default("info"),
   title: text("title").notNull(),
   message: text("message").notNull(),
   orderId: integer("order_id").references(() => orders.id),
+  targetTab: text("target_tab"),
   read: boolean("read").notNull().default(false),
+  readAt: timestamp("read_at", { mode: "string" }),
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
 }, (table) => [
   index("notifications_user_read_idx").on(table.userId, table.read),
+  index("notifications_user_created_idx").on(table.userId, table.createdAt),
   index("notifications_order_idx").on(table.orderId),
 ]);
 

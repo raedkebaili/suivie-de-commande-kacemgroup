@@ -77,6 +77,7 @@ export default function HomePage() {
   const didRedirect = useRef(false);
   const [darkMode, setDarkMode] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifs, setShowNotifs] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{orders: unknown[]; items: unknown[]; clients: unknown[]} | null>(null);
@@ -103,10 +104,12 @@ export default function HomePage() {
     return () => clearTimeout(t);
   }, [searchQuery]);
 
-  const fetchNotifications = useCallback(async () => {
+  const fetchNotifications = useCallback(async (all = false) => {
     try {
-      const data = await apiFetch<{ notifications: Notification[] }>(`/api/notifications?unread=1`);
+      const query = all ? "all=1" : "unread=1&limit=50";
+      const data = await apiFetch<{ notifications: Notification[]; unreadCount: number }>(`/api/notifications?${query}`);
       setNotifications(data.notifications);
+      setUnreadCount(data.unreadCount);
     } catch { /* ok */ }
   }, []);
 
@@ -136,7 +139,7 @@ export default function HomePage() {
 
   const markRead = async (id: number) => {
     await apiFetch(`/api/notifications/${id}`, { method: "PUT", body: JSON.stringify({ read: true }) });
-    fetchNotifications();
+    fetchNotifications(showNotifs);
   };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950"><div className="flex flex-col items-center gap-3"><svg className="animate-spin w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg><span className="text-sm text-gray-500 dark:text-gray-400">Chargement...</span></div></div>;
@@ -146,7 +149,7 @@ export default function HomePage() {
   // remplacé, aucun module n'est accessible (barrière applicative complète).
   if (user.mustChangePassword) return <ForcePasswordChange />;
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const latestUnread = notifications.find((notification) => !notification.read);
 
   return (
     <div className={`flex h-screen overflow-hidden ${darkMode ? "dark" : ""} bg-gray-50 dark:bg-gray-950`}>
@@ -212,21 +215,31 @@ export default function HomePage() {
           </div>
           {/* Notifications bell */}
           <div className="relative">
-            <button onClick={() => { setShowNotifs(!showNotifs); if (!showNotifs) fetchNotifications(); }}
+            <button onClick={() => { setShowNotifs(!showNotifs); if (!showNotifs) fetchNotifications(true); }}
+              aria-label="Ouvrir l'historique complet des notifications"
+              title="Historique complet des notifications"
               className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 relative">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
               {unreadCount > 0 && <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">{unreadCount}</span>}
             </button>
             {showNotifs && (
-              <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-50 max-h-96 overflow-y-auto">
-                <div className="p-3 border-b border-gray-200 dark:border-gray-700 font-semibold text-sm text-gray-800 dark:text-white">Notifications</div>
+              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-50 max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto">
+                <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-2">
+                  <span className="font-semibold text-sm text-gray-800 dark:text-white">Historique des notifications</span>
+                  <span className="text-[10px] text-gray-400">{notifications.length} affichée(s) · {unreadCount} non lue(s)</span>
+                </div>
                 {notifications.length === 0 ? <div className="p-4 text-sm text-gray-400 text-center">Aucune notification</div> :
-                  notifications.slice(0, 20).map(n => (
+                  notifications.map(n => (
                     <div key={n.id} className={`p-3 border-b border-gray-100 dark:border-gray-700/50 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-750 ${!n.read ? "bg-blue-50 dark:bg-blue-900/20" : ""}`}
                       onClick={() => markRead(n.id)}>
-                      <div className="font-medium text-gray-800 dark:text-white text-xs">{n.title}</div>
-                      <div className="text-gray-500 dark:text-gray-400 text-xs mt-0.5">{n.message}</div>
-                      <div className="text-[10px] text-gray-400 mt-1">{formatNotifDate(n.createdAt)}</div>
+                      <div className="flex items-start gap-2">
+                        {!n.read && <span className="mt-1.5 w-2 h-2 rounded-full bg-blue-500 shrink-0" aria-label="Non lue" />}
+                        <div className="min-w-0">
+                          <div className="font-medium text-gray-800 dark:text-white text-xs">{n.title}</div>
+                          <div className="text-gray-500 dark:text-gray-400 text-xs mt-0.5">{n.message}</div>
+                          <div className="text-[10px] text-gray-400 mt-1">{formatNotifDate(n.createdAt)}{n.read ? " · Lue" : " · Cliquer pour marquer comme lue"}</div>
+                        </div>
+                      </div>
                     </div>
                   ))}
               </div>
@@ -237,6 +250,19 @@ export default function HomePage() {
             <span className="hidden sm:inline font-medium">{user.fullName}</span>
           </div>
         </header>
+        {latestUnread && (
+          <div className="notification-ticker border-b border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/50 text-blue-900 dark:text-blue-100" role="alert" aria-live="polite">
+            <div className="notification-ticker-viewport px-4 py-2 text-xs sm:text-sm">
+              <div className="notification-ticker-track">
+                <span className="font-semibold">{latestUnread.title}</span>
+                <span className="mx-3 opacity-60">•</span>
+                <span>{latestUnread.message}</span>
+                <span className="mx-3 opacity-60">•</span>
+                <span>{formatNotifDate(latestUnread.createdAt)}</span>
+              </div>
+            </div>
+          </div>
+        )}
         <main className="flex-1 overflow-y-auto p-4 lg:p-6 bg-gray-50 dark:bg-gray-950">
           {activeTab === "dashboard" && <DashboardView user={user} />}
           {activeTab === "orders" && <OrdersView user={user} />}

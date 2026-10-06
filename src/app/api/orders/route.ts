@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { orders, orderItems, clients, agencies, itemTechnicalComponents, driveDocuments, photometricStudies } from "@/db/schema";
 import { eq, desc, and, inArray, sql } from "drizzle-orm";
-import { logActivity, getUserFromHeaders, notifyRole } from "@/lib/auth";
+import { logActivity, getUserFromHeaders } from "@/lib/auth";
+import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
 import { generateOrderNumber } from "@/lib/order-number";
 import { agencyScopeForUser } from "@/lib/agency-access";
 
@@ -231,8 +232,20 @@ export async function POST(request: NextRequest) {
 
   // Logger et notifier
   await logActivity(a.user.id, a.user.username, "CREATE_ORDER", `Commande: ${orderNumber}`);
-  await notifyRole("technique", "info", `Nouvelle commande #${orderNumber}`, `Commande ${orderNumber} en attente de traitement technique`, created.id);
-  await notifyRole("planification", "info", `Nouvelle commande #${orderNumber}`, `Commande ${orderNumber} créée par ${a.user.fullName}`, created.id);
+  await notifyRoles(["technique"], {
+    eventKey: NOTIFICATION_EVENTS.ORDER_CREATED,
+    title: `Nouvelle commande #${orderNumber}`,
+    message: `Commande ${orderNumber} en attente de traitement technique`,
+    orderId: created.id,
+    targetTab: "orders",
+  });
+  await notifyRoles(["planification"], {
+    eventKey: NOTIFICATION_EVENTS.ORDER_CREATED,
+    title: `Nouvelle commande #${orderNumber}`,
+    message: `Commande ${orderNumber} créée par ${a.user.fullName}`,
+    orderId: created.id,
+    targetTab: "orders",
+  });
 
   return NextResponse.json({ order: created, orderNumber }, { status: 201 });
 }

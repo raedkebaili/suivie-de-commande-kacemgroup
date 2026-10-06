@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { productionPlanEntries } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
+import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
 import { applyProductionQuantity } from "@/lib/production-apply";
 import {
   PLANNING_MANAGER_ROLES,
@@ -44,6 +45,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     const body = await request.json();
     const now = new Date().toISOString();
     const updates: Record<string, unknown> = { updatedAt: now, updatedByName: user.fullName };
+    let meaningfulChange = false;
 
     // ── Quantité planifiée ──
     if (body.plannedQty !== undefined) {
@@ -52,11 +54,16 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       if (entry.appliedAt) {
         return NextResponse.json({ error: "Quantité non modifiable : la production a déjà été appliquée" }, { status: 400 });
       }
+      if (q !== entry.plannedQty) meaningfulChange = true;
       updates.plannedQty = q;
     }
 
     // ── Raison (motif de suspension / annulation) ──
-    if (body.reason !== undefined) updates.reason = String(body.reason || "").trim() || null;
+    if (body.reason !== undefined) {
+      const nextReason = String(body.reason || "").trim() || null;
+      if (nextReason !== entry.reason) meaningfulChange = true;
+      updates.reason = nextReason;
+    }
 
     // ── Statut ──
     let applied: Awaited<ReturnType<typeof applyProductionQuantity>> | null = null;
@@ -95,6 +102,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         updates.appliedAt = now;
       }
 
+      if (body.status !== entry.status) meaningfulChange = true;
       updates.status = body.status;
     }
 
@@ -106,6 +114,16 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         `${entry.articleName} (#${entry.orderNumber || entry.orderId}) : ${planningStatusLabel(entry.status)} → ${planningStatusLabel(body.status)}` +
         (updates.reason ? ` — ${updates.reason}` : "") +
         (applied && applied.ok ? ` | +${applied.actualQty} produit` : ""));
+    }
+
+    if (meaningfulChange) {
+      await notifyRoles(["consultant_prod"], {
+        eventKey: NOTIFICATION_EVENTS.PLANNING_UPDATED,
+        title: `Planning modifié #${entry.orderNumber || entry.orderId}`,
+        message: `${entry.articleName} a été modifié par ${user.fullName}`,
+        orderId: entry.orderId,
+        targetTab: "planning",
+      });
     }
 
     return NextResponse.json({
@@ -146,6 +164,13 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
     await db.delete(productionPlanEntries).where(eq(productionPlanEntries.id, entryId));
     await logActivity(user.id, user.username, "PLANNING_DELETE", `Planning ${entry.planDate} : ${entry.articleName} retiré`);
+    await notifyRoles(["consultant_prod"], {
+      eventKey: NOTIFICATION_EVENTS.PLANNING_UPDATED,
+      title: `Planning supprimé #${entry.orderNumber || entry.orderId}`,
+      message: `${entry.articleName} du ${entry.planDate} a été retiré par ${user.fullName}`,
+      orderId: entry.orderId,
+      targetTab: "planning",
+    });
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("Erreur suppression planning:", error);

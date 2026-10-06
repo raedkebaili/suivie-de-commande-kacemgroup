@@ -37,7 +37,20 @@ export type Order = {
   clientName?: string; clientCode?: string; agencyName?: string; agencyCode?: string;
   items?: OrderItem[]; totalQuantity?: number;
 };
-export type Notification = { id: number; userId: number; type: string; title: string; message: string; orderId?: number | null; read: boolean; createdAt: string };
+export type Notification = {
+  id: number;
+  userId: number;
+  eventKey: string;
+  type: string;
+  severity?: string;
+  title: string;
+  message: string;
+  orderId?: number | null;
+  targetTab?: string | null;
+  read: boolean;
+  readAt?: string | null;
+  createdAt: string;
+};
 export type ProductionBatch = { id: number; itemId: number; orderId: number; quantity: number; cumulativeTotal: number; producedBy: string; productionDate: string; article_name?: string; createdAt: string };
 export type ExpeditionBatch = { id: number; itemId: number; orderId: number; quantity: number; cumulativeTotal: number; driverName: string | null; plannedLoadingDate: string | null; deliveredBy: string; deliveryDate: string; note: string | null; article_name?: string; createdAt: string };
 

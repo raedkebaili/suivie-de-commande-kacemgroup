@@ -10,7 +10,7 @@
 import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
 import { db } from "@/db";
-import { users, activityLogs, modificationLogs, notifications } from "@/db/schema";
+import { users, activityLogs, modificationLogs } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { readAuthCookie } from "@/lib/auth-cookie";
 import { getAssignedAgencyIds } from "@/lib/agency-access";
@@ -92,17 +92,6 @@ export async function seedDefaultUser() {
   }
 }
 
-export async function notifyUser(userId: number, type: string, title: string, message: string, orderId?: number) {
-  await db.insert(notifications).values({ userId, type, title, message, orderId: orderId || null, read: false });
-}
-
 export async function logModification(orderId: number, userId: number, username: string, field: string, oldValue: string | null, newValue: string | null) {
   await db.insert(modificationLogs).values({ orderId, userId, username, field, oldValue, newValue });
-}
-
-export async function notifyRole(role: string, type: string, title: string, message: string, orderId?: number) {
-  const us = await db.select().from(users).where(eq(users.role, role));
-  for (const u of us) {
-    await notifyUser(u.id, type, title, message, orderId);
-  }
 }
