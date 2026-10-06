@@ -25,10 +25,26 @@ type Item = {
   affaire: string | null;
 };
 
+type Plan = {
+  id: number;
+  planDate: string;
+  itemId: number;
+  articleName: string;
+  orderNumber: string | null;
+  plannedQty: number;
+  loadedQty: number;
+  driverName: string;
+  status: string;
+};
+
 export default function ExpeditionView({ user: _user }: { user: User }) {
   const [items, setItems] = useState<Item[]>([]);
   const [batches, setBatches] = useState<ExpeditionBatch[]>([]);
+  const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [stateFilter, setStateFilter] = useState("all");
+  const [selectedPlans, setSelectedPlans] = useState<Record<number, string>>({});
   const [batchQtys, setBatchQtys] = useState<Record<number, string>>({});
   const [batchDates, setBatchDates] = useState<Record<number, string>>({});
   const [drivers, setDrivers] = useState<Record<number, string>>({});
@@ -37,9 +53,10 @@ export default function ExpeditionView({ user: _user }: { user: User }) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   const fetchData = useCallback(async () => {
-    const data = await apiFetch<{ items: Item[]; batches: ExpeditionBatch[] }>("/api/expedition");
+    const data = await apiFetch<{ items: Item[]; batches: ExpeditionBatch[]; plans: Plan[] }>("/api/expedition");
     setItems(data.items);
     setBatches(data.batches || []);
+    setPlans(data.plans || []);
   }, []);
 
   useEffect(() => {
@@ -56,6 +73,8 @@ export default function ExpeditionView({ user: _user }: { user: User }) {
   const addBatch = async (itemId: number) => {
     const quantity = batchQtys[itemId];
     if (!quantity || parseInt(quantity) <= 0) return;
+    const itemPlanOptions = plans.filter((plan) => plan.itemId === itemId && plan.status !== "ANNULE" && plan.status !== "TERMINE");
+    const linkedPlanningId = selectedPlans[itemId] || (itemPlanOptions.length === 1 ? String(itemPlanOptions[0].id) : "");
     try {
       await apiFetch("/api/expedition", {
         method: "POST",
@@ -66,12 +85,14 @@ export default function ExpeditionView({ user: _user }: { user: User }) {
           plannedLoadingDate: loadingDates[itemId] || null,
           driverName: drivers[itemId] || null,
           note: notes[itemId] || null,
+          planningId: linkedPlanningId ? Number(linkedPlanningId) : null,
         }),
       });
       setBatchQtys(current => ({ ...current, [itemId]: "" }));
       setDrivers(current => ({ ...current, [itemId]: "" }));
       setNotes(current => ({ ...current, [itemId]: "" }));
       setLoadingDates(current => ({ ...current, [itemId]: "" }));
+      setSelectedPlans(current => ({ ...current, [itemId]: "" }));
       fetchData();
     } catch (error) {
       alert(error instanceof Error ? error.message : "Erreur");
@@ -103,18 +124,40 @@ export default function ExpeditionView({ user: _user }: { user: User }) {
     };
   });
 
+  const visibleOrders = orders.filter((order) => {
+    const query = search.trim().toLowerCase();
+    const orderPlanDrivers = plans.filter((plan) => order.items.some((item) => item.itemId === plan.itemId)).map((plan) => plan.driverName);
+    const orderBatchDrivers = batches.filter((batch) => order.items.some((item) => item.itemId === batch.itemId)).map((batch) => batch.driverName || "");
+    const matchesSearch = !query || [order.orderNumber, order.clientName, order.affaire, ...order.items.map((item) => item.articleName), ...orderPlanDrivers, ...orderBatchDrivers]
+      .some((value) => String(value || "").toLowerCase().includes(query));
+    const matchesState = stateFilter === "all" || order.visualState === stateFilter;
+    return matchesSearch && matchesState;
+  });
+
   return (
     <div className="space-y-3 text-black operational-content">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-black">🚚 Expédition</h3>
         <button onClick={fetchData} className="px-3 py-1.5 bg-gray-200 border border-gray-400 rounded-lg text-sm text-black">🔄 Actualiser</button>
       </div>
+      <div className="flex flex-wrap items-center gap-2 bg-white border border-gray-200 rounded-xl p-3">
+        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Rechercher commande, client, affaire, article ou chauffeur…" className="min-w-[220px] flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm text-black" />
+        <select value={stateFilter} onChange={(event) => setStateFilter(event.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-black">
+          <option value="all">Tous les états</option>
+          <option value="neutral">À expédier</option>
+          <option value="awaiting-delivery">En attente de livraison</option>
+          <option value="delivered">Livrée</option>
+          <option value="cancelled">Annulée</option>
+        </select>
+        <span className="text-xs text-gray-500">{visibleOrders.length} commande(s)</span>
+      </div>
 
       {loading ? (
         <div className="flex justify-center py-12 text-black">Chargement...</div>
       ) : (
         <div className="space-y-2">
-          {orders.map(order => (
+          {visibleOrders.length === 0 && <div className="rounded-xl border border-gray-200 bg-white py-10 text-center text-sm text-gray-500">Aucune commande ne correspond aux filtres.</div>}
+          {visibleOrders.map(order => (
             <div
               key={order.orderId}
               className={`rounded-xl border-2 overflow-hidden text-black ${ORDER_STATE_PANEL_CLASSES[order.visualState]}`}
@@ -147,6 +190,8 @@ export default function ExpeditionView({ user: _user }: { user: User }) {
                     const produced = (item.producedQty || 0) >= item.quantity;
                     const cancelled = order.visualState === "cancelled";
                     const itemState = cancelled ? "cancelled" : delivered ? "delivered" : produced ? "awaiting-delivery" : "neutral";
+                    const itemPlans = plans.filter((plan) => plan.itemId === item.itemId && plan.status !== "ANNULE" && plan.status !== "TERMINE");
+                    const defaultPlanId = selectedPlans[item.itemId] || (itemPlans.length === 1 ? String(itemPlans[0].id) : "");
                     return (
                       <div
                         key={item.itemId}
@@ -157,6 +202,10 @@ export default function ExpeditionView({ user: _user }: { user: User }) {
                         <span className="text-black">Prod: <b>{item.producedQty || 0}</b></span>
                         <span className="text-black">Livré: <b>{item.deliveredQty || 0}</b></span>
                         <span className="text-black font-bold">Reste: <b>{remaining}</b></span>
+                        {!cancelled && itemPlans.length > 0 && <select value={defaultPlanId} onChange={(event) => setSelectedPlans(current => ({ ...current, [item.itemId]: event.target.value }))} className="max-w-48 px-1 py-1 border border-blue-400 rounded text-xs bg-white text-black" title="Planning d'expédition à imputer">
+                          <option value="">Sans planning</option>
+                          {itemPlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.driverName} · {plan.loadedQty}/{plan.plannedQty}</option>)}
+                        </select>}
 
                         {!delivered && !cancelled && (
                           <>

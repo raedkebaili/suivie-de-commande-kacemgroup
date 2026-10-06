@@ -52,6 +52,7 @@ export async function POST(request: NextRequest) {
           notifications,
           modification_logs,
           activity_logs,
+          expedition_plan_entries,
           expedition_batches,
           production_batches,
           item_technical_components,

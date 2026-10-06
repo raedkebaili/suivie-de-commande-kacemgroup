@@ -1,8 +1,9 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { orderItems, orders, clients, agencies, expeditionBatches } from "@/db/schema";
-import { eq, desc, sql } from "drizzle-orm";
+import { orderItems, orders, clients, agencies, expeditionBatches, expeditionPlanEntries } from "@/db/schema";
+import { and, eq, desc, ne, sql } from "drizzle-orm";
+import { todayISO } from "@/lib/production-planning-constants";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
 
@@ -35,9 +36,13 @@ export async function GET(request: NextRequest) {
   }).from(expeditionBatches).innerJoin(orderItems, eq(orderItems.id, expeditionBatches.itemId))
     .orderBy(desc(expeditionBatches.createdAt)).limit(500);
 
+  const date = new URL(request.url).searchParams.get("date") || todayISO();
+  const plans = await db.select().from(expeditionPlanEntries)
+    .where(and(eq(expeditionPlanEntries.planDate, date), ne(expeditionPlanEntries.status, "ANNULE"), ne(expeditionPlanEntries.status, "TERMINE")))
+    .orderBy(desc(expeditionPlanEntries.id));
   const batches = rawBatches.map(r => ({ ...r, driverName: r.driverName || null, plannedLoadingDate: r.plannedLoadingDate || null, note: r.note || null }));
 
-  return NextResponse.json({ items, batches });
+  return NextResponse.json({ items, batches, plans, planDate: date });
 }
 
 export async function POST(request: NextRequest) {
@@ -45,7 +50,7 @@ export async function POST(request: NextRequest) {
   if (!user || !["superadmin", "planification"].includes(user.role))
     return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
 
-  const { itemId, batchQty, deliveryDate, driverName, plannedLoadingDate, note } = await request.json();
+  const { itemId, batchQty, deliveryDate, driverName, plannedLoadingDate, note, planningId } = await request.json();
   if (!itemId || !batchQty) return NextResponse.json({ error: "itemId et batchQty requis" }, { status: 400 });
 
   const qty = parseInt(batchQty) || 0;
@@ -64,6 +69,22 @@ export async function POST(request: NextRequest) {
 
   const actualQty = Math.min(qty, remaining);
   const newCumulative = currentDelivered + actualQty;
+  const parsedPlanningId = planningId ? Number.parseInt(String(planningId), 10) : null;
+  let linkedPlan: typeof expeditionPlanEntries.$inferSelect | null = null;
+  if (parsedPlanningId && Number.isInteger(parsedPlanningId)) {
+    const [plan] = await db.select().from(expeditionPlanEntries)
+      .where(eq(expeditionPlanEntries.id, parsedPlanningId)).limit(1);
+    if (!plan || plan.itemId !== item.id || plan.orderId !== item.orderId) {
+      return NextResponse.json({ error: "Planning d'expédition invalide pour cet article" }, { status: 400 });
+    }
+    if (["ANNULE", "TERMINE"].includes(plan.status)) {
+      return NextResponse.json({ error: "Ce planning d'expédition n'est plus actif" }, { status: 400 });
+    }
+    if (actualQty > plan.plannedQty - plan.loadedQty) {
+      return NextResponse.json({ error: `Quantité restante sur le planning : ${plan.plannedQty - plan.loadedQty}` }, { status: 400 });
+    }
+    linkedPlan = plan;
+  }
 
   // Insert batch
   await db.insert(expeditionBatches).values({
@@ -81,6 +102,16 @@ export async function POST(request: NextRequest) {
     deliveredQty: newCumulative,
     deliveryDate: deliveryDate || item.deliveryDate,
   }).where(eq(orderItems.id, item.id));
+
+  if (linkedPlan) {
+    const loadedQty = linkedPlan.loadedQty + actualQty;
+    await db.update(expeditionPlanEntries).set({
+      loadedQty,
+      status: loadedQty >= linkedPlan.plannedQty ? "TERMINE" : "EN_COURS",
+      updatedAt: new Date().toISOString(),
+      updatedByName: user.fullName,
+    }).where(eq(expeditionPlanEntries.id, linkedPlan.id));
+  }
 
   // Check LIVREE
   const [all] = await db.select({

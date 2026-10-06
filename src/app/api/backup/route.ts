@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
 import {
-  users, agencies, userAgencyAccess, clients, orders, orderItems, productionBatches, expeditionBatches,
+  users, agencies, userAgencyAccess, clients, orders, orderItems, productionBatches, expeditionBatches, expeditionPlanEntries,
   productionUnitLib, articleLibrary, techLibrary, materialCategories, matieres, itemTechnicalComponents,
   activityLogs, modificationLogs, notifications, backupHistory, photometricStudies, photometricStudyItems,
   recouvrementStates, clientRecouvrementStates, clientRecouvrementLogs,
@@ -115,6 +115,8 @@ export async function POST(request: NextRequest) {
   const orderItemsRows = arr<typeof orderItems.$inferInsert>("orderItems");
   const productionBatchesRows = arr<typeof productionBatches.$inferInsert>("productionBatches");
   const expeditionBatchesRows = arr<typeof expeditionBatches.$inferInsert>("expeditionBatches");
+  const expeditionPlanEntriesRows = arr<typeof expeditionPlanEntries.$inferInsert>("expeditionPlanEntries");
+  const restoreExpeditionPlanning = expeditionPlanEntriesRows.length > 0;
   const productionUnitLibRows = arr<typeof productionUnitLib.$inferInsert>("productionUnitLib");
   const articleLibraryRows = arr<typeof articleLibrary.$inferInsert>("articleLibrary");
   const techLibraryRows = arr<typeof techLibrary.$inferInsert>("techLibrary");
@@ -187,6 +189,7 @@ export async function POST(request: NextRequest) {
       await tx.delete(activityLogs);
       await tx.delete(photometricStudyItems);
       await tx.delete(photometricStudies);
+      if (restoreExpeditionPlanning) await tx.delete(expeditionPlanEntries);
       await tx.delete(expeditionBatches);
       await tx.delete(productionBatches);
       await tx.delete(itemTechnicalComponents);
@@ -223,6 +226,7 @@ export async function POST(request: NextRequest) {
       await insertChunked(tx, itemTechnicalComponents, itemTechnicalComponentsRows);
       await insertChunked(tx, productionBatches, productionBatchesRows);
       await insertChunked(tx, expeditionBatches, expeditionBatchesRows);
+      if (restoreExpeditionPlanning) await insertChunked(tx, expeditionPlanEntries, expeditionPlanEntriesRows);
       await insertChunked(tx, productionUnitLib, productionUnitLibRows);
       await insertChunked(tx, articleLibrary, articleLibraryRows);
       await insertChunked(tx, techLibrary, techLibraryRows);
@@ -246,7 +250,7 @@ export async function POST(request: NextRequest) {
       // Resync auto-increment sequences with the restored max ids
       const tableNames = [
         "users", "agencies", ...(restoreAgencyAccess ? ["user_agency_access"] : []), "clients", "orders", "order_items", "production_batches",
-        "expedition_batches", "production_unit_lib", "article_library", "tech_library",
+        "expedition_batches", ...(restoreExpeditionPlanning ? ["expedition_plan_entries"] : []), "production_unit_lib", "article_library", "tech_library",
         "material_categories", "matieres", "item_technical_components", "activity_logs", "modification_logs", "notifications",
         "photometric_studies", "photometric_study_items",
         ...(restoreRecouvrement ? ["recouvrement_states", "client_recouvrement_states", "client_recouvrement_logs"] : []),
@@ -270,7 +274,7 @@ export async function POST(request: NextRequest) {
   }
 
   const totalRestored = usersRows.length + agenciesRows.length + userAgencyAccessRows.length + clientsRows.length + ordersRows.length +
-    orderItemsRows.length + productionBatchesRows.length + expeditionBatchesRows.length +
+    orderItemsRows.length + productionBatchesRows.length + expeditionBatchesRows.length + expeditionPlanEntriesRows.length +
     productionUnitLibRows.length + articleLibraryRows.length + techLibraryRows.length +
     materialCategoriesRows.length + matieresRows.length + itemTechnicalComponentsRows.length +
     activityLogsRows.length + modificationLogsRows.length + notificationsRows.length +

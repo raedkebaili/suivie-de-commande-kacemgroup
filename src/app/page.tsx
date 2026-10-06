@@ -27,6 +27,7 @@ const UsersView = dynamic(() => import("@/components/UsersView"), { loading: Tab
 const WatchdogView = dynamic(() => import("@/components/WatchdogView"), { loading: TabLoader });
 const ProductionView = dynamic(() => import("@/components/ProductionView"), { loading: TabLoader });
 const ExpeditionView = dynamic(() => import("@/components/ExpeditionView"), { loading: TabLoader });
+const ExpeditionPlanningView = dynamic(() => import("@/components/ExpeditionPlanningView"), { loading: TabLoader });
 const MatiereView = dynamic(() => import("@/components/MatiereView"), { loading: TabLoader });
 const BackupView = dynamic(() => import("@/components/BackupView"), { loading: TabLoader });
 const ColorsView = dynamic(() => import("@/components/ColorsView"), { loading: TabLoader });
@@ -42,7 +43,7 @@ import { startBackupScheduler, stopBackupScheduler } from "@/lib/backup-schedule
 
 function formatNotifDate(d: string) { if (!d) return ""; const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(d); if (m) return `${m[3]}/${m[2]} ${m[4]}:${m[5]}`; return d.substring(0,16); }
 
-type Tab = "dashboard" | "orders" | "production" | "expedition" | "matieres" | "agencies" | "clients" | "users" | "watchdog" | "backup" | "colors" | "recouvrement" | "archive" | "planning" | "factories" | "telegestion" | "storage";
+type Tab = "dashboard" | "orders" | "production" | "expedition" | "expeditionPlanning" | "matieres" | "agencies" | "clients" | "users" | "watchdog" | "backup" | "colors" | "recouvrement" | "archive" | "planning" | "factories" | "telegestion" | "storage";
 
 // Hoisted outside the component: this list is static and doesn't need to be
 // recreated on every render. Also reused by the Electron shortcut handler to
@@ -54,6 +55,7 @@ const TABS: { key: Tab; label: string; roles: string[] }[] = [
   { key: "archive", label: "Archive commandes", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement"] },
   { key: "production", label: "Production", roles: ["superadmin", "planification"] },
   { key: "expedition", label: "Expédition", roles: ["superadmin", "planification"] },
+  { key: "expeditionPlanning", label: "Planning d'expédition", roles: ["superadmin", "planification"] },
   { key: "planning", label: "Planning production", roles: ["superadmin", "planification", "consultant_prod"] },
   { key: "factories", label: "Usines", roles: ["superadmin", "planification"] },
   { key: "matieres", label: "Matières", roles: ["superadmin", "technique"] },
@@ -142,6 +144,15 @@ export default function HomePage() {
     fetchNotifications(showNotifs);
   };
 
+  const markAllRead = async () => {
+    const unread = notifications.filter((notification) => !notification.read);
+    await Promise.all(unread.map((notification) => apiFetch(`/api/notifications/${notification.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ read: true }),
+    })));
+    fetchNotifications(showNotifs);
+  };
+
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950"><div className="flex flex-col items-center gap-3"><svg className="animate-spin w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg><span className="text-sm text-gray-500 dark:text-gray-400">Chargement...</span></div></div>;
   if (!user) return null;
 
@@ -183,7 +194,7 @@ export default function HomePage() {
             </h2>
             <span className="text-xs bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full font-medium">KACEM GROUP</span>
             {/* Search bar */}
-            <div className="hidden md:flex items-center gap-2 flex-1 max-w-md mx-4 relative">
+            <div className="hidden md:flex items-center gap-2 flex-1 max-w-sm xl:max-w-md mx-2 xl:mx-4 relative">
               <input ref={searchInputRef} type="text" placeholder="Rechercher commande, client, affaire, article…"
                 value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                 onFocus={() => searchResults && setShowSearch(true)}
@@ -213,6 +224,17 @@ export default function HomePage() {
               )}
             </div>
           </div>
+          {latestUnread && (
+            <div className="notification-ticker notification-ticker-inline flex-1 min-w-0 max-w-xl text-blue-900 dark:text-blue-100" role="alert" aria-live="polite">
+              <div className="notification-ticker-viewport px-2 py-1.5 text-xs">
+                <div className="notification-ticker-track">
+                  <span className="font-semibold">{latestUnread.title}</span>
+                  <span className="mx-2 opacity-60">•</span>
+                  <span>{latestUnread.message}</span>
+                </div>
+              </div>
+            </div>
+          )}
           {/* Notifications bell */}
           <div className="relative">
             <button onClick={() => { setShowNotifs(!showNotifs); if (!showNotifs) fetchNotifications(true); }}
@@ -226,7 +248,10 @@ export default function HomePage() {
               <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-50 max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto">
                 <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-2">
                   <span className="font-semibold text-sm text-gray-800 dark:text-white">Historique des notifications</span>
-                  <span className="text-[10px] text-gray-400">{notifications.length} affichée(s) · {unreadCount} non lue(s)</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-gray-400">{notifications.length} · {unreadCount} non lue(s)</span>
+                    {unreadCount > 0 && <button onClick={markAllRead} className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap">Tout marquer comme lue</button>}
+                  </div>
                 </div>
                 {notifications.length === 0 ? <div className="p-4 text-sm text-gray-400 text-center">Aucune notification</div> :
                   notifications.map(n => (
@@ -237,7 +262,10 @@ export default function HomePage() {
                         <div className="min-w-0">
                           <div className="font-medium text-gray-800 dark:text-white text-xs">{n.title}</div>
                           <div className="text-gray-500 dark:text-gray-400 text-xs mt-0.5">{n.message}</div>
-                          <div className="text-[10px] text-gray-400 mt-1">{formatNotifDate(n.createdAt)}{n.read ? " · Lue" : " · Cliquer pour marquer comme lue"}</div>
+                          <div className="text-[10px] text-gray-400 mt-1 flex items-center gap-2">
+                            <span>{formatNotifDate(n.createdAt)}{n.read ? " · Lue" : ""}</span>
+                            {!n.read && <button onClick={(event) => { event.stopPropagation(); markRead(n.id); }} className="font-semibold text-blue-600 dark:text-blue-400 hover:underline">Marquer comme lue</button>}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -250,24 +278,12 @@ export default function HomePage() {
             <span className="hidden sm:inline font-medium">{user.fullName}</span>
           </div>
         </header>
-        {latestUnread && (
-          <div className="notification-ticker border-b border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/50 text-blue-900 dark:text-blue-100" role="alert" aria-live="polite">
-            <div className="notification-ticker-viewport px-4 py-2 text-xs sm:text-sm">
-              <div className="notification-ticker-track">
-                <span className="font-semibold">{latestUnread.title}</span>
-                <span className="mx-3 opacity-60">•</span>
-                <span>{latestUnread.message}</span>
-                <span className="mx-3 opacity-60">•</span>
-                <span>{formatNotifDate(latestUnread.createdAt)}</span>
-              </div>
-            </div>
-          </div>
-        )}
         <main className="flex-1 overflow-y-auto p-4 lg:p-6 bg-gray-50 dark:bg-gray-950">
           {activeTab === "dashboard" && <DashboardView user={user} />}
           {activeTab === "orders" && <OrdersView user={user} />}
           {activeTab === "production" && <ProductionView user={user} />}
           {activeTab === "expedition" && <ExpeditionView user={user} />}
+          {activeTab === "expeditionPlanning" && <ExpeditionPlanningView user={user} />}
           {activeTab === "planning" && <PlanningProductionView user={user} />}
           {activeTab === "factories" && <FactoriesView user={user} />}
           {activeTab === "matieres" && <MatiereView user={user} />}

@@ -15,7 +15,7 @@
  */
 import { db } from "@/db";
 import {
-  users, agencies, userAgencyAccess, clients, orders, orderItems, productionBatches, expeditionBatches,
+  users, agencies, userAgencyAccess, clients, orders, orderItems, productionBatches, expeditionBatches, expeditionPlanEntries,
   productionUnitLib, articleLibrary, techLibrary, materialCategories, matieres,
   itemTechnicalComponents, activityLogs, modificationLogs, notifications,
   photometricStudies, photometricStudyItems,
@@ -41,6 +41,7 @@ export async function collectBackupData() {
     orderItems: await db.select().from(orderItems),
     productionBatches: await db.select().from(productionBatches),
     expeditionBatches: await db.select().from(expeditionBatches),
+    expeditionPlanEntries: await db.select().from(expeditionPlanEntries),
     productionUnitLib: await db.select().from(productionUnitLib),
     articleLibrary: await db.select().from(articleLibrary),
     techLibrary: await db.select().from(techLibrary),

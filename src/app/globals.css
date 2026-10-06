@@ -111,6 +111,15 @@ html { transition: background-color 0.3s ease, color 0.3s ease; }
 .notification-ticker {
   overflow: hidden;
 }
+.notification-ticker-inline {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.5rem;
+}
+.dark .notification-ticker-inline {
+  background: rgba(30, 58, 138, 0.28);
+  border-color: #1e3a8a;
+}
 .notification-ticker-viewport {
   overflow: hidden;
   white-space: nowrap;

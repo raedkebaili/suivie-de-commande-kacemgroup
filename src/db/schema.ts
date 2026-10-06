@@ -150,6 +150,33 @@ export const expeditionBatches = pgTable("expedition_batches", {
   index("expedition_batches_order_idx").on(table.orderId),
 ]);
 
+// Planning d'expédition journalier. Cette table prépare les chargements sans
+// modifier les quantités réellement livrées : seule l'API /api/expedition
+// écrit dans order_items.delivered_qty et expedition_batches.
+export const expeditionPlanEntries = pgTable("expedition_plan_entries", {
+  id: serial("id").primaryKey(),
+  planDate: text("plan_date").notNull(),
+  itemId: integer("item_id").notNull().references(() => orderItems.id, { onDelete: "cascade" }),
+  orderId: integer("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),
+  articleName: text("article_name").notNull(),
+  orderNumber: text("order_number"),
+  clientName: text("client_name"),
+  plannedQty: integer("planned_qty").notNull().default(0),
+  loadedQty: integer("loaded_qty").notNull().default(0),
+  driverName: text("driver_name").notNull(),
+  status: text("status").notNull().default("PLANIFIE"),
+  note: text("note"),
+  createdById: integer("created_by_id").references(() => users.id, { onDelete: "set null" }),
+  createdByName: text("created_by_name"),
+  updatedByName: text("updated_by_name"),
+  createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
+}, (table) => [
+  index("expedition_plan_entries_date_driver_idx").on(table.planDate, table.driverName),
+  index("expedition_plan_entries_item_idx").on(table.itemId),
+  index("expedition_plan_entries_status_idx").on(table.status),
+]);
+
 export const productionUnitLib = pgTable("production_unit_lib", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().unique(),
