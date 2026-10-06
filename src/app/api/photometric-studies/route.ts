@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { photometricStudies, photometricStudyItems, orders, orderItems, itemTechnicalComponents, matieres, materialCategories, clients, driveDocuments } from "@/db/schema";
 import { eq, desc, isNull, inArray } from "drizzle-orm";
 import { getUserFromHeaders, logActivity, logModification } from "@/lib/auth";
+import { agencyScopeForUser } from "@/lib/agency-access";
 import { articleLensToValue, resolveStudyLens } from "@/lib/study-lens";
 
 export const dynamic = "force-dynamic";
@@ -128,7 +129,7 @@ export async function GET(request: NextRequest) {
   const orderId = sp.get("orderId");
   const rawOrderIds = sp.get("orderIds");
   const standalone = sp.get("standalone");
-  const orderIds = rawOrderIds
+  let orderIds = rawOrderIds
     ? [...new Set(rawOrderIds.split(",")
         .map((value) => Number.parseInt(value, 10))
         .filter((value) => Number.isInteger(value) && value > 0))]
@@ -136,6 +137,24 @@ export async function GET(request: NextRequest) {
 
   if (rawOrderIds && orderIds.length === 0) {
     return NextResponse.json({ error: "Au moins une commande est requise" }, { status: 400 });
+  }
+
+  // Une étude liée est visible uniquement si sa commande appartient au
+  // périmètre du rôle Accès agence. Les études indépendantes n'ayant aucune
+  // agence de rattachement, elles restent réservées aux rôles métier.
+  const agencyScope = agencyScopeForUser(user);
+  let scopedOrderIds: number[] | null = null;
+  if (agencyScope) {
+    if (agencyScope.length === 0 || standalone === "1") return NextResponse.json({ studies: [] });
+    const scopedOrders = await db.select({ id: orders.id }).from(orders).where(inArray(orders.agencyId, agencyScope));
+    scopedOrderIds = scopedOrders.map((order) => order.id);
+    if (scopedOrderIds.length === 0) return NextResponse.json({ studies: [] });
+    if (orderIds.length > 0) {
+      orderIds = orderIds.filter((id) => scopedOrderIds!.includes(id));
+      if (orderIds.length === 0) return NextResponse.json({ studies: [] });
+    } else if (orderId && !scopedOrderIds.includes(parseInt(orderId))) {
+      return NextResponse.json({ studies: [] });
+    }
   }
 
   let studiesQuery;
@@ -150,6 +169,10 @@ export async function GET(request: NextRequest) {
   } else if (standalone === "1") {
     studiesQuery = db.select().from(photometricStudies)
       .where(isNull(photometricStudies.orderId))
+      .orderBy(desc(photometricStudies.updatedAt), desc(photometricStudies.createdAt)).limit(500);
+  } else if (scopedOrderIds) {
+    studiesQuery = db.select().from(photometricStudies)
+      .where(inArray(photometricStudies.orderId, scopedOrderIds))
       .orderBy(desc(photometricStudies.updatedAt), desc(photometricStudies.createdAt)).limit(500);
   } else {
     studiesQuery = db.select().from(photometricStudies)

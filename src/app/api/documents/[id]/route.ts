@@ -16,6 +16,7 @@ import { getUserFromHeaders, logActivity } from "@/lib/auth";
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getUserFromHeaders(request);
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  if (user.role === "acces_agence") return NextResponse.json({ error: "Le rôle Accès agence est limité à la consultation" }, { status: 403 });
 
   const { id } = await params;
   const docId = parseInt(id);

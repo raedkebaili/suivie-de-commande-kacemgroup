@@ -44,8 +44,12 @@ export async function POST(request: NextRequest) {
   if (!username || !password || !role || !fullName) return NextResponse.json({ error: "Tous les champs requis" }, { status: 400 });
   const policyError = passwordPolicyError(String(password));
   if (policyError) return NextResponse.json({ error: `Mot de passe trop faible : ${policyError}` }, { status: 400 });
-  const agencyIds = await validateAgencyIds(body.agencyIds);
-  if (typeof agencyIds === "string") return NextResponse.json({ error: agencyIds }, { status: 400 });
+  const requestedAgencyIds = await validateAgencyIds(body.agencyIds);
+  if (typeof requestedAgencyIds === "string") return NextResponse.json({ error: requestedAgencyIds }, { status: 400 });
+  if (role === "acces_agence" && requestedAgencyIds.length === 0) {
+    return NextResponse.json({ error: "Sélectionnez au moins une agence pour le rôle Accès agence" }, { status: 400 });
+  }
+  const agencyIds = role === "acces_agence" ? requestedAgencyIds : [];
   const ex = await db.select().from(users).where(eq(users.username, username)).limit(1);
   if (ex.length > 0) return NextResponse.json({ error: "Nom d'utilisateur existe déjà" }, { status: 400 });
 

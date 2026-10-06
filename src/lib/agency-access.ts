@@ -1,10 +1,11 @@
 import { db } from "@/db";
 import { userAgencyAccess } from "@/db/schema";
 import { eq } from "drizzle-orm";
+export { agencyScopeForUser } from "./agency-scope";
 
 /**
- * Agences attribuées à un utilisateur.
- * Une liste vide signifie qu'aucune restriction n'est configurée.
+ * Agences attribuées à un utilisateur. Les affectations ne sont utilisées
+ * comme périmètre que pour le rôle autonome `acces_agence`.
  */
 export async function getAssignedAgencyIds(userId: number): Promise<number[]> {
   const rows = await db
@@ -12,15 +13,4 @@ export async function getAssignedAgencyIds(userId: number): Promise<number[]> {
     .from(userAgencyAccess)
     .where(eq(userAgencyAccess.userId, userId));
   return rows.map((row) => row.agencyId);
-}
-
-/**
- * Retourne la portée agence effective pour les requêtes métier.
- * null = toutes les agences ; un tableau = filtre obligatoire.
- * Le superadmin conserve toujours une visibilité globale.
- */
-export function agencyScopeForUser(user: { role: string; agencyIds?: number[] | null }): number[] | null {
-  if (user.role === "superadmin") return null;
-  const ids = user.agencyIds || [];
-  return ids.length > 0 ? ids : null;
 }

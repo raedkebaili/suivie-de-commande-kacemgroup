@@ -49,7 +49,7 @@ type Tab = "dashboard" | "orders" | "production" | "expedition" | "matieres" | "
 // check whether the current user's role is allowed to jump to a given tab.
 const TABS: { key: Tab; label: string; roles: string[] }[] = [
   { key: "dashboard", label: "Tableau de bord", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement"] },
-  { key: "orders", label: "Commandes", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement"] },
+  { key: "orders", label: "Commandes", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement", "acces_agence"] },
   // Archive : consultation ouverte à tous les rôles authentifiés
   { key: "archive", label: "Archive commandes", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement"] },
   { key: "production", label: "Production", roles: ["superadmin", "planification"] },
@@ -84,6 +84,12 @@ export default function HomePage() {
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const availableTabs = useMemo(() => (user ? TABS.filter(t => t.roles.includes(user.role)) : []), [user]);
+
+  useEffect(() => {
+    if (user && !availableTabs.some((tab) => tab.key === activeTab)) {
+      setActiveTab((availableTabs[0]?.key || "orders") as Tab);
+    }
+  }, [user, availableTabs, activeTab]);
 
   useEffect(() => {
     if (searchQuery.length < 2) { setSearchResults(null); return; }

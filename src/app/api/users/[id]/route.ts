@@ -38,17 +38,23 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     updates.passwordHash = await hashPassword(body.password);
     updates.mustChangePassword = true;
   }
-  const hasAgencyIds = Object.prototype.hasOwnProperty.call(body, "agencyIds");
-  const agencyIds = hasAgencyIds ? await validateAgencyIds(body.agencyIds) : undefined;
-  if (typeof agencyIds === "string") return NextResponse.json({ error: agencyIds }, { status: 400 });
+  const [current] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
+  if (!current) return NextResponse.json({ error: "Utilisateur non trouvé" }, { status: 404 });
+  const nextRole = body.role ?? current.role;
+  const requestedAgencyIds = await validateAgencyIds(body.agencyIds);
+  if (typeof requestedAgencyIds === "string") return NextResponse.json({ error: requestedAgencyIds }, { status: 400 });
+  if (nextRole === "acces_agence" && requestedAgencyIds.length === 0) {
+    return NextResponse.json({ error: "Sélectionnez au moins une agence pour le rôle Accès agence" }, { status: 400 });
+  }
+  // Les affectations sont exclusivement celles du rôle Accès agence.
+  // Changer un utilisateur vers un autre rôle retire donc ses restrictions.
+  const agencyIds = nextRole === "acces_agence" ? requestedAgencyIds : [];
 
   const updated = await db.transaction(async (tx) => {
     const [user] = await tx.update(users).set(updates).where(eq(users.id, userId)).returning({ id: users.id, username: users.username, role: users.role, fullName: users.fullName, active: users.active, createdAt: users.createdAt });
     if (!user) return null;
-    if (agencyIds !== undefined) {
-      await tx.delete(userAgencyAccess).where(eq(userAgencyAccess.userId, userId));
-      if (agencyIds.length > 0) await tx.insert(userAgencyAccess).values(agencyIds.map((agencyId) => ({ userId, agencyId })));
-    }
+    await tx.delete(userAgencyAccess).where(eq(userAgencyAccess.userId, userId));
+    if (agencyIds.length > 0) await tx.insert(userAgencyAccess).values(agencyIds.map((agencyId) => ({ userId, agencyId })));
     return user;
   });
   if (!updated) return NextResponse.json({ error: "Utilisateur non trouvé" }, { status: 404 });

@@ -17,7 +17,7 @@ import { darkenColor, getContrastTextColor } from "@/lib/color-utils";
 import OrderItemRow from "@/components/OrderItemRow";
 import DocumentsPanel, { PendingDocumentsZone, uploadPendingDocuments, documentDownloadUrl, type PendingDocument } from "@/components/DocumentsPanel";
 
-type FullOrder = Order & { totalQty?: number; totalDelivered?: number; totalProduced?: number; totalRemaining?: number; documentCount?: number; hasCahierDesCharges?: boolean };
+type FullOrder = Order & { totalQty?: number; totalDelivered?: number; totalProduced?: number; totalRemaining?: number; documentCount?: number; hasCahierDesCharges?: boolean; hasPhotometricStudy?: boolean };
 
 function normalizeOrderSearch(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
@@ -184,7 +184,7 @@ export default function OrdersView({ user }: { user: User }) {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingOrder, setEditingOrder] = useState<FullOrder | null>(null);
-  const [fs, setFs] = useState(""); const [fa, setFa] = useState(""); const [fp, setFp] = useState("");
+  const [fs, setFs] = useState(""); const [fa, setFa] = useState(""); const [fp, setFp] = useState(""); const [fphoto, setFphoto] = useState(false);
   const [error, setError] = useState(""); const [saving, setSaving] = useState(false);
   const [expandedOrders, setExpandedOrders] = useState<Set<number>>(new Set());
   const [showImport, setShowImport] = useState(false); const [importType, setImportType] = useState("clients");
@@ -243,6 +243,10 @@ export default function OrdersView({ user }: { user: User }) {
   const [editingStudy, setEditingStudy] = useState<PhotoStudy | null>(null);
   const [orderStudies, setOrderStudies] = useState<Map<number, PhotoStudy[]>>(new Map());
   const [standaloneStudies, setStandaloneStudies] = useState<PhotoStudy[]>([]);
+  const [standaloneTableOpen, setStandaloneTableOpen] = useState(true);
+  const [standaloneSearch, setStandaloneSearch] = useState("");
+  const [standaloneSortField, setStandaloneSortField] = useState<"date" | "study" | "client">("date");
+  const [standaloneSortDir, setStandaloneSortDir] = useState<"asc" | "desc">("desc");
   const [isConvertingStudy, setIsConvertingStudy] = useState(false);
   // ── Documents contextuels (Stockage Google Drive existant) ──
   // Cible du panneau de consultation/ajout (affaire ou étude)
@@ -254,16 +258,18 @@ export default function OrdersView({ user }: { user: User }) {
   // Hook pour les couleurs
   const { getModifiedCellStyle, getColor } = useColors();
 
-  const ce=()=>["superadmin","commercial"].includes(user.role), ct=()=>["superadmin","technique"].includes(user.role), cp=()=>["superadmin","planification"].includes(user.role), cd=user.role==="superadmin";
+  const ce=()=>["superadmin","commercial"].includes(user.role), ct=()=>["superadmin","technique"].includes(user.role), cp=()=>["superadmin","planification"].includes(user.role), cd=user.role==="superadmin", canDeleteOrder=cd||user.role==="commercial";
 
   // ── Accès limité du service planification ──
   // Le planificateur peut CRÉER des commandes, mais uniquement à l'état
   // commercial « Sur Stock / Besoin interne » (verrouillé ici et côté serveur).
   // Il ne gagne aucun droit d'édition commerciale sur les commandes existantes.
   const planifStockOnly = user.role === "planification";
-  const accessibleAgencies = () => user.role === "superadmin" || !user.agencyIds?.length
+  const accessibleAgencies = () => user.role === "superadmin"
     ? agencies
-    : agencies.filter((agency) => user.agencyIds!.includes(agency.id));
+    : user.role === "acces_agence"
+      ? agencies.filter((agency) => user.agencyIds?.includes(agency.id))
+      : agencies;
   const canCreateOrder = () => ce() || planifStockOnly;
   // Saisie de l'en-tête et des articles : commercial, ou planificateur en création
   const canEditOrderForm = () => ce() || (planifStockOnly && !editingOrder);
@@ -307,9 +313,10 @@ export default function OrdersView({ user }: { user: User }) {
     if(fp)p.set("priority",fp);
     if(ff)p.set("factory",ff);
     if(ftel)p.set("telegestion","1");
+    if(fphoto)p.set("photometric","1");
     setOrders((await apiFetch<{orders:FullOrder[]}>(`/api/orders?${p}`)).orders);
     setDataVersion(v=>v+1)
-  },[fs,fa,fp,ff,ftel]);
+  },[fs,fa,fp,ff,ftel,fphoto]);
   useEffect(()=>{setLoading(true);Promise.all([
     fetchOrders(),
     apiFetch<{agencies:Agency[]}>("/api/agencies").then(d=>setAgencies(d.agencies)).catch(()=>{}),
@@ -526,7 +533,7 @@ export default function OrdersView({ user }: { user: User }) {
     setShowExpHistory(true);
   }, []);
   const showModifications=async(orderId:number)=>{setModOrderId(orderId);const d=await apiFetch<{logs:typeof modLogs}>(`/api/order-modifications/${orderId}`);setModLogs(d.logs);setShowModHistory(true)};
-  const ee=async()=>{const p=new URLSearchParams();if(fs.startsWith("comm:"))p.set("status",fs.slice(5));if(fa)p.set("agencyId",fa);const res=await fetch(`/api/orders/export?${p}`,{credentials:"same-origin"});if(!res.ok){alert("Erreur export");return}const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`commandes_${new Date().toISOString().split("T")[0]}.xlsx`;a.click();URL.revokeObjectURL(url)};
+  const ee=async()=>{const p=new URLSearchParams();if(fs.startsWith("comm:"))p.set("status",fs.slice(5));if(fa)p.set("agencyId",fa);if(fphoto)p.set("photometric","1");const res=await fetch(`/api/orders/export?${p}`,{credentials:"same-origin"});if(!res.ok){alert("Erreur export");return}const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`commandes_${new Date().toISOString().split("T")[0]}.xlsx`;a.click();URL.revokeObjectURL(url)};
   const ai=()=>setFormItems([...formItems,{articleName:"",quantity:1,unitPrice:"",description:""}]);
   const ri=(i:number)=>{if(formItems.length<=1)return;setFormItems(formItems.filter((_,x)=>x!==i))};
   const ui=(i:number,f:keyof OrderItem,v:string|number)=>{const u=[...formItems];(u[i]as Record<string,unknown>)[f]=v;setFormItems(u)};
@@ -728,6 +735,25 @@ export default function OrdersView({ user }: { user: User }) {
   // Charger les études indépendantes au montage
   useEffect(() => { fetchStandaloneStudies(); }, [fetchStandaloneStudies]);
 
+  const filteredStandaloneStudies = useMemo(() => {
+    const query = normalizeOrderSearch(standaloneSearch);
+    const result = standaloneStudies.filter((study) => {
+      if (query.length < 2) return true;
+      const haystack = [
+        study.studyNumber, study.clientName, study.affaireName, study.note, study.createdByName,
+        ...study.items.flatMap((item) => [item.productName, item.lensReference, item.lensLabel, item.note]),
+      ].map((value) => normalizeOrderSearch(value || ""));
+      return haystack.some((value) => value.includes(query));
+    });
+    const direction = standaloneSortDir === "asc" ? 1 : -1;
+    result.sort((left, right) => {
+      if (standaloneSortField === "study") return direction * left.studyNumber.localeCompare(right.studyNumber, "fr", { numeric: true, sensitivity: "base" });
+      if (standaloneSortField === "client") return direction * (left.clientName || "").localeCompare(right.clientName || "", "fr", { sensitivity: "base" });
+      return direction * (new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
+    });
+    return result;
+  }, [standaloneSearch, standaloneSortDir, standaloneSortField, standaloneStudies]);
+
   const lensMaterials = useMemo(() => {
     const lensCategory = materialCategories.find(c => c.key === "lens" || c.name.toLowerCase().includes("lentille"));
     return lensCategory ? materials.filter(m => m.categoryId === lensCategory.id) : [];
@@ -925,6 +951,10 @@ export default function OrdersView({ user }: { user: User }) {
         title="N’afficher que les commandes contenant des articles de la famille Télégestion">
         <input type="checkbox" checked={ftel} onChange={e=>setFtel(e.target.checked)} className="accent-sky-600" />📡 Télégestion
       </label>
+      <label className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer flex items-center gap-1.5 border transition-colors ${fphoto?"bg-amber-100 border-amber-500 text-amber-900 font-semibold":"bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200"}`}
+        title="N’afficher que les commandes contenant une étude photométrique">
+        <input type="checkbox" checked={fphoto} onChange={e=>setFphoto(e.target.checked)} className="accent-amber-600" />🔬 Études photométriques
+      </label>
       <button onClick={fetchOrders} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg text-sm hover:bg-gray-300">🔄 Actualiser</button>
       <label className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer flex items-center gap-1 transition-colors ${watchLive?"bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-400":"bg-gray-100 dark:bg-gray-800 text-gray-500 border border-gray-300 dark:border-gray-600"}`}>
         <input type="checkbox" checked={watchLive} onChange={e=>setWatchLive(e.target.checked)} className="sr-only" />
@@ -1000,7 +1030,7 @@ export default function OrdersView({ user }: { user: User }) {
       const operationalLabel=visualState==="neutral"?(o.productionStatus==="EN_PRODUCTION"?"En production":"En instance"):ORDER_STATE_LABELS[visualState];
       return (<React.Fragment key={o.id}><tr className={`cursor-pointer border-l-4 text-black [&_td]:text-black [&_span]:text-black [&_b]:text-black ${orderRowClass(visualState,o.status)}`} onClick={()=>toggleExpand(o.id)}>
         <td className="px-2 py-1.5 text-center font-bold">{expanded?"▾":"▸"}</td>
-        <td className="px-2 py-1.5 font-medium">{highlight(o.orderNumber)}{(o.items||[]).some(i=>!!i.id&&planningActiveItems.has(i.id))&&<span className="planning-blink ml-1 inline-block px-1 text-[8px] font-bold align-middle" style={{["--planning-color"]:getColor("PLANNING_EN_COURS"),["--planning-text"]:"#000000"} as React.CSSProperties} title="Production en cours (planning)">PROD</span>}{(o.documentCount||0)>0&&<span onClick={(e)=>{e.stopPropagation();setDocsTarget({entity:"order",id:o.id,label:o.orderNumber})}} className={`ml-1 inline-flex items-center gap-0.5 px-1 py-0.5 text-[8px] font-bold align-middle border cursor-pointer rounded ${o.hasCahierDesCharges?"doc-blink bg-blue-100 border-blue-500 text-blue-900":"bg-blue-50 border-blue-300 text-blue-800"}`} title={o.hasCahierDesCharges?"Cahier des charges disponible":"Documents disponibles"}>📄 {o.hasCahierDesCharges?"Cahier des charges":"Docs"}{o.documentCount!>1?` (${o.documentCount})`:""}</span>}</td>
+        <td className="px-2 py-1.5 font-medium">{highlight(o.orderNumber)}{o.hasPhotometricStudy&&<span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-amber-400 align-middle shadow-[0_0_5px_2px_rgba(251,191,36,0.8)] animate-pulse" title="Cette commande contient une étude photométrique" aria-label="Étude photométrique" />}{(o.items||[]).some(i=>!!i.id&&planningActiveItems.has(i.id))&&<span className="planning-blink ml-1 inline-block px-1 text-[8px] font-bold align-middle" style={{["--planning-color"]:getColor("PLANNING_EN_COURS"),["--planning-text"]:"#000000"} as React.CSSProperties} title="Production en cours (planning)">PROD</span>}{(o.documentCount||0)>0&&<span onClick={(e)=>{e.stopPropagation();setDocsTarget({entity:"order",id:o.id,label:o.orderNumber})}} className={`ml-1 inline-flex items-center gap-0.5 px-1 py-0.5 text-[8px] font-bold align-middle border cursor-pointer rounded ${o.hasCahierDesCharges?"doc-blink bg-blue-100 border-blue-500 text-blue-900":"bg-blue-50 border-blue-300 text-blue-800"}`} title={o.hasCahierDesCharges?"Cahier des charges disponible":"Documents disponibles"}>📄 {o.hasCahierDesCharges?"Cahier des charges":"Docs"}{o.documentCount!>1?` (${o.documentCount})`:""}</span>}</td>
         {isColVisible("date")&&<td className="px-2 py-1.5 text-[10px]">{o.orderDate}</td>}
         <td className="px-2 py-1.5"><RecouvrementAlertCell name={highlight(o.clientName||"")} assignment={recouvByClient.get(o.clientId)} /></td>
         {isColVisible("agence")&&<td className="px-2 py-1.5 text-[10px]">{o.agencyName}</td>}
@@ -1010,7 +1040,7 @@ export default function OrdersView({ user }: { user: User }) {
         <td className="px-2 py-1.5" title={o.statusReason||""}>{isProdStateVisible(productionStateKey(visualState,o.productionStatus))?<><span className={`inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded border ${productionBadge(visualState,o.productionStatus)}`}>{operationalLabel}</span>{o.statusReason&&<span className="text-[8px] ml-1 cursor-help">💬</span>}{visualState==="cancelled"&&o.cancelReason&&<span className="text-[9px] ml-1">({o.cancelReason})</span>}</>:<span className="text-[10px] opacity-40">—</span>}</td>
         {isColVisible("creePar")&&<td className="px-2 py-1.5 text-[10px]">{o.createdByName||"-"}</td>}
         {isColVisible("modifiePar")&&<td className="px-2 py-1.5 text-[10px] flex items-center gap-1">{o.updatedBy||"-"}<button onClick={(e)=>{e.stopPropagation();showModifications(o.id)}} className="text-[11px]" title="Historique des modifications">📝</button></td>}
-        <td className="px-2 py-1.5 text-right" onClick={e=>e.stopPropagation()}><button onClick={()=>oe(o)} className="px-2 py-1 text-[10px] bg-white/70 border border-black/30 text-black rounded">Détails</button>{cd&&<button onClick={()=>hd(o.id)} className="ml-1 px-2 py-1 text-[10px] bg-white/70 border border-black/30 text-black rounded">✕</button>}</td>
+        <td className="px-2 py-1.5 text-right" onClick={e=>e.stopPropagation()}><button onClick={()=>oe(o)} className="px-2 py-1 text-[10px] bg-white/70 border border-black/30 text-black rounded">Détails</button>{canDeleteOrder&&<button onClick={()=>hd(o.id)} className="ml-1 px-2 py-1 text-[10px] bg-white/70 border border-black/30 text-black rounded">✕</button>}</td>
       </tr>
       {expanded&&o.items&&o.items.length>0&&<tr key={`${o.id}-exp`} className={`text-black [&_td]:text-black [&_span]:text-black [&_b]:text-black ${orderPanelClass(visualState,o.status)}`}><td colSpan={visibleColCount} className="px-2 py-2">
         <DeferredOrderDetails estimatedHeight={Math.max(180, o.items.length * 42 + 80)}>
@@ -1257,7 +1287,7 @@ export default function OrdersView({ user }: { user: User }) {
         </>)}
       </fieldset>}
 
-      <div className="sticky bottom-0 bg-white dark:bg-gray-900 border-t px-5 py-3 rounded-b-2xl flex justify-end gap-2"><button onClick={()=>setShowModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Annuler</button><button onClick={handleSave} disabled={saving} className="px-6 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving?"...":editingOrder?"Enregistrer":"Créer"}</button></div></div></div>)}
+      <div className="sticky bottom-0 bg-white dark:bg-gray-900 border-t px-5 py-3 rounded-b-2xl flex justify-end gap-2"><button onClick={()=>setShowModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Fermer</button>{user.role !== "acces_agence" && <button onClick={handleSave} disabled={saving} className="px-6 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving?"...":editingOrder?"Enregistrer":"Créer"}</button>}</div></div></div>)}
 
     {showImport&&<div className="fixed inset-0 z-50 flex items-center justify-center"><div className="absolute inset-0 bg-black/50" onClick={()=>setShowImport(false)}/><div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6"><h4 className="text-lg font-semibold mb-4">📥 Import Excel</h4>{importMsg&&<div className="mb-3 p-2 rounded-lg bg-green-50 text-green-700 text-sm">{importMsg}</div>}<div className="space-y-3"><div><label className="block text-xs font-medium text-gray-600 mb-1">Type</label><select value={importType} onChange={e=>setImportType(e.target.value)} className="w-full px-3 py-2 bg-white border rounded-lg text-sm"><option value="clients">Clients</option><option value="agencies">Agences</option></select></div><div><label className="block text-xs font-medium text-gray-600 mb-1">Fichier .xlsx</label><input type="file" accept=".xlsx,.xls" ref={fileRef} className="w-full text-sm"/></div></div><div className="flex justify-end gap-2 mt-6"><button onClick={()=>setShowImport(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Annuler</button><button onClick={hi} className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700">Importer</button></div></div></div>}
   
@@ -1444,11 +1474,19 @@ export default function OrdersView({ user }: { user: User }) {
     {/* ═══════════════════════════════════════════════════════════════════ */}
     {standaloneStudies.length > 0 && (
       <div className="mt-6">
-        <div className="flex items-center gap-3 mb-3">
+        <div className="flex flex-wrap items-center gap-2 mb-3">
           <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300">🔬 Études Photométriques Indépendantes</h3>
-          <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">{standaloneStudies.length}</span>
+          <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">{filteredStandaloneStudies.length}/{standaloneStudies.length}</span>
+          <DebouncedSearchInput value={standaloneSearch} onChange={setStandaloneSearch} />
+          <select value={standaloneSortField} onChange={event => setStandaloneSortField(event.target.value as "date" | "study" | "client")} className="px-2 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-xs text-gray-700 dark:text-gray-200" title="Trier les études indépendantes">
+            <option value="date">Date</option><option value="study">N° étude</option><option value="client">Client</option>
+          </select>
+          <button onClick={() => setStandaloneSortDir(direction => direction === "asc" ? "desc" : "asc")} className="px-2.5 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-xs text-gray-700 dark:text-gray-200" title="Inverser le tri">{standaloneSortDir === "asc" ? "↑" : "↓"}</button>
+          <button onClick={() => setStandaloneTableOpen(open => !open)} className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-700 rounded-lg text-xs hover:bg-indigo-100 dark:hover:bg-indigo-900/50">
+            {standaloneTableOpen ? "▾ Replier" : "▸ Déplier"}
+          </button>
         </div>
-        <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+        {standaloneTableOpen && <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
@@ -1465,7 +1503,8 @@ export default function OrdersView({ user }: { user: User }) {
                 </tr>
               </thead>
               <tbody>
-                {standaloneStudies.map(study => (
+                {filteredStandaloneStudies.length === 0 && <tr><td colSpan={9} className="px-3 py-6 text-center text-xs text-gray-500">Aucune étude indépendante ne correspond à la recherche.</td></tr>}
+                {filteredStandaloneStudies.map(study => (
                   <tr key={study.id} className="border-b border-black/10 hover:opacity-90 align-top" style={{ backgroundColor: getColor("ETUDE_PHOTOMETRIQUE") + "33" }}>
                     <td className="px-2 py-1.5 font-bold text-[11px] text-black">🔬 {study.studyNumber}{(study.documentCount||0)>0&&<span className="block mt-0.5"><button onClick={(e)=>{e.stopPropagation();setDocsTarget({entity:"study",id:study.id,label:study.studyNumber})}} className="doc-blink inline-flex items-center gap-0.5 px-1 py-0.5 text-[8px] font-bold bg-blue-100 border border-blue-500 rounded text-blue-900 cursor-pointer" title="Afficher les documents associés">📎 Étude disponible</button>{study.studyDocument&&<a href={documentDownloadUrl(study.studyDocument.driveFileId,"attachment")} download onClick={e=>e.stopPropagation()} className="ml-1 inline-flex items-center px-1 py-0.5 text-[10px] font-bold text-blue-700 hover:text-blue-900" title={`Télécharger ${study.studyDocument.fileName}`}>⬇</a>}</span>}</td>
                     <td className="px-2 py-1.5 text-[11px] text-black">{study.clientName || "-"}</td>
@@ -1494,7 +1533,7 @@ export default function OrdersView({ user }: { user: User }) {
               </tbody>
             </table>
           </div>
-        </div>
+        </div>}
       </div>
     )}
 

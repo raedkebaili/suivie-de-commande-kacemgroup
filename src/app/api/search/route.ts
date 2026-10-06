@@ -44,9 +44,15 @@ export async function GET(request: NextRequest) {
     .orderBy(desc(orderItems.id))
     .limit(20);
 
-  const foundClients = await db.select().from(clients)
-    .where(or(ilike(clients.name, like), ilike(clients.code, like)))
-    .limit(10);
+  const foundClients = agencyScope
+    ? await db.selectDistinct({ id: clients.id, name: clients.name, code: clients.code })
+      .from(clients)
+      .innerJoin(orders, eq(clients.id, orders.clientId))
+      .where(and(inArray(orders.agencyId, agencyScope), or(ilike(clients.name, like), ilike(clients.code, like))))
+      .limit(10)
+    : await db.select().from(clients)
+      .where(or(ilike(clients.name, like), ilike(clients.code, like)))
+      .limit(10);
 
   return NextResponse.json({ orders: foundOrders, items: foundItems, clients: foundClients, query: q });
 }

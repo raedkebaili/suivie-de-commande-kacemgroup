@@ -13,11 +13,18 @@ export async function GET(request: NextRequest) {
   const sp = new URL(request.url).searchParams;
   const status = sp.get("status");
   const agencyId = sp.get("agencyId");
+  const photometricOnly = sp.get("photometric") === "1";
   const conds = [];
   const agencyScope = agencyScopeForUser(user);
   if (agencyScope) conds.push(inArray(orders.agencyId, agencyScope));
   if (status) conds.push(eq(orders.status, status));
   if (agencyId) conds.push(eq(orders.agencyId, parseInt(agencyId)));
+  if (photometricOnly) {
+    const matching = await db.selectDistinct({ orderId: photometricStudies.orderId }).from(photometricStudies);
+    const ids = matching.map((row) => row.orderId).filter((id): id is number => id !== null);
+    if (ids.length === 0) return NextResponse.json({ error: "Aucune commande avec étude photométrique" }, { status: 404 });
+    conds.push(inArray(orders.id, ids));
+  }
   const where = conds.length > 0 ? and(...conds) : undefined;
 
   // Récupérer toutes les commandes
@@ -237,7 +244,11 @@ export async function GET(request: NextRequest) {
   }
 
   // ── Feuille 3 : Études Photométriques ──
-  const allStudies = await db.select().from(photometricStudies).orderBy(desc(photometricStudies.createdAt));
+  const allStudiesRows = await db.select().from(photometricStudies).orderBy(desc(photometricStudies.createdAt));
+  const visibleOrderIds = new Set(allOrders.map((order) => order.id));
+  const allStudies = agencyScope
+    ? allStudiesRows.filter((study) => study.orderId !== null && visibleOrderIds.has(study.orderId))
+    : allStudiesRows;
   if (allStudies.length > 0) {
     const studyIds = allStudies.map(s => s.id);
     const allStudyItems = await db.select().from(photometricStudyItems)

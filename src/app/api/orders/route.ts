@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { orders, orderItems, clients, agencies, itemTechnicalComponents, driveDocuments } from "@/db/schema";
+import { orders, orderItems, clients, agencies, itemTechnicalComponents, driveDocuments, photometricStudies } from "@/db/schema";
 import { eq, desc, and, inArray, sql } from "drizzle-orm";
 import { logActivity, getUserFromHeaders, notifyRole } from "@/lib/auth";
 import { generateOrderNumber } from "@/lib/order-number";
@@ -18,6 +18,7 @@ export async function GET(request: NextRequest) {
   const a = await auth(request); if (!a.ok) return NextResponse.json({ error: a.error }, { status: a.status });
   const sp = new URL(request.url).searchParams;
   const status = sp.get("status"); const agencyId = sp.get("agencyId"); const priority = sp.get("priority");
+  const photometricOnly = sp.get("photometric") === "1";
   // Filtre sur l'état de PRODUCTION (colonne distincte de l'état commercial).
   // Ajout rétrocompatible : si le paramètre est absent, comportement inchangé.
   const productionStatus = sp.get("productionStatus");
@@ -46,6 +47,13 @@ export async function GET(request: NextRequest) {
     if (ids.length === 0) return NextResponse.json({ orders: [] });
     conds.push(inArray(orders.id, ids));
   }
+  if (photometricOnly) {
+    const matching = await db.selectDistinct({ orderId: photometricStudies.orderId })
+      .from(photometricStudies);
+    const ids = matching.map((row) => row.orderId).filter((id): id is number => id !== null);
+    if (ids.length === 0) return NextResponse.json({ orders: [] });
+    conds.push(inArray(orders.id, ids));
+  }
   const where = conds.length > 0 ? and(...conds) : undefined;
 
   const data = await db.select({
@@ -63,6 +71,11 @@ export async function GET(request: NextRequest) {
   }).from(orders).leftJoin(clients, eq(orders.clientId, clients.id)).leftJoin(agencies, eq(orders.agencyId, agencies.id)).where(where).orderBy(desc(orders.createdAt));
 
   const oids = data.map(o => o.id);
+  const studyRows = oids.length > 0
+    ? await db.selectDistinct({ orderId: photometricStudies.orderId })
+      .from(photometricStudies).where(inArray(photometricStudies.orderId, oids))
+    : [];
+  const studyOrderIds = new Set(studyRows.map((row) => row.orderId).filter((id): id is number => id !== null));
   let allItems: (typeof orderItems.$inferSelect)[] = [];
   if (oids.length > 0) allItems = await db.select().from(orderItems).where(inArray(orderItems.orderId, oids));
   const itemIds = allItems.map(item => item.id);
@@ -100,6 +113,7 @@ export async function GET(request: NextRequest) {
         totalRemaining: items.reduce((s, i) => s + i.quantity - (i.deliveredQty || 0), 0),
         documentCount: docStat ? Number(docStat.totalCount) : 0,
         hasCahierDesCharges: docStat ? Number(docStat.cahierCount) > 0 : false,
+        hasPhotometricStudy: studyOrderIds.has(o.id),
       };
     })
   });
