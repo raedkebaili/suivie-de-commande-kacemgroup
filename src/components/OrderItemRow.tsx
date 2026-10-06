@@ -19,6 +19,8 @@ type OrderItemRowProps = {
   planningInProgress?: boolean;
   /** true si la lentille affichée est imposée par une étude photométrique */
   studyLens?: boolean;
+  /** true si une ligne du planning d'expédition est en cours de livraison */
+  expeditionInProgress?: boolean;
 };
 
 /**
@@ -35,11 +37,15 @@ function OrderItemRow({
   onShowExpeditionHistory,
   planningInProgress = false,
   studyLens = false,
+  expeditionInProgress = false,
 }: OrderItemRowProps) {
   const { getModifiedCellStyle, getColor } = useColors();
   // Alerte visuelle « en cours de production » (couleur administrable)
   const planningStyle = planningInProgress
     ? ({ ["--planning-color"]: getColor("PLANNING_EN_COURS"), ["--planning-text"]: "#000000" } as React.CSSProperties)
+    : undefined;
+  const expeditionStyle = expeditionInProgress
+    ? ({ ["--expedition-color"]: "#22c55e", ["--expedition-text"]: "#000000" } as React.CSSProperties)
     : undefined;
   // Famille TÉLÉGESTION : surbrillance de la ligne avec la couleur définie
   // pour les spécifications techniques de télégestion (administrable).
@@ -64,9 +70,9 @@ function OrderItemRow({
   const modStyle = getModifiedCellStyle();
 
   return (
-    <tr className={`border-b border-black/20 text-black [&_td]:text-black [&_span]:text-black [&_b]:text-black ${ORDER_STATE_PANEL_CLASSES[itemState]}`}
-      style={telegestionBg ? { backgroundColor: telegestionBg, boxShadow: `inset 3px 0 0 0 ${telegestionBg}` } : undefined}
-      title={isTelegestionItem ? "Article de la famille Télégestion" : undefined}>
+    <tr className={`border-b border-black/20 text-black [&_td]:text-black [&_span]:text-black [&_b]:text-black ${ORDER_STATE_PANEL_CLASSES[itemState]} ${expeditionInProgress ? "expedition-blink" : ""}`}
+      style={expeditionStyle || (telegestionBg ? { backgroundColor: telegestionBg, boxShadow: `inset 3px 0 0 0 ${telegestionBg}` } : undefined)}
+      title={expeditionInProgress ? "En cours de livraison" : isTelegestionItem ? "Article de la famille Télégestion" : undefined}>
       {/* Article */}
       <td 
         className="px-1 py-1 font-medium text-[10px]" 
@@ -75,6 +81,7 @@ function OrderItemRow({
       >
         {isArticleModified && <span className="mr-0.5">✏️</span>}
         {isTelegestionItem && <span className="mr-0.5" title="Famille Télégestion">📡</span>}
+        {expeditionInProgress && <span className="mr-1" title="En cours de livraison">🚚</span>}
         {planningInProgress
           ? <span className="planning-blink inline-block px-1 font-bold" style={planningStyle} title="En cours de production (planning)">{highlight(item.articleName)}</span>
           : highlight(item.articleName)}
@@ -185,6 +192,9 @@ function OrderItemRow({
         {item.deliveredQty && item.deliveredQty > 0 ? (
           <span className="font-medium ml-1">{item.deliveredQty}</span>
         ) : null}
+        {item.expeditionPlanDriverName && <span className="block font-semibold">🚚 {item.expeditionPlanDriverName}</span>}
+        {item.expeditionPlanDate && <span className="block font-semibold">Chargement : {item.expeditionPlanDate}</span>}
+        {item.expeditionPlanNote && <span className="block max-w-[120px] truncate" title={item.expeditionPlanNote}>📝 {item.expeditionPlanNote}</span>}
         <button
           onClick={(e) => {
             e.stopPropagation();

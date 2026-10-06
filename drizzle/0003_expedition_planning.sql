@@ -9,7 +9,7 @@ CREATE TABLE "expedition_plan_entries" (
   "planned_qty" integer DEFAULT 0 NOT NULL,
   "loaded_qty" integer DEFAULT 0 NOT NULL,
   "driver_name" text NOT NULL,
-  "status" text DEFAULT 'PLANIFIE' NOT NULL,
+  "status" text DEFAULT 'NON_TRAITE' NOT NULL,
   "note" text,
   "created_by_id" integer,
   "created_by_name" text,
@@ -29,3 +29,10 @@ CREATE INDEX "expedition_plan_entries_date_driver_idx" ON "expedition_plan_entri
 CREATE INDEX "expedition_plan_entries_item_idx" ON "expedition_plan_entries" USING btree ("item_id");
 --> statement-breakpoint
 CREATE INDEX "expedition_plan_entries_status_idx" ON "expedition_plan_entries" USING btree ("status");
+--> statement-breakpoint
+-- Compatibilité avec les premières versions du planning : les lignes préparées
+-- restent neutres et les lignes terminées sont déjà des livraisons réelles.
+UPDATE "expedition_plan_entries" SET "status" = 'NON_TRAITE' WHERE "status" = 'PLANIFIE';
+UPDATE "expedition_plan_entries" SET "status" = 'LIVRE' WHERE "status" = 'TERMINE';
+--> statement-breakpoint
+ALTER TABLE "expedition_plan_entries" ADD CONSTRAINT "expedition_plan_entries_status_check" CHECK ("status" IN ('NON_TRAITE', 'EN_COURS', 'ANNULE', 'LIVRE'));

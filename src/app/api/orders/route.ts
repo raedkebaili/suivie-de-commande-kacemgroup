@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { orders, orderItems, clients, agencies, itemTechnicalComponents, driveDocuments, photometricStudies } from "@/db/schema";
+import { orders, orderItems, clients, agencies, itemTechnicalComponents, driveDocuments, photometricStudies, expeditionPlanEntries } from "@/db/schema";
 import { eq, desc, and, inArray, sql } from "drizzle-orm";
 import { logActivity, getUserFromHeaders } from "@/lib/auth";
 import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
@@ -83,6 +83,27 @@ export async function GET(request: NextRequest) {
   const allTechnicalComponents = itemIds.length > 0
     ? await db.select().from(itemTechnicalComponents).where(inArray(itemTechnicalComponents.itemId, itemIds))
     : [];
+  // Seul l'état EN_COURS est propagé à Commandes : NON_TRAITE reste neutre,
+  // LIVRE est déjà représenté par les cumuls réels et ANNULE ne colore pas la ligne.
+  const allExpeditionPlans = itemIds.length > 0
+    ? await db.select({
+        id: expeditionPlanEntries.id,
+        itemId: expeditionPlanEntries.itemId,
+        status: expeditionPlanEntries.status,
+        planDate: expeditionPlanEntries.planDate,
+        driverName: expeditionPlanEntries.driverName,
+        plannedQty: expeditionPlanEntries.plannedQty,
+        note: expeditionPlanEntries.note,
+      }).from(expeditionPlanEntries)
+        .where(inArray(expeditionPlanEntries.itemId, itemIds))
+        .orderBy(desc(expeditionPlanEntries.id))
+    : [];
+  const activePlanByItem = new Map<number, typeof allExpeditionPlans[number]>();
+  const latestPlanByItem = new Map<number, typeof allExpeditionPlans[number]>();
+  for (const plan of allExpeditionPlans) {
+    if (!latestPlanByItem.has(plan.itemId)) latestPlanByItem.set(plan.itemId, plan);
+    if (plan.status === "EN_COURS" && !activePlanByItem.has(plan.itemId)) activePlanByItem.set(plan.itemId, plan);
+  }
 
   // ── Documents associés (gestion documentaire contextuelle) ──────────
   // AJOUT rétrocompatible : 1 requête groupée, champs additifs. Si la table
@@ -100,10 +121,19 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     orders: data.map(o => {
-      const items = allItems.filter(i => i.orderId === o.id).map(item => ({
-        ...item,
-        technicalComponents: allTechnicalComponents.filter(component => component.itemId === item.id),
-      }));
+      const items = allItems.filter(i => i.orderId === o.id).map(item => {
+        const plan = activePlanByItem.get(item.id);
+        const latestPlan = latestPlanByItem.get(item.id);
+        return {
+          ...item,
+          technicalComponents: allTechnicalComponents.filter(component => component.itemId === item.id),
+          expeditionPlanStatus: plan?.status || null,
+          expeditionPlanDate: latestPlan?.planDate || null,
+          expeditionPlanDriverName: latestPlan?.driverName || null,
+          expeditionPlanQty: latestPlan?.plannedQty || null,
+          expeditionPlanNote: latestPlan?.note || null,
+        };
+      });
       const docStat = docByOrder.get(o.id);
       return {
         ...o,

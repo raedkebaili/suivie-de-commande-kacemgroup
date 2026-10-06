@@ -1,8 +1,8 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { orders, orderItems, productionBatches, expeditionBatches, modificationLogs, notifications, itemTechnicalComponents, matieres, materialCategories, factories } from "@/db/schema";
-import { eq, count } from "drizzle-orm";
+import { orders, orderItems, productionBatches, expeditionBatches, expeditionPlanEntries, modificationLogs, notifications, itemTechnicalComponents, matieres, materialCategories, factories } from "@/db/schema";
+import { eq, count, desc } from "drizzle-orm";
 import { logActivity, logModification, getUserFromHeaders } from "@/lib/auth";
 import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
 import { agencyScopeForUser } from "@/lib/agency-access";
@@ -21,10 +21,30 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!order) return NextResponse.json({ error: "Non trouvée" }, { status: 404 });
   const items = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
   const components = await db.select().from(itemTechnicalComponents).where(eq(itemTechnicalComponents.orderId, order.id));
+  const plans = await db.select({
+    itemId: expeditionPlanEntries.itemId,
+    status: expeditionPlanEntries.status,
+    planDate: expeditionPlanEntries.planDate,
+    driverName: expeditionPlanEntries.driverName,
+    plannedQty: expeditionPlanEntries.plannedQty,
+    note: expeditionPlanEntries.note,
+  }).from(expeditionPlanEntries).where(eq(expeditionPlanEntries.orderId, order.id)).orderBy(desc(expeditionPlanEntries.id));
   return NextResponse.json({
     order: {
       ...order,
-      items: items.map(item => ({ ...item, technicalComponents: components.filter(component => component.itemId === item.id) })),
+      items: items.map(item => {
+        const plan = plans.find(candidate => candidate.itemId === item.id && candidate.status === "EN_COURS");
+        const latestPlan = plans.find(candidate => candidate.itemId === item.id);
+        return {
+          ...item,
+          technicalComponents: components.filter(component => component.itemId === item.id),
+          expeditionPlanStatus: plan?.status || null,
+          expeditionPlanDate: latestPlan?.planDate || null,
+          expeditionPlanDriverName: latestPlan?.driverName || null,
+          expeditionPlanQty: latestPlan?.plannedQty || null,
+          expeditionPlanNote: latestPlan?.note || null,
+        };
+      }),
     },
   });
 }

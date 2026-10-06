@@ -164,7 +164,7 @@ export const expeditionPlanEntries = pgTable("expedition_plan_entries", {
   plannedQty: integer("planned_qty").notNull().default(0),
   loadedQty: integer("loaded_qty").notNull().default(0),
   driverName: text("driver_name").notNull(),
-  status: text("status").notNull().default("PLANIFIE"),
+  status: text("status").notNull().default("NON_TRAITE"),
   note: text("note"),
   createdById: integer("created_by_id").references(() => users.id, { onDelete: "set null" }),
   createdByName: text("created_by_name"),

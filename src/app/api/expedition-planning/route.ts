@@ -7,12 +7,23 @@ import { getUserFromHeaders, logActivity } from "@/lib/auth";
 
 const MANAGER_ROLES = ["superadmin", "planification"];
 
+type ExpeditionPlanStatus = "NON_TRAITE" | "EN_COURS" | "LIVRE" | "ANNULE";
+
 function canManage(role: string) {
   return MANAGER_ROLES.includes(role);
 }
 
 function validDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+// Compatibilité avec les premières lignes éventuellement créées par la
+// version précédente du module : PLANIFIE = NON_TRAITE, TERMINE = LIVRE.
+function normalizeStatus(status: string): ExpeditionPlanStatus {
+  if (status === "PLANIFIE") return "NON_TRAITE";
+  if (status === "TERMINE") return "LIVRE";
+  if (["EN_COURS", "LIVRE", "ANNULE"].includes(status)) return status as ExpeditionPlanStatus;
+  return "NON_TRAITE";
 }
 
 export async function GET(request: NextRequest) {
@@ -29,7 +40,7 @@ export async function GET(request: NextRequest) {
   if (date && date !== "all") conditions.push(eq(expeditionPlanEntries.planDate, date));
   if (driver && driver !== "all") conditions.push(eq(expeditionPlanEntries.driverName, driver));
 
-  const plans = await db.select({
+  const rows = await db.select({
     id: expeditionPlanEntries.id,
     planDate: expeditionPlanEntries.planDate,
     itemId: expeditionPlanEntries.itemId,
@@ -50,6 +61,7 @@ export async function GET(request: NextRequest) {
     itemProducedQty: orderItems.producedQty,
     productionStatus: orders.productionStatus,
     affaire: orders.affaire,
+    priority: orders.priority,
   })
     .from(expeditionPlanEntries)
     .leftJoin(orderItems, eq(expeditionPlanEntries.itemId, orderItems.id))
@@ -57,6 +69,7 @@ export async function GET(request: NextRequest) {
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(asc(expeditionPlanEntries.planDate), asc(expeditionPlanEntries.driverName), asc(expeditionPlanEntries.id));
 
+  const plans = rows.map((row) => ({ ...row, status: normalizeStatus(row.status) }));
   const filteredPlans = search
     ? plans.filter((plan) => [plan.articleName, plan.orderNumber, plan.clientName, plan.affaire, plan.driverName]
       .some((value) => String(value || "").toLowerCase().includes(search)))
@@ -85,9 +98,9 @@ export async function POST(request: NextRequest) {
     const driverName = String(body.driverName || "").trim();
     const note = String(body.note || "").trim() || null;
 
-    if (!validDate(planDate)) return NextResponse.json({ error: "Date de planning invalide" }, { status: 400 });
+    if (!validDate(planDate)) return NextResponse.json({ error: "Date de chargement invalide" }, { status: 400 });
     if (!Number.isInteger(itemId) || itemId <= 0) return NextResponse.json({ error: "Article invalide" }, { status: 400 });
-    if (!Number.isInteger(plannedQty) || plannedQty <= 0) return NextResponse.json({ error: "La quantité planifiée doit être supérieure à zéro" }, { status: 400 });
+    if (!Number.isInteger(plannedQty) || plannedQty <= 0) return NextResponse.json({ error: "La quantité à livrer doit être supérieure à zéro" }, { status: 400 });
     if (!driverName) return NextResponse.json({ error: "Le chauffeur/porteur est requis" }, { status: 400 });
 
     const [row] = await db.select({
@@ -100,6 +113,7 @@ export async function POST(request: NextRequest) {
       orderNumber: orders.orderNumber,
       productionStatus: orders.productionStatus,
       affaire: orders.affaire,
+      priority: orders.priority,
       clientName: clients.name,
     })
       .from(orderItems)
@@ -111,10 +125,12 @@ export async function POST(request: NextRequest) {
     if (!row) return NextResponse.json({ error: "Article introuvable" }, { status: 404 });
     if (row.productionStatus === "ANNULEE") return NextResponse.json({ error: "Impossible de planifier une commande annulée" }, { status: 400 });
 
-    const remaining = row.quantity - (row.deliveredQty || 0);
-    if (remaining <= 0) return NextResponse.json({ error: "Cet article est déjà entièrement livré" }, { status: 400 });
-    if (plannedQty > remaining) {
-      return NextResponse.json({ error: `Quantité maximale planifiable : ${remaining}` }, { status: 400 });
+    // Le planning d'expédition ne peut travailler que sur le stock produit,
+    // jamais sur la quantité totale commandée.
+    const availableToDeliver = Math.max(0, (row.producedQty || 0) - (row.deliveredQty || 0));
+    if (availableToDeliver <= 0) return NextResponse.json({ error: "Aucune quantité produite disponible à livrer pour cet article" }, { status: 400 });
+    if (plannedQty > availableToDeliver) {
+      return NextResponse.json({ error: `Quantité maximale à livrer : ${availableToDeliver}` }, { status: 400 });
     }
 
     const [duplicate] = await db.select({ id: expeditionPlanEntries.id })
@@ -124,6 +140,7 @@ export async function POST(request: NextRequest) {
         eq(expeditionPlanEntries.itemId, itemId),
         eq(expeditionPlanEntries.driverName, driverName),
         ne(expeditionPlanEntries.status, "ANNULE"),
+        ne(expeditionPlanEntries.status, "LIVRE"),
         ne(expeditionPlanEntries.status, "TERMINE"),
       ))
       .limit(1);
@@ -139,7 +156,7 @@ export async function POST(request: NextRequest) {
       plannedQty,
       loadedQty: 0,
       driverName,
-      status: "PLANIFIE",
+      status: "NON_TRAITE",
       note,
       createdById: user.id,
       createdByName: user.fullName,
@@ -147,8 +164,8 @@ export async function POST(request: NextRequest) {
     }).returning();
 
     await logActivity(user.id, user.username, "EXPEDITION_PLANNING_ADD",
-      `${row.articleName} — ${plannedQty} unité(s), ${driverName}, le ${planDate}`);
-    return NextResponse.json({ plan: created }, { status: 201 });
+      `${row.articleName} — ${plannedQty} unité(s) à livrer, ${driverName}, le ${planDate}`);
+    return NextResponse.json({ plan: { ...created, status: "NON_TRAITE" } }, { status: 201 });
   } catch (error) {
     console.error("Erreur création planning expédition:", error);
     return NextResponse.json({ error: "Erreur lors de la création du planning d'expédition" }, { status: 500 });

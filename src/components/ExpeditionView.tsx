@@ -73,7 +73,7 @@ export default function ExpeditionView({ user: _user }: { user: User }) {
   const addBatch = async (itemId: number) => {
     const quantity = batchQtys[itemId];
     if (!quantity || parseInt(quantity) <= 0) return;
-    const itemPlanOptions = plans.filter((plan) => plan.itemId === itemId && plan.status !== "ANNULE" && plan.status !== "TERMINE");
+    const itemPlanOptions = plans.filter((plan) => plan.itemId === itemId && plan.status !== "ANNULE" && plan.status !== "LIVRE" && plan.status !== "TERMINE");
     const linkedPlanningId = selectedPlans[itemId] || (itemPlanOptions.length === 1 ? String(itemPlanOptions[0].id) : "");
     try {
       await apiFetch("/api/expedition", {
@@ -186,11 +186,12 @@ export default function ExpeditionView({ user: _user }: { user: User }) {
                 <div className="border-t border-black/20 px-4 py-2 space-y-2 text-black">
                   {order.items.map(item => {
                     const remaining = Math.max(0, item.quantity - (item.deliveredQty || 0));
+                    const availableToDeliver = Math.max(0, (item.producedQty || 0) - (item.deliveredQty || 0));
                     const delivered = remaining === 0;
                     const produced = (item.producedQty || 0) >= item.quantity;
                     const cancelled = order.visualState === "cancelled";
                     const itemState = cancelled ? "cancelled" : delivered ? "delivered" : produced ? "awaiting-delivery" : "neutral";
-                    const itemPlans = plans.filter((plan) => plan.itemId === item.itemId && plan.status !== "ANNULE" && plan.status !== "TERMINE");
+                    const itemPlans = plans.filter((plan) => plan.itemId === item.itemId && plan.status !== "ANNULE" && plan.status !== "LIVRE" && plan.status !== "TERMINE");
                     const defaultPlanId = selectedPlans[item.itemId] || (itemPlans.length === 1 ? String(itemPlans[0].id) : "");
                     return (
                       <div
@@ -209,7 +210,7 @@ export default function ExpeditionView({ user: _user }: { user: User }) {
 
                         {!delivered && !cancelled && (
                           <>
-                            <input type="number" min={1} max={remaining} placeholder="Qté" value={batchQtys[item.itemId] || ""} onChange={event => setBatchQtys(current => ({ ...current, [item.itemId]: event.target.value }))} className="w-14 px-1 py-1 border border-black/30 rounded text-sm bg-white text-black" />
+                            <input type="number" min={1} max={availableToDeliver} placeholder="Qté" value={batchQtys[item.itemId] || ""} onChange={event => setBatchQtys(current => ({ ...current, [item.itemId]: event.target.value }))} className="w-14 px-1 py-1 border border-black/30 rounded text-sm bg-white text-black" />
                             <input type="date" value={batchDates[item.itemId] || new Date().toISOString().split("T")[0]} onChange={event => setBatchDates(current => ({ ...current, [item.itemId]: event.target.value }))} className="px-1 py-1 border border-black/30 rounded text-sm bg-white text-black w-28" />
                             <input type="text" placeholder="Chauffeur" value={drivers[item.itemId] || ""} onChange={event => setDrivers(current => ({ ...current, [item.itemId]: event.target.value }))} className="w-20 px-1 py-1 border border-black/30 rounded text-sm bg-white text-black" />
                             <input type="date" value={loadingDates[item.itemId] || ""} onChange={event => setLoadingDates(current => ({ ...current, [item.itemId]: event.target.value }))} className="px-1 py-1 border border-black/30 rounded text-sm bg-white text-black w-28" title="Chargement" />
