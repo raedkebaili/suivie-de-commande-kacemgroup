@@ -2,14 +2,14 @@
  * Regroupement des articles de commande.
  *
  * Règle métier : deux articles appartiennent au même groupe si leurs
- * 3 PREMIERS CARACTÈRES significatifs sont identiques.
- * Ex. « NETLUX 150 W » et « NETLUX 200 W » → même groupe (clé « NET »).
+ * 4 PREMIERS CARACTÈRES significatifs sont identiques.
+ * Ex. « NETLUX 150 W » et « NETLUX 200 W » → même groupe (clé « NETL »).
  *
  * Normalisation appliquée avant extraction de la clé :
  *   - suppression des accents
  *   - passage en majuscules
  *   - suppression des espaces / ponctuation de début
- * Les articles de moins de 3 caractères forment un groupe sur leur nom complet.
+ * Les articles de moins de 4 caractères forment un groupe sur leur nom complet.
  *
  * Ce module est PUR (aucun import DB) : il est utilisé côté serveur pour
  * l'export Excel et côté client pour l'affichage, garantissant un résultat
@@ -36,7 +36,7 @@ export type GroupedLine = GroupableItem & {
 };
 
 export type ArticleGroup = {
-  /** Clé technique du groupe (3 premiers caractères normalisés) */
+  /** Clé technique du groupe (4 premiers caractères normalisés) */
   key: string;
   /** Libellé lisible du groupe (préfixe + nombre de variantes) */
   label: string;
@@ -59,15 +59,15 @@ export function normalizeArticleName(name: string): string {
     .trim();
 }
 
-/** Clé de regroupement : 3 premiers caractères significatifs */
+/** Clé de regroupement : 4 premiers caractères significatifs */
 export function articleGroupKey(name: string): string {
   const normalized = normalizeArticleName(name);
   if (!normalized) return "(SANS NOM)";
-  return normalized.slice(0, 3);
+  return normalized.slice(0, 4);
 }
 
 /**
- * Regroupe une liste d'articles par préfixe de 3 caractères.
+ * Regroupe une liste d'articles par préfixe de 4 caractères.
  * Les groupes sont triés alphabétiquement, les lignes par article puis affaire.
  */
 export function groupArticles(items: GroupableItem[]): ArticleGroup[] {

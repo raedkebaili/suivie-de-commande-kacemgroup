@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { users } from "@/db/schema";
+import { userAgencyAccess, users } from "@/db/schema";
 import { getUserFromHeaders, hashPassword, verifyPassword } from "@/lib/auth";
 import { eq } from "drizzle-orm";
 
@@ -62,6 +62,7 @@ export async function POST(request: NextRequest) {
           tech_library,
           article_library,
           production_unit_lib,
+          user_agency_access,
           clients,
           agencies,
           users

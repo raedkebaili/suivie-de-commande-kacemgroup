@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { orders, orderItems, productionBatches, expeditionBatches, modificationLogs, notifications, itemTechnicalComponents, matieres, materialCategories, factories } from "@/db/schema";
 import { eq, count } from "drizzle-orm";
 import { logActivity, logModification, getUserFromHeaders, notifyUser } from "@/lib/auth";
+import { agencyScopeForUser } from "@/lib/agency-access";
 
 async function auth(r: Request, roles?: string[]) {
   const u = await getUserFromHeaders(r);
@@ -32,6 +33,10 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params; const oid = parseInt(id);
   const [existing] = await db.select().from(orders).where(eq(orders.id, oid)).limit(1);
   if (!existing) return NextResponse.json({ error: "Non trouvée" }, { status: 404 });
+  const agencyScope = agencyScopeForUser(a.user);
+  if (agencyScope && !agencyScope.includes(existing.agencyId)) {
+    return NextResponse.json({ error: "Commande inaccessible pour votre agence" }, { status: 404 });
+  }
 
   const body = await request.json();
   const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
@@ -52,7 +57,11 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (body.orderNumber !== undefined) { log("N° Commande", existing.orderNumber, body.orderNumber); updates.orderNumber = body.orderNumber; }
     if (body.orderDate !== undefined) { log("Date", existing.orderDate, body.orderDate); updates.orderDate = body.orderDate; }
     if (body.clientId !== undefined) { const v=parseInt(body.clientId); log("Client", existing.clientId, v); updates.clientId = v; }
-    if (body.agencyId !== undefined) { const v=parseInt(body.agencyId); log("Agence", existing.agencyId, v); updates.agencyId = v; }
+    if (body.agencyId !== undefined) {
+      const v = parseInt(body.agencyId);
+      if (agencyScope && !agencyScope.includes(v)) return NextResponse.json({ error: "Vous n'avez pas accès à cette agence" }, { status: 403 });
+      log("Agence", existing.agencyId, v); updates.agencyId = v;
+    }
     if (body.affaire !== undefined) { log("Affaire", existing.affaire, body.affaire); updates.affaire = body.affaire; }
     if (body.status !== undefined) {
       const allowedCommercialStatuses = ["SUR_STOCK", "BON_COMMANDE", "PREVISION"];

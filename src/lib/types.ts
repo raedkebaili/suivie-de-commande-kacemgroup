@@ -6,7 +6,7 @@ export type Priority =
   | "PREVISION" | "NORMALE" | "URGENTE" | "TRES_URGENTE";
 export type OrderStatus = "SUR_STOCK" | "BON_COMMANDE" | "PREVISION" | "EN_INSTANCE" | "EN_PRODUCTION" | "LIVREE" | "ANNULEE";
 
-export type User = { id: number; username: string; role: Role; fullName: string; active?: boolean; darkMode?: boolean; mustChangePassword?: boolean; createdAt?: string };
+export type User = { id: number; username: string; role: Role; fullName: string; active?: boolean; darkMode?: boolean; mustChangePassword?: boolean; createdAt?: string; agencyIds?: number[] };
 export type Agency = { id: number; name: string; code: string; address?: string | null; active?: boolean; createdAt?: string };
 export type Client = { id: number; name: string; code: string; contactName?: string | null; phone?: string | null; email?: string | null; address?: string | null; active?: boolean; createdAt?: string };
 export type TechnicalComponent = { id: number; itemId: number; orderId: number; categoryId: number | null; materialId: number | null; categoryKey: string; categoryName: string; materialReference: string; materialLabel: string; isTelegestion: boolean; enteredById: number | null; enteredByName: string; enteredAt: string };

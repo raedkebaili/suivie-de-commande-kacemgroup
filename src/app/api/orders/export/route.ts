@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { orders, orderItems, clients, agencies, itemTechnicalComponents, matieres, materialCategories, photometricStudies, photometricStudyItems } from "@/db/schema";
 import { eq, desc, and, inArray, isNull } from "drizzle-orm";
 import { getUserFromHeaders } from "@/lib/auth";
+import { agencyScopeForUser } from "@/lib/agency-access";
 
 export async function GET(request: NextRequest) {
   const user = await getUserFromHeaders(request);
@@ -13,6 +14,8 @@ export async function GET(request: NextRequest) {
   const status = sp.get("status");
   const agencyId = sp.get("agencyId");
   const conds = [];
+  const agencyScope = agencyScopeForUser(user);
+  if (agencyScope) conds.push(inArray(orders.agencyId, agencyScope));
   if (status) conds.push(eq(orders.status, status));
   if (agencyId) conds.push(eq(orders.agencyId, parseInt(agencyId)));
   const where = conds.length > 0 ? and(...conds) : undefined;

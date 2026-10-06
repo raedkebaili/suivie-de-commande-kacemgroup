@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { articleGroupKey, groupArticles, normalizeArticleName } from "../article-grouping";
 
-describe("article-grouping — règle des 3 premiers caractères normalisés", () => {
+describe("article-grouping — règle des 4 premiers caractères normalisés", () => {
   it("normalise majuscules, accents, espaces", () => {
     expect(normalizeArticleName("  néo lux  ")).toContain("NEO");
     expect(normalizeArticleName("éclairé")).toContain("ECLAIRE");
   });
 
-  it("regroupe par clé de 3 caractères", () => {
+  it("regroupe par clé de 4 caractères", () => {
+    expect(articleGroupKey("NETLUX 150 W")).toBe("NETL");
     expect(articleGroupKey("NETLUX 150 W")).toBe(articleGroupKey("NETLUX 200 W"));
     expect(articleGroupKey("NETLUX 150 W")).not.toBe(articleGroupKey("OMEGA 10 W"));
   });
@@ -15,6 +16,7 @@ describe("article-grouping — règle des 3 premiers caractères normalisés", (
   it("les noms courts forment un groupe sur leur nom complet", () => {
     expect(articleGroupKey("AB")).toBeTruthy();
     expect(articleGroupKey("AB")).not.toBe(articleGroupKey("ABC"));
+    expect(articleGroupKey("ABCD")).toBe("ABCD");
   });
 
   it("totalise quantités, produit, livré et reste", () => {

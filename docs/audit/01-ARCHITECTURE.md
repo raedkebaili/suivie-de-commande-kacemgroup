@@ -94,7 +94,7 @@ Composants transverses : `Sidebar`, `DocumentsPanel` (documents contextuels),
 | Sauvegarde | `backup-data.ts`, `backup-scheduler.ts` | collecte FK-safe de 29 tables ; planificateur **navigateur** (File System Access + IndexedDB) |
 | Référentiels | `material-categories.ts`, `tech-categories.ts` | seeds de catégories de matières / bibliothèque technique |
 | Présentation | `color-utils.ts`, `color-context.tsx`, `order-visual-state.ts` | couleurs par défaut, état visuel d'une ligne de commande |
-| Groupement | `article-grouping.ts` | regroupement par 3 premiers caractères normalisés (export Excel + affichage identiques) |
+| Groupement | `article-grouping.ts` | regroupement par 4 premiers caractères normalisés (export Excel + affichage identiques) |
 | Infra | `db-error.ts`, `api.ts`, `api-helpers.ts`, `types.ts`, `excel.ts` | messages BD conviviaux, client fetch, types, export |
 
 ## Tâches automatiques

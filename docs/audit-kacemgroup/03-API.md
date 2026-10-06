@@ -34,7 +34,7 @@
 | `/api/orders/[id]` | PUT | ✓ (périmètre par rôle) | **Route multi-sections, une par mission** : ① verrou optimiste 5 min (`423 Locked` si détenu par un autre) ; ② **SA/COM** : infos, statut commercial (`SUR_STOCK/BON_COMMANDE/PREVISION` uniquement), ajout/suppression/modif d'items — un item n'est supprimé que s'il n'a **aucun lot** production/expédition ; chaque champ modifié → `modification_logs` ; ③ **SA/TECH** (`techItems`) : 7 specs techniques avec `*_by/_at` seulement si valeur changée ; (`dynamicTechItems`) : mise à jour **différentielle** des composants matières (suppression/ajout loggés individuellement, traçabilité préservée), en transaction ; marque `tech_completed`, notifie le créateur ; ④ **SA/PLAN** : `priority`, `productionStatus` (+`statusReason`, annulation horodatée), `itemUpdates` (unité de production, date de chargement), marque `planif_completed`, notifie le créateur. Verrou relâché en fin de requête. |
 | `/api/orders/[id]` | DELETE | SA | Suppression ordonnée (batches, logs, notifications, items, commande) — les FK `production_batches/expedition_batches` n'ont pas de cascade, d'où ces `DELETE` manuels. |
 | `/api/orders/column-visibility` | GET/PUT | ✓ | Préférences de colonnes du tableau des commandes. |
-| `/api/orders/grouped-articles` | GET | ✓ | Articles regroupés par 3 premiers caractères significatifs (`article-grouping.ts`). |
+| `/api/orders/grouped-articles` | GET | ✓ | Articles regroupés par 4 premiers caractères significatifs (`article-grouping.ts`). |
 | `/api/orders/export` | GET | ✓ | Classeur Excel des commandes (`excel.ts`, `xlsx`). |
 | `/api/search` | GET | ✓ | Recherche transversale. |
 | `/api/templates` | GET | ✓ | Modèle (template) de fichier d'import. |

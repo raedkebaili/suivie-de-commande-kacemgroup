@@ -15,7 +15,7 @@
  */
 import { db } from "@/db";
 import {
-  users, agencies, clients, orders, orderItems, productionBatches, expeditionBatches,
+  users, agencies, userAgencyAccess, clients, orders, orderItems, productionBatches, expeditionBatches,
   productionUnitLib, articleLibrary, techLibrary, materialCategories, matieres,
   itemTechnicalComponents, activityLogs, modificationLogs, notifications,
   photometricStudies, photometricStudyItems,
@@ -35,6 +35,7 @@ export async function collectBackupData() {
       passwordHash: null, // jamais exporté (champ conservé pour compat restauration)
     })) as unknown as (typeof users.$inferSelect)[],
     agencies: await db.select().from(agencies),
+    userAgencyAccess: await db.select().from(userAgencyAccess),
     clients: await db.select().from(clients),
     orders: await db.select().from(orders),
     orderItems: await db.select().from(orderItems),

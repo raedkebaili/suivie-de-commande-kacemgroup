@@ -25,6 +25,21 @@ export const agencies = pgTable("agencies", {
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
 });
 
+// Accès agence optionnel attribué par le superadmin.
+// Sans ligne pour un utilisateur : aucune restriction (compatibilité existante).
+// Avec une ou plusieurs lignes : seules ces agences sont visibles sur les
+// commandes et les vues dérivées.
+export const userAgencyAccess = pgTable("user_agency_access", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  agencyId: integer("agency_id").notNull().references(() => agencies.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("user_agency_access_user_agency_unique").on(table.userId, table.agencyId),
+  index("user_agency_access_user_idx").on(table.userId),
+  index("user_agency_access_agency_idx").on(table.agencyId),
+]);
+
 export const clients = pgTable("clients", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().unique(),

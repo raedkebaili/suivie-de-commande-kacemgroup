@@ -13,6 +13,7 @@ import { db } from "@/db";
 import { users, activityLogs, modificationLogs, notifications } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { readAuthCookie } from "@/lib/auth-cookie";
+import { getAssignedAgencyIds } from "@/lib/agency-access";
 
 const TOKEN_TTL = "12h";
 
@@ -27,7 +28,15 @@ function getJwtSecret(): Uint8Array {
   return new TextEncoder().encode(secret);
 }
 
-export type UserPayload = { id: number; username: string; role: string; fullName: string; darkMode: boolean };
+export type UserPayload = {
+  id: number;
+  username: string;
+  role: string;
+  fullName: string;
+  darkMode: boolean;
+  /** Agences attribuées par l'administrateur ; vide = aucune restriction. */
+  agencyIds?: number[];
+};
 
 export async function hashPassword(p: string) { return bcrypt.hash(p, 12); }
 export async function verifyPassword(p: string, h: string) { return bcrypt.compare(p, h); }
@@ -56,7 +65,8 @@ export async function getUserFromHeaders(request: Request): Promise<UserPayload 
       .select({ id: users.id, username: users.username, role: users.role, fullName: users.fullName, darkMode: users.darkMode, active: users.active })
       .from(users).where(eq(users.id, payload.id)).limit(1);
     if (!row || !row.active) return null;
-    return { id: row.id, username: row.username, role: row.role, fullName: row.fullName, darkMode: row.darkMode };
+    const agencyIds = await getAssignedAgencyIds(row.id);
+    return { id: row.id, username: row.username, role: row.role, fullName: row.fullName, darkMode: row.darkMode, agencyIds };
   } catch (error) {
     // Base indisponible : refuser par prudence plutôt qu'authentifier à l'aveugle.
     console.error("[auth] Re-validation utilisateur impossible:", error);

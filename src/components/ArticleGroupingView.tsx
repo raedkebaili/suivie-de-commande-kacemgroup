@@ -7,7 +7,7 @@ import type { ArticleGroup } from "@/lib/article-grouping";
 type Totals = { groups: number; lines: number; quantity: number; produced: number; delivered: number; remaining: number };
 
 /**
- * Tableau de regroupement des articles par préfixe de 3 caractères.
+ * Tableau de regroupement des articles par préfixe de 4 caractères.
  * Affiché sous les études photométriques dans l'onglet Commandes.
  *
  * « Toujours à jour » : rechargé à chaque changement de filtre et à chaque
@@ -104,7 +104,7 @@ function ArticleGroupingView({
           <span>{open ? "▾" : "▸"}</span> 📊 Regroupement par Article
         </button>
         {totals && <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">{totals.groups} groupe(s) · {totals.lines} ligne(s)</span>}
-        <span className="text-[11px] text-gray-400 italic">Regroupement sur les 3 premiers caractères du nom d&apos;article</span>
+        <span className="text-[11px] text-gray-400 italic">Regroupement sur les 4 premiers caractères du nom d&apos;article</span>
         <div className="flex-1" />
         {open && <>
           <input type="text" value={searchDraft} onChange={e => setSearchDraft(e.target.value)} placeholder="🔍 Filtrer article, affaire, client..."

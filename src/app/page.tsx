@@ -54,7 +54,7 @@ const TABS: { key: Tab; label: string; roles: string[] }[] = [
   { key: "archive", label: "Archive commandes", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement"] },
   { key: "production", label: "Production", roles: ["superadmin", "planification"] },
   { key: "expedition", label: "Expédition", roles: ["superadmin", "planification"] },
-  { key: "planning", label: "Planning production", roles: ["superadmin", "planification"] },
+  { key: "planning", label: "Planning production", roles: ["superadmin", "planification", "consultant_prod"] },
   { key: "factories", label: "Usines", roles: ["superadmin", "planification"] },
   { key: "matieres", label: "Matières", roles: ["superadmin", "technique"] },
   { key: "telegestion", label: "Télégestion", roles: ["superadmin", "technique"] },

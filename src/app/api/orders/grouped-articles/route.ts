@@ -2,13 +2,14 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { orders, orderItems, clients, agencies } from "@/db/schema";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { getUserFromHeaders } from "@/lib/auth";
+import { agencyScopeForUser } from "@/lib/agency-access";
 import { groupArticles, type GroupableItem } from "@/lib/article-grouping";
 
 /**
  * GET /api/orders/grouped-articles
- * Regroupement des articles de toutes les commandes par préfixe de 3 caractères.
+ * Regroupement des articles de toutes les commandes par préfixe de 4 caractères.
  * Toujours à jour : la donnée est recalculée à chaque appel depuis les commandes.
  *
  * Query : status, agencyId, priority (mêmes filtres que /api/orders)
@@ -26,6 +27,8 @@ export async function GET(request: NextRequest) {
   const format = sp.get("format");
 
   const conds = [];
+  const agencyScope = agencyScopeForUser(user);
+  if (agencyScope) conds.push(inArray(orders.agencyId, agencyScope));
   if (status) conds.push(eq(orders.status, status));
   if (agencyId) conds.push(eq(orders.agencyId, parseInt(agencyId)));
   if (priority) conds.push(eq(orders.priority, priority));
@@ -89,7 +92,7 @@ export async function GET(request: NextRequest) {
 
       // Feuille synthèse : un total par groupe
       const summary = groups.map(g => ({
-        "Groupe (3 car.)": g.key,
+        "Groupe (4 car.)": g.key,
         "Articles du groupe": g.variants.join(" | "),
         "Nb variantes": g.variants.length,
         "Nb lignes": g.lines.length,

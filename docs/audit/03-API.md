@@ -77,7 +77,7 @@ commande) + log.
 | Endpoint | Droits | Fonction |
 |---|---|---|
 | `GET /api/orders/next-number` | SA,CO,PL | Aperçu du prochain n° **sans incrémenter** |
-| `GET /api/orders/export` | * | Export Excel complet (articles, composants, études photométriques, libellés FR, regroupement par 3 caractères) — `xlsx` chargé dynamiquement |
+| `GET /api/orders/export` | * | Export Excel complet (articles, composants, études photométriques, libellés FR, regroupement par 4 caractères) — `xlsx` chargé dynamiquement |
 | `GET /api/orders/grouped-articles` | * | Articles regroupés (module pur partagé) |
 | `GET·PUT /api/orders/column-visibility` | * / SA | Colonnes/états masqués, ligne de totaux — JSON dans `system_settings` |
 | `GET /api/order-modifications/[id]` | * | 100 derniers logs de modification d'une commande |

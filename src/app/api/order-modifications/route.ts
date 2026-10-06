@@ -1,9 +1,10 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { modificationLogs } from "@/db/schema";
+import { modificationLogs, orders } from "@/db/schema";
 import { desc, inArray } from "drizzle-orm";
 import { getUserFromHeaders } from "@/lib/auth";
+import { agencyScopeForUser } from "@/lib/agency-access";
 
 /**
  * GET /api/order-modifications?orderIds=1,2,3
@@ -24,9 +25,18 @@ export async function GET(request: NextRequest) {
   if (orderIds.length === 0) {
     return NextResponse.json({ error: "Au moins une commande est requise" }, { status: 400 });
   }
+  const agencyScope = agencyScopeForUser(user);
+  let visibleOrderIds = orderIds;
+  if (agencyScope) {
+    const visible = await db.select({ id: orders.id }).from(orders)
+      .where(inArray(orders.agencyId, agencyScope));
+    const visibleSet = new Set(visible.map((order) => order.id));
+    visibleOrderIds = orderIds.filter((id) => visibleSet.has(id));
+  }
+  if (visibleOrderIds.length === 0) return NextResponse.json({ modifications: [] });
 
   const rows = await db.select().from(modificationLogs)
-    .where(inArray(modificationLogs.orderId, orderIds))
+    .where(inArray(modificationLogs.orderId, visibleOrderIds))
     .orderBy(desc(modificationLogs.createdAt));
 
   const grouped = new Map<number, typeof rows>();
@@ -37,7 +47,7 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({
-    modifications: orderIds.map((orderId) => ({
+    modifications: visibleOrderIds.map((orderId) => ({
       orderId,
       logs: (grouped.get(orderId) || []).map((row) => ({
         id: row.id,

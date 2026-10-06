@@ -261,6 +261,9 @@ export default function OrdersView({ user }: { user: User }) {
   // commercial « Sur Stock / Besoin interne » (verrouillé ici et côté serveur).
   // Il ne gagne aucun droit d'édition commerciale sur les commandes existantes.
   const planifStockOnly = user.role === "planification";
+  const accessibleAgencies = () => user.role === "superadmin" || !user.agencyIds?.length
+    ? agencies
+    : agencies.filter((agency) => user.agencyIds!.includes(agency.id));
   const canCreateOrder = () => ce() || planifStockOnly;
   // Saisie de l'en-tête et des articles : commercial, ou planificateur en création
   const canEditOrderForm = () => ce() || (planifStockOnly && !editingOrder);
@@ -905,7 +908,7 @@ export default function OrdersView({ user }: { user: User }) {
           <option value="planning:NONE">⚪ Hors planning</option>
         </optgroup>
       </select>
-      <select value={fa} onChange={e=>setFa(e.target.value)} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"><option value="">Agences</option>{agencies.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select>
+      <select value={fa} onChange={e=>setFa(e.target.value)} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"><option value="">Agences</option>{accessibleAgencies().map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select>
       <select value={ff} onChange={e=>setFf(e.target.value)} title="Filtrer par usine (unité de production)"
         className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">
         <option value="">🏭 Usines</option>
@@ -1096,7 +1099,7 @@ export default function OrdersView({ user }: { user: User }) {
           </button>
         </div>
         <AutocompleteSelect label="Client *" items={clients.map(c=>({id:c.id,label:c.name}))} value={form.clientId} onChange={v=>setForm({...form,clientId:v})} disabled={!canEditOrderForm()} />
-        <AutocompleteSelect label={form.commercialStatus==="SUR_STOCK"?"Agence (facultative)":"Agence *"} items={agencies.map(a=>({id:a.id,label:a.name}))} value={form.agencyId} onChange={v=>setForm({...form,agencyId:v})} disabled={!canEditOrderForm()} />
+        <AutocompleteSelect label={form.commercialStatus==="SUR_STOCK"?"Agence (facultative)":"Agence *"} items={accessibleAgencies().map(a=>({id:a.id,label:a.name}))} value={form.agencyId} onChange={v=>setForm({...form,agencyId:v})} disabled={!canEditOrderForm()} />
         <div><label className="block text-[11px] font-medium text-gray-600 dark:text-gray-400 mb-1">N° Affaire</label><AutocompleteInput value={form.affaire} onChange={v=>setForm({...form,affaire:v})} suggestUrl="/api/library/affaires" placeholder="Affaire" disabled={!canEditOrderForm()} /></div>
       </div>
       {canEditOrderForm()&&<div className="mt-4">
@@ -1496,7 +1499,7 @@ export default function OrdersView({ user }: { user: User }) {
     )}
 
     {/* ═══════════════════════════════════════════════════════════════════ */}
-    {/* SECTION 3 : Regroupement par Article (3 premiers caractères)       */}
+    {/* SECTION 3 : Regroupement par Article (4 premiers caractères)       */}
     {/* Placé sous les études photométriques, toujours à jour via          */}
     {/* dataVersion (incrémenté à chaque rafraîchissement des commandes).  */}
     {/* ═══════════════════════════════════════════════════════════════════ */}

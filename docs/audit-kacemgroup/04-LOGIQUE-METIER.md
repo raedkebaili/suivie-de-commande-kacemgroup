@@ -78,7 +78,7 @@ périmètre (route PUT multi-sections) :
   LIVREE ou tout livré) > `awaiting-delivery` (tout produit) > `neutral`.
 - **Archive** : état effectif = `state_override` (manuel) ?? `state_detected`
   (fichier) ?? règle « Reste à livrer = 0 ⇒ LIVRÉ » (cellule vide ≠ 0).
-- **Regroupement d'articles** : clé = 3 premiers caractères significatifs
+- **Regroupement d'articles** : clé = 4 premiers caractères significatifs
   (NETLUX 150W ≈ NETLUX 200W).
 
 ## 5.5 Fonctionnalités « cachées » / règles implicites (à connaître)

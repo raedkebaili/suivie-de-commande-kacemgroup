@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
 import {
-  users, agencies, clients, orders, orderItems, productionBatches, expeditionBatches,
+  users, agencies, userAgencyAccess, clients, orders, orderItems, productionBatches, expeditionBatches,
   productionUnitLib, articleLibrary, techLibrary, materialCategories, matieres, itemTechnicalComponents,
   activityLogs, modificationLogs, notifications, backupHistory, photometricStudies, photometricStudyItems,
   recouvrementStates, clientRecouvrementStates, clientRecouvrementLogs,
@@ -108,6 +108,8 @@ export async function POST(request: NextRequest) {
     mustChangePassword: u.passwordHash ? (u.mustChangePassword ?? false) : true,
   })) as (typeof users.$inferInsert)[];
   const agenciesRows = arr<typeof agencies.$inferInsert>("agencies");
+  const userAgencyAccessRows = arr<typeof userAgencyAccess.$inferInsert>("userAgencyAccess");
+  const restoreAgencyAccess = Object.prototype.hasOwnProperty.call(data, "userAgencyAccess");
   const clientsRows = arr<typeof clients.$inferInsert>("clients");
   const ordersRows = arr<typeof orders.$inferInsert>("orders");
   const orderItemsRows = arr<typeof orderItems.$inferInsert>("orderItems");
@@ -197,6 +199,7 @@ export async function POST(request: NextRequest) {
       await tx.delete(productionUnitLib);
       await tx.delete(clients);
       if (restoreRecouvrement) await tx.delete(recouvrementStates);
+      if (restoreAgencyAccess) await tx.delete(userAgencyAccess);
       await tx.delete(agencies);
       if (restoreSettings) await tx.delete(systemSettings);
       if (restoreColors) await tx.delete(appColors);
@@ -206,6 +209,7 @@ export async function POST(request: NextRequest) {
       // Insert in forward FK-dependency order (parents first)
       await insertChunked(tx, users, usersRows);
       await insertChunked(tx, agencies, agenciesRows);
+      if (restoreAgencyAccess) await insertChunked(tx, userAgencyAccess, userAgencyAccessRows);
       await insertChunked(tx, clients, clientsRows);
       if (restoreRecouvrement) {
         await insertChunked(tx, recouvrementStates, recouvrementStatesRows);
@@ -241,7 +245,7 @@ export async function POST(request: NextRequest) {
 
       // Resync auto-increment sequences with the restored max ids
       const tableNames = [
-        "users", "agencies", "clients", "orders", "order_items", "production_batches",
+        "users", "agencies", ...(restoreAgencyAccess ? ["user_agency_access"] : []), "clients", "orders", "order_items", "production_batches",
         "expedition_batches", "production_unit_lib", "article_library", "tech_library",
         "material_categories", "matieres", "item_technical_components", "activity_logs", "modification_logs", "notifications",
         "photometric_studies", "photometric_study_items",
@@ -265,7 +269,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Erreur lors de la restauration: " + String(err) }, { status: 500 });
   }
 
-  const totalRestored = usersRows.length + agenciesRows.length + clientsRows.length + ordersRows.length +
+  const totalRestored = usersRows.length + agenciesRows.length + userAgencyAccessRows.length + clientsRows.length + ordersRows.length +
     orderItemsRows.length + productionBatchesRows.length + expeditionBatchesRows.length +
     productionUnitLibRows.length + articleLibraryRows.length + techLibraryRows.length +
     materialCategoriesRows.length + matieresRows.length + itemTechnicalComponentsRows.length +

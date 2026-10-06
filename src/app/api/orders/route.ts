@@ -5,6 +5,7 @@ import { orders, orderItems, clients, agencies, itemTechnicalComponents, driveDo
 import { eq, desc, and, inArray, sql } from "drizzle-orm";
 import { logActivity, getUserFromHeaders, notifyRole } from "@/lib/auth";
 import { generateOrderNumber } from "@/lib/order-number";
+import { agencyScopeForUser } from "@/lib/agency-access";
 
 async function auth(r: Request, roles?: string[]) {
   const u = await getUserFromHeaders(r);
@@ -24,6 +25,8 @@ export async function GET(request: NextRequest) {
   // l'unité de production correspond au nom de l'usine (alimenté par le planning).
   const factory = sp.get("factory");
   const conds = [];
+  const agencyScope = agencyScopeForUser(a.user);
+  if (agencyScope) conds.push(inArray(orders.agencyId, agencyScope));
   if (status) conds.push(eq(orders.status, status));
   if (productionStatus) conds.push(eq(orders.productionStatus, productionStatus));
   if (agencyId) conds.push(eq(orders.agencyId, parseInt(agencyId)));
@@ -162,6 +165,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Erreur résolution agence:", error);
     return NextResponse.json({ error: "Erreur lors de la résolution de l'agence" }, { status: 500 });
+  }
+  const createAgencyScope = agencyScopeForUser(a.user);
+  if (createAgencyScope && !createAgencyScope.includes(resolvedAgencyId)) {
+    return NextResponse.json({ error: "Vous n'avez pas accès à cette agence" }, { status: 403 });
   }
 
   // Générer automatiquement le numéro de commande (thread-safe)

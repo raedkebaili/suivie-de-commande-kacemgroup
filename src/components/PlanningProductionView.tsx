@@ -236,6 +236,7 @@ export default function PlanningProductionView({ user }: { user: User }) {
           <p className="text-xs text-gray-500 dark:text-gray-400">
             Suivi journalier en temps réel des articles en cours de production.
           </p>
+          {!canManage && <span className="mt-1 inline-block rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">Consultation seule</span>}
         </div>
         {canManage && (
           <button onClick={openPicker} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
