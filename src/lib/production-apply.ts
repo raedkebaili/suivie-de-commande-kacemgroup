@@ -71,7 +71,8 @@ export async function applyProductionQuantity(params: {
     tc: sql<number>`sum(${orderItems.quantity})`,
     td: sql<number>`sum(${orderItems.deliveredQty})`,
   }).from(orderItems).where(eq(orderItems.orderId, item.orderId));
-  if (all && Number(all.td) >= Number(all.tc)) {
+  const fullyDelivered = Boolean(all && Number(all.td) >= Number(all.tc));
+  if (fullyDelivered) {
     const [full] = await db.select().from(orders).where(eq(orders.id, item.orderId)).limit(1);
     if (full && full.productionStatus !== "LIVREE") {
       await db.update(orders)
@@ -101,7 +102,7 @@ export async function applyProductionQuantity(params: {
   let priorityPromotion: Awaited<ReturnType<typeof promotePrioritiesAfterCompletion>> | null = null;
   try {
     const fullyProduced = await isOrderFullyProduced(item.orderId);
-    if (fullyProduced && order && order.productionStatus !== "LIVREE") {
+    if (fullyProduced && !fullyDelivered && order && order.productionStatus !== "LIVREE") {
       await notifyRoles(["commercial"], {
         eventKey: NOTIFICATION_EVENTS.ORDER_READY,
         type: "success",
