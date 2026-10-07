@@ -1,6 +1,7 @@
 import { db, pool } from "@/db";
-import { orderCounters, orders } from "@/db/schema";
-import { eq, like, desc, sql } from "drizzle-orm";
+import { orderCounters } from "@/db/schema";
+import { eq, sql } from "drizzle-orm";
+import { getNextOrderSequenceNumber } from "@/lib/order-number-sequence";
 
 /**
  * Génère le prochain numéro de commande de manière thread-safe
@@ -18,41 +19,26 @@ export async function generateOrderNumber(): Promise<string> {
   try {
     await client.query("BEGIN");
 
-    // Essayer de récupérer le compteur pour l'année en cours avec verrouillage
+    // Verrouiller le compteur courant, puis le comparer au dernier numéro
+    // réellement présent dans toute la plateforme. Cela couvre les anciennes
+    // commandes d'une autre année et les imports manuels.
     const result = await client.query(
       `SELECT id, last_number FROM order_counters WHERE year = $1 FOR UPDATE`,
       [currentYear]
     );
-
-    let nextNumber: number;
+    const maxOrderResult = await client.query(
+      `SELECT COALESCE(MAX((regexp_match(order_number, '([0-9]+)'))[1]::integer), 0) AS max_number FROM orders`,
+    );
+    const platformLastNumber = Number(maxOrderResult.rows[0]?.max_number || 0);
+    const counterLastNumber = Number(result.rows[0]?.last_number || 0);
+    const nextNumber = getNextOrderSequenceNumber(platformLastNumber, counterLastNumber);
 
     if (result.rows.length === 0) {
-      // Première commande de l'année - initialiser le compteur
-      // D'abord, vérifier s'il existe des commandes de cette année (migration)
-      const existingOrders = await client.query(
-        `SELECT order_number FROM orders 
-         WHERE order_number LIKE $1 OR order_number LIKE $2
-         ORDER BY id DESC LIMIT 1`,
-        [`%/${currentYear}`, `%-${currentYear}`]
-      );
-
-      if (existingOrders.rows.length > 0) {
-        // Extraire le numéro le plus élevé des commandes existantes
-        const existingNumber = existingOrders.rows[0].order_number;
-        const match = existingNumber.match(/^(\d+)[/-]/);
-        nextNumber = match ? parseInt(match[1]) + 1 : 1;
-      } else {
-        nextNumber = 1;
-      }
-
-      // Créer le compteur pour cette année
       await client.query(
         `INSERT INTO order_counters (year, last_number, updated_at) VALUES ($1, $2, NOW())`,
         [currentYear, nextNumber]
       );
     } else {
-      // Incrémenter le compteur existant
-      nextNumber = result.rows[0].last_number + 1;
       await client.query(
         `UPDATE order_counters SET last_number = $1, updated_at = NOW() WHERE year = $2`,
         [nextNumber, currentYear]
@@ -84,25 +70,13 @@ export async function getNextOrderNumberPreview(): Promise<string> {
     .where(eq(orderCounters.year, currentYear))
     .limit(1);
 
-  if (counter) {
-    return `${counter.lastNumber + 1}/${currentYear}`;
-  }
-
-  // Si pas de compteur, vérifier les commandes existantes
-  const [lastOrder] = await db
-    .select({ orderNumber: orders.orderNumber })
-    .from(orders)
-    .where(sql`order_number LIKE ${`%/${currentYear}`} OR order_number LIKE ${`%-${currentYear}`}`)
-    .orderBy(desc(orders.id))
-    .limit(1);
-
-  if (lastOrder?.orderNumber) {
-    const match = lastOrder.orderNumber.match(/^(\d+)[/-]/);
-    const lastNum = match ? parseInt(match[1]) : 0;
-    return `${lastNum + 1}/${currentYear}`;
-  }
-
-  return `1/${currentYear}`;
+  const maxNumberResult = await db.execute(sql`
+    SELECT COALESCE(MAX((regexp_match(order_number, '([0-9]+)'))[1]::integer), 0) AS max_number
+    FROM orders
+  `);
+  const platformLastNumber = Number((maxNumberResult as unknown as { rows?: { max_number?: number | string }[] }).rows?.[0]?.max_number || 0);
+  const counterLastNumber = counter?.lastNumber || 0;
+  return `${getNextOrderSequenceNumber(platformLastNumber, counterLastNumber)}/${currentYear}`;
 }
 
 /**

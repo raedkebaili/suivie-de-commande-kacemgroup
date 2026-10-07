@@ -13,7 +13,7 @@ import {
   normalizeImportHeader,
   suggestOrderImportMapping,
 } from "@/lib/order-import-fields";
-import { inferCommercialStatusFromExcel, inferProductionStatusFromExcel, normalizeExcelFillColor } from "@/lib/order-import-colors";
+import { inferCommercialStatusFromExcel, inferProductionStatusFromExcel, isExcelDeliveredFill, isExcelReadyFill, normalizeExcelFillColor, selectExcelGroupColor } from "@/lib/order-import-colors";
 
 type Merge = { s: { r: number; c: number }; e: { r: number; c: number } };
 type WorksheetLike = { [key: string]: unknown; "!merges"?: Merge[]; "!rows"?: unknown[]; "!ref"?: string };
@@ -114,17 +114,8 @@ function cellFillColor(cell: unknown): string | null {
     const nestedFill = style.fill && typeof style.fill === "object" ? style.fill as Record<string, unknown> : null;
     const colors = [style.fgColor, style.bgColor, style.color, nestedFill?.fgColor, nestedFill?.bgColor];
     for (const color of colors) {
-      if (typeof color === "string") {
-        const normalized = normalizeExcelFillColor(color);
-        if (normalized) return normalized;
-      }
-      if (color && typeof color === "object") {
-        const colorRecord = color as Record<string, unknown>;
-        for (const key of ["rgb", "argb", "hex", "value"]) {
-          const normalized = normalizeExcelFillColor(colorRecord[key]);
-          if (normalized) return normalized;
-        }
-      }
+      const normalized = normalizeExcelFillColor(color);
+      if (normalized) return normalized;
     }
   }
   return null;
@@ -201,10 +192,12 @@ function parseSheet(XLSX: typeof import("xlsx"), name: string, index: number, wo
     const preferredColor = orderNumberColumn >= 0
       ? worksheetCellColor(XLSX, worksheet, actualRow, originColumn + orderNumberColumn)
       : null;
-    const rowColor = preferredColor || worksheetRowColor(worksheet, actualRow) || Array.from({ length: width }, (_, column) =>
-      worksheetCellColor(XLSX, worksheet, originRow + row, originColumn + column),
+    const detectedColor = preferredColor || worksheetRowColor(worksheet, actualRow) || Array.from({ length: width }, (_, column) =>
+      worksheetCellColor(XLSX, worksheet, actualRow, originColumn + column),
     ).find((color) => color !== null) || null;
-    rowColors.push(rowColor);
+    // Excel sans remplissage est visuellement blanc : ne pas confondre cette
+    // couleur par défaut avec une prévision.
+    rowColors.push(detectedColor || "#FFFFFF");
   }
   propagateOrderFields(rows, headers, mapping);
   return { index, name, headerRow, headers, rows, rowColors, mapping };
@@ -399,9 +392,7 @@ export async function POST(request: NextRequest) {
       const first = group.rows[0];
       const clientValue = sourceValue(first, "client", mapping).trim();
       const agencyValue = sourceValue(first, "agency", mapping).trim();
-      const groupColor = group.rows
-        .map((row) => row.sheet.rowColors[row.rowIndex])
-        .find((color): color is string => color !== null && color !== undefined);
+      const groupColor = selectExcelGroupColor(group.rows.map((row) => row.sheet.rowColors[row.rowIndex]));
       const commercialValue = sourceValue(first, "commercialStatus", mapping) || sourceValue(first, "productionStatus", mapping);
       const status = inferCommercialStatusFromExcel(commercialValue, groupColor);
       if (!clientValue) { skipped.push({ orderNumber: group.orderNumber, reason: "Client vide" }); continue; }
@@ -464,14 +455,22 @@ export async function POST(request: NextRequest) {
           return null;
         }
         const quantity = Math.round(quantityValue);
-        const producedQty = Math.max(0, Math.round(parseNumber(sourceValue(row, "producedQty", mapping), 0)));
+        const itemColor = row.sheet.rowColors[row.rowIndex] || groupColor;
+        const producedSource = sourceValue(row, "producedQty", mapping);
+        const producedQty = producedSource !== ""
+          ? Math.max(0, Math.round(parseNumber(producedSource, 0)))
+          : isExcelReadyFill(itemColor)
+            ? quantity
+            : 0;
         const deliveredSource = sourceValue(row, "deliveredQty", mapping);
         const remainingSource = sourceValue(row, "remainingQty", mapping);
         const deliveredQty = deliveredSource !== ""
           ? Math.max(0, Math.round(parseNumber(deliveredSource, 0)))
           : remainingSource !== ""
             ? Math.max(0, quantity - Math.round(parseNumber(remainingSource, quantity)))
-            : 0;
+            : isExcelDeliveredFill(itemColor)
+              ? quantity
+              : 0;
         return {
           articleName,
           quantity,

@@ -3,7 +3,9 @@ import {
   EXCEL_WHITE_FILL,
   inferCommercialStatusFromExcel,
   inferProductionStatusFromExcel,
+  isExcelReadyFill,
   isExcelWhiteFill,
+  selectExcelGroupColor,
   normalizeExcelFillColor,
 } from "../order-import-colors";
 
@@ -13,6 +15,8 @@ describe("couleurs du fichier Excel pour l'import commandes", () => {
     expect(normalizeExcelFillColor("FFFFFFFF")).toBe(EXCEL_WHITE_FILL);
     expect(normalizeExcelFillColor("FFFFD3AC")).toBe("#FFD3AC");
     expect(isExcelWhiteFill("FFFFFF")).toBe(true);
+    expect(isExcelReadyFill("#FFF700")).toBe(true);
+    expect(selectExcelGroupColor(["#FFFFFF", "#FFF700"])).toBe("#FFF700");
   });
 
   it("donne la priorité à l'état textuel puis utilise le blanc comme bon de commande", () => {
