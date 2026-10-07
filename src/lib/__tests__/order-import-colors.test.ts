@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   EXCEL_WHITE_FILL,
   inferCommercialStatusFromExcel,
+  inferProductionStatusFromExcel,
   isExcelWhiteFill,
   normalizeExcelFillColor,
 } from "../order-import-colors";
@@ -19,5 +20,8 @@ describe("couleurs du fichier Excel pour l'import commandes", () => {
     expect(inferCommercialStatusFromExcel("", "#FFFFFF")).toBe("BON_COMMANDE");
     expect(inferCommercialStatusFromExcel("Bon de commande", null)).toBe("BON_COMMANDE");
     expect(inferCommercialStatusFromExcel("", "#FFD3AC")).toBe("PREVISION");
+    expect(inferProductionStatusFromExcel("Annulée", "#FFFFFF")).toBe("ANNULEE");
+    expect(inferProductionStatusFromExcel("", "#EF4444")).toBe("ANNULEE");
+    expect(inferProductionStatusFromExcel("", "#22C55E")).toBe("LIVREE");
   });
 });

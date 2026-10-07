@@ -2,6 +2,8 @@ import { normalizeImportHeader } from "./order-import-fields";
 
 export const EXCEL_WHITE_FILL = "#FFFFFF";
 const EXCEL_PREVISION_FILLS = new Set(["#F97316", "#FFD3AC", "#FFA500"]);
+const EXCEL_CANCELLED_FILLS = new Set(["#EF4444", "#FF0000", "#FF2C2C", "#C00000"]);
+const EXCEL_DELIVERED_FILLS = new Set(["#22C55E", "#00B050", "#92D050", "#008000"]);
 
 export function normalizeExcelFillColor(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -34,4 +36,19 @@ export function inferCommercialStatusFromExcel(
   if (color === EXCEL_WHITE_FILL) return "BON_COMMANDE";
   if (color && EXCEL_PREVISION_FILLS.has(color)) return "PREVISION";
   return "PREVISION";
+}
+
+export function inferProductionStatusFromExcel(
+  rawValue: string | null | undefined,
+  fillColor: string | null | undefined,
+): "EN_INSTANCE" | "EN_PRODUCTION" | "LIVREE" | "ANNULEE" {
+  const normalized = normalizeImportHeader(rawValue || "");
+  if (normalized.includes("annul")) return "ANNULEE";
+  if (normalized.includes("livr") || normalized.includes("termine") || normalized.includes("solde")) return "LIVREE";
+  if (normalized.includes("production") || normalized.includes("cours")) return "EN_PRODUCTION";
+
+  const color = normalizeExcelFillColor(fillColor);
+  if (color && EXCEL_CANCELLED_FILLS.has(color)) return "ANNULEE";
+  if (color && EXCEL_DELIVERED_FILLS.has(color)) return "LIVREE";
+  return "EN_INSTANCE";
 }

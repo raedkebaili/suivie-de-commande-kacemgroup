@@ -13,10 +13,10 @@ import {
   normalizeImportHeader,
   suggestOrderImportMapping,
 } from "@/lib/order-import-fields";
-import { inferCommercialStatusFromExcel, normalizeExcelFillColor } from "@/lib/order-import-colors";
+import { inferCommercialStatusFromExcel, inferProductionStatusFromExcel, normalizeExcelFillColor } from "@/lib/order-import-colors";
 
 type Merge = { s: { r: number; c: number }; e: { r: number; c: number } };
-type WorksheetLike = { [key: string]: unknown; "!merges"?: Merge[]; "!ref"?: string };
+type WorksheetLike = { [key: string]: unknown; "!merges"?: Merge[]; "!rows"?: unknown[]; "!ref"?: string };
 type ParsedSheet = {
   index: number;
   name: string;
@@ -74,22 +74,34 @@ function mergeCells(matrix: unknown[][], sheet: WorksheetLike) {
   const merges = sheet["!merges"] || [];
   if (merges.length === 0) return;
   let originRow = 0;
+  let originColumn = 0;
   if (typeof sheet["!ref"] === "string") {
     const match = /^([A-Z]+)(\d+):/.exec(sheet["!ref"]);
     if (match) originRow = Number(match[2]) - 1;
+    if (match) originColumn = match[1].split("").reduce((total, letter) => total * 26 + letter.charCodeAt(0) - 64, 0) - 1;
   }
   for (const merge of merges) {
     const firstRow = merge.s.r - originRow;
     const lastRow = merge.e.r - originRow;
-    const value = matrix[firstRow]?.[merge.s.c];
+    const firstColumn = merge.s.c - originColumn;
+    const lastColumn = merge.e.c - originColumn;
+    const value = matrix[firstRow]?.[firstColumn];
     if (value === undefined || value === null || cellText(value) === "") continue;
     for (let row = firstRow; row <= lastRow && row < matrix.length; row++) {
       if (!matrix[row]) matrix[row] = [];
-      for (let column = merge.s.c; column <= merge.e.c; column++) {
+      for (let column = firstColumn; column <= lastColumn; column++) {
         if (matrix[row][column] === undefined || cellText(matrix[row][column]) === "") matrix[row][column] = value;
       }
     }
   }
+}
+
+function worksheetCellValue(cell: unknown): unknown {
+  if (!cell || typeof cell !== "object") return "";
+  const record = cell as Record<string, unknown>;
+  if (record.v !== undefined && record.v !== null) return record.v;
+  if (record.w !== undefined && record.w !== null) return record.w;
+  return record.f ? String(record.f) : "";
 }
 
 function cellFillColor(cell: unknown): string | null {
@@ -118,6 +130,10 @@ function cellFillColor(cell: unknown): string | null {
   return null;
 }
 
+function worksheetRowColor(worksheet: WorksheetLike, row: number): string | null {
+  return cellFillColor(worksheet["!rows"]?.[row]);
+}
+
 function worksheetCellColor(
   XLSX: typeof import("xlsx"),
   worksheet: WorksheetLike,
@@ -138,12 +154,24 @@ function worksheetCellColor(
 }
 
 function parseSheet(XLSX: typeof import("xlsx"), name: string, index: number, worksheet: WorksheetLike): ParsedSheet | null {
-  const matrix = XLSX.utils.sheet_to_json<unknown[]>(worksheet as unknown as import("xlsx").WorkSheet, {
-    header: 1,
-    defval: "",
-    blankrows: true,
-    raw: true,
-  }) as unknown as unknown[][];
+  const range = typeof worksheet["!ref"] === "string" ? XLSX.utils.decode_range(worksheet["!ref"] as string) : null;
+  if (!range) return null;
+  const matrix: unknown[][] = [];
+  const rowPresence: boolean[] = [];
+  for (let actualRow = range.s.r; actualRow <= range.e.r; actualRow++) {
+    const row: unknown[] = [];
+    let present = false;
+    for (let actualColumn = range.s.c; actualColumn <= range.e.c; actualColumn++) {
+      const address = XLSX.utils.encode_cell({ r: actualRow, c: actualColumn });
+      const cell = worksheet[address];
+      const value = worksheetCellValue(cell);
+      row.push(value);
+      if (value !== "" || cellFillColor(cell) !== null) present = true;
+    }
+    if (worksheetRowColor(worksheet, actualRow) !== null) present = true;
+    matrix.push(row);
+    rowPresence.push(present);
+  }
   if (matrix.length === 0) return null;
   mergeCells(matrix, worksheet);
   const headerRow = findHeaderIndex(matrix);
@@ -158,24 +186,27 @@ function parseSheet(XLSX: typeof import("xlsx"), name: string, index: number, wo
   const headers = Array.from({ length: width }, (_, column) => rawHeaders[column] || `Colonne ${column + 1}`);
   const mapping = suggestOrderImportMapping(headers);
   const orderNumberColumn = mapping.orderNumber ? headers.findIndex((header) => header === mapping.orderNumber) : -1;
-  const range = typeof worksheet["!ref"] === "string" ? XLSX.utils.decode_range(worksheet["!ref"] as string) : null;
-  const originRow = range?.s.r || 0;
-  const originColumn = range?.s.c || 0;
+  const originRow = range.s.r;
+  const originColumn = range.s.c;
   const dateColumns = new Set(headers.map((header, column) => normalizeImportHeader(header).includes("date") ? column : -1).filter((column) => column >= 0));
   const rows: string[][] = [];
   const rowColors: (string | null)[] = [];
   for (let row = headerRow + 1; row < matrix.length; row++) {
     const values = Array.from({ length: width }, (_, column) => dateColumns.has(column) ? excelDate(matrix[row]?.[column]) : cellText(matrix[row]?.[column]));
-    if (values.every((value) => value === "")) continue;
+    // Une ligne qui contient uniquement une couleur/style est conservée pour
+    // ne pas perdre une ligne historique visuellement renseignée.
+    if (values.every((value) => value === "") && !rowPresence[row]) continue;
     rows.push(values);
+    const actualRow = originRow + row;
     const preferredColor = orderNumberColumn >= 0
-      ? worksheetCellColor(XLSX, worksheet, originRow + row, originColumn + orderNumberColumn)
+      ? worksheetCellColor(XLSX, worksheet, actualRow, originColumn + orderNumberColumn)
       : null;
-    const rowColor = preferredColor || Array.from({ length: width }, (_, column) =>
+    const rowColor = preferredColor || worksheetRowColor(worksheet, actualRow) || Array.from({ length: width }, (_, column) =>
       worksheetCellColor(XLSX, worksheet, originRow + row, originColumn + column),
     ).find((color) => color !== null) || null;
     rowColors.push(rowColor);
   }
+  propagateOrderFields(rows, headers, mapping);
   return { index, name, headerRow, headers, rows, rowColors, mapping };
 }
 
@@ -189,6 +220,32 @@ async function readWorkbook(file: File): Promise<ParsedSheet[]> {
     if (parsed) sheets.push(parsed);
   });
   return sheets;
+}
+
+function propagateOrderFields(
+  rows: string[][],
+  headers: string[],
+  mapping: Record<string, string>,
+) {
+  const carryKeys = ["orderNumber", "client", "agency", "affaire", "commercialStatus", "productionStatus"];
+  const columns = new Map<string, number>();
+  for (const key of carryKeys) {
+    const source = mapping[key];
+    const column = source ? headers.findIndex((header) => header === source || normalizeImportHeader(header) === normalizeImportHeader(source)) : -1;
+    if (column >= 0) columns.set(key, column);
+  }
+  const articleColumn = mapping.articleName ? headers.findIndex((header) => header === mapping.articleName || normalizeImportHeader(header) === normalizeImportHeader(mapping.articleName)) : -1;
+  const quantityColumn = mapping.quantity ? headers.findIndex((header) => header === mapping.quantity || normalizeImportHeader(header) === normalizeImportHeader(mapping.quantity)) : -1;
+  const carried: Record<string, string> = {};
+  for (const row of rows) {
+    const hasArticleData = (articleColumn >= 0 && cellText(row[articleColumn]) !== "") || (quantityColumn >= 0 && cellText(row[quantityColumn]) !== "");
+    if (!hasArticleData) continue;
+    for (const [key, column] of columns) {
+      const value = cellText(row[column]);
+      if (value) carried[key] = value;
+      else if (carried[key]) row[column] = carried[key];
+    }
+  }
 }
 
 function sourceValue(row: ImportRow, key: string, mapping: Record<string, string>): string {
@@ -213,14 +270,6 @@ function parseDate(value: string): string {
   if (fr) return `${fr[3]}-${fr[2].padStart(2, "0")}-${fr[1].padStart(2, "0")}`;
   const parsed = new Date(raw);
   return Number.isNaN(parsed.getTime()) ? new Date().toISOString().slice(0, 10) : parsed.toISOString().slice(0, 10);
-}
-
-function normalizeProductionStatus(value: string): "EN_INSTANCE" | "EN_PRODUCTION" | "LIVREE" | "ANNULEE" {
-  const normalized = normalizeImportHeader(value);
-  if (normalized.includes("annul")) return "ANNULEE";
-  if (normalized.includes("livr") || normalized.includes("termine")) return "LIVREE";
-  if (normalized.includes("production") || normalized.includes("cours")) return "EN_PRODUCTION";
-  return "EN_INSTANCE";
 }
 
 function normalizePriority(value: string): string {
@@ -447,7 +496,7 @@ export async function POST(request: NextRequest) {
       }).filter((item): item is NonNullable<typeof item> => item !== null);
       if (items.length === 0) { skipped.push({ orderNumber: group.orderNumber, reason: "Aucun article exploitable" }); continue; }
 
-      const productionStatus = normalizeProductionStatus(sourceValue(first, "productionStatus", mapping));
+      const productionStatus = inferProductionStatusFromExcel(sourceValue(first, "productionStatus", mapping), groupColor);
       await db.transaction(async (tx) => {
         const [createdOrder] = await tx.insert(orders).values({
           orderNumber,

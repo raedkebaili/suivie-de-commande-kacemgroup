@@ -12,7 +12,7 @@ describe("modèle et mappage import commandes", () => {
   it("reconnaît les variantes historiques avec accents et pluriels", () => {
     const mapping = suggestOrderImportMapping([
       "Commande", "Date", "Clients", "Agence", "Affaire", "Etat",
-      "Désignation", "Quantité", "Reste livraison", "Commentaire",
+      "Désignation", "Quantité", "Reste livraison", "Commentaire", "PCB", "Driver", "Classe",
     ]);
     expect(mapping.orderNumber).toBe("Commande");
     expect(mapping.client).toBe("Clients");
@@ -20,6 +20,9 @@ describe("modèle et mappage import commandes", () => {
     expect(mapping.quantity).toBe("Quantité");
     expect(mapping.remainingQty).toBe("Reste livraison");
     expect(mapping.note).toBe("Commentaire");
+    expect(mapping.pcb).toBe("PCB");
+    expect(mapping.driver).toBe("Driver");
+    expect(mapping.electricalClass).toBe("Classe");
     expect(mapping.productionStatus).toBe("Etat");
   });
 });
