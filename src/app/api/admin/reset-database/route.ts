@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { userAgencyAccess, users } from "@/db/schema";
-import { getUserFromHeaders, hashPassword, verifyPassword } from "@/lib/auth";
+import { orderCounters, users } from "@/db/schema";
+import { getUserFromHeaders, verifyPassword } from "@/lib/auth";
 import { eq } from "drizzle-orm";
+import { buildOrderResetSql, ORDER_COUNTER_TABLE, ORDER_RESET_TABLES, PRESERVED_REFERENCE_TABLES } from "@/lib/admin-reset-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,7 @@ export async function POST(request: NextRequest) {
 
   if (body.confirmation !== CONFIRMATION_TEXT) {
     return NextResponse.json(
-      { error: `Saisissez exactement ${CONFIRMATION_TEXT} pour confirmer` },
+      { error: `Saisissez exactement ${CONFIRMATION_TEXT} pour confirmer le reset des commandes` },
       { status: 400 },
     );
   }
@@ -44,51 +45,27 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const defaultPasswordHash = await hashPassword("admin123");
-
+    const currentYear = new Date().getFullYear();
     await db.transaction(async (tx) => {
-      await tx.execute(sql.raw(`
-        TRUNCATE TABLE
-          notifications,
-          modification_logs,
-          activity_logs,
-          expedition_plan_entries,
-          expedition_batches,
-          production_batches,
-          item_technical_components,
-          order_items,
-          orders,
-          matieres,
-          material_categories,
-          tech_library,
-          article_library,
-          production_unit_lib,
-          user_agency_access,
-          clients,
-          agencies,
-          users
-        RESTART IDENTITY CASCADE
-      `));
-
-      await tx.insert(users).values({
-        username: "admin",
-        passwordHash: defaultPasswordHash,
-        role: "superadmin",
-        fullName: "Super Administrateur",
-        active: true,
-        darkMode: false,
-      });
+      // CASCADE supprime uniquement les dépendances des commandes et études
+      // (articles, lots, planning, notifications et documents associés).
+      await tx.execute(sql.raw(buildOrderResetSql()));
+      await tx.execute(sql.raw(`TRUNCATE TABLE ${ORDER_COUNTER_TABLE} RESTART IDENTITY`));
+      // Une ligne à zéro rend explicite l'état initial du compteur courant.
+      await tx.insert(orderCounters).values({ year: currentYear, lastNumber: 0 });
     });
 
     return NextResponse.json({
       ok: true,
-      message: "Base réinitialisée avec succès",
-      credentials: { username: "admin", password: "admin123" },
+      message: "Commandes et études réinitialisées. Les matières, clients et agences ont été conservés.",
+      preserved: [...PRESERVED_REFERENCE_TABLES],
+      reset: [...ORDER_RESET_TABLES, ORDER_COUNTER_TABLE],
+      nextOrderNumber: `1/${currentYear}`,
     });
   } catch (error) {
-    console.error("Database reset error:", error);
+    console.error("Orders/studies reset error:", error);
     return NextResponse.json(
-      { error: "Échec du formatage. Aucune donnée n'a été partiellement supprimée." },
+      { error: "Échec de la réinitialisation. Aucune donnée n'a été partiellement supprimée." },
       { status: 500 },
     );
   }

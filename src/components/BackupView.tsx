@@ -272,7 +272,7 @@ export default function BackupView({ user }: { user: User }) {
   const resetDatabase = async () => {
     if (resetConfirmation !== "REINITIALISER" || !resetPassword) return;
     const accepted = confirm(
-      "DANGER : toutes les commandes, clients, agences, utilisateurs, bibliothèques et tous les journaux seront définitivement supprimés. Continuer ?",
+      "DANGER : toutes les commandes, études et leurs données de suivi seront définitivement supprimées. Les matières, clients, agences et comptes utilisateurs seront conservés. Continuer ?",
     );
     if (!accepted) return;
 
@@ -289,13 +289,15 @@ export default function BackupView({ user }: { user: User }) {
         }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Erreur lors du formatage");
+      if (!res.ok) throw new Error(json.error || "Erreur lors de la réinitialisation");
 
-      await apiFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
-      alert("Base réinitialisée. Reconnectez-vous avec le compte administrateur temporaire.");
-      window.location.assign("/login");
+      setResetPassword("");
+      setResetConfirmation("");
+      setMessage({ type: "success", text: `${json.message} Prochaine commande : ${json.nextOrderNumber}.` });
+      await loadData();
     } catch (err) {
-      setMessage({ type: "error", text: err instanceof Error ? err.message : "Erreur lors du formatage" });
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Erreur lors de la réinitialisation" });
+    } finally {
       setResetting(false);
     }
   };
@@ -570,14 +572,14 @@ export default function BackupView({ user }: { user: User }) {
         )}
       </div>
 
-      {/* Factory reset */}
+      {/* Reset commandes / études */}
       <div className="bg-red-50 dark:bg-red-950/30 rounded-2xl p-6 border-2 border-red-300 dark:border-red-900">
         <div className="flex items-start gap-3">
           <div className="text-2xl" aria-hidden="true">⚠️</div>
           <div className="flex-1">
-            <h4 className="font-semibold text-red-800 dark:text-red-300">Zone de danger — Formater la base</h4>
+            <h4 className="font-semibold text-red-800 dark:text-red-300">Zone de danger — Réinitialiser commandes et études</h4>
             <p className="text-sm text-red-700 dark:text-red-400 mt-1">
-              Supprime définitivement toutes les données et remet tous les compteurs à zéro. Seul le compte de secours <strong>admin / admin123</strong> sera recréé.
+              Supprime les commandes, études photométriques et données de suivi associées, puis remet le compteur de commandes à zéro. Les matières, catégories de matières, clients, agences et utilisateurs sont conservés.
             </p>
           </div>
         </div>
@@ -616,7 +618,7 @@ export default function BackupView({ user }: { user: User }) {
         >
           {resetting
             ? <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Formatage en cours...</>
-            : <>🗑️ Réinitialiser et formater la base</>}
+            : <>🗑️ Réinitialiser commandes et études</>}
         </button>
       </div>
 
