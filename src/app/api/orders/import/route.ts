@@ -188,6 +188,18 @@ function makeCode(value: string, prefix: string, used: Set<string>): string {
   return code;
 }
 
+function registerReference<T extends { id: number }>(map: Map<string, T>, ambiguous: Set<string>, value: T, raw: string) {
+  const key = normalizeImportHeader(raw);
+  if (!key || ambiguous.has(key)) return;
+  const existing = map.get(key);
+  if (existing && existing.id !== value.id) {
+    map.delete(key);
+    ambiguous.add(key);
+    return;
+  }
+  map.set(key, value);
+}
+
 function previewResponse(sheets: ParsedSheet[]) {
   const allHeaders = [...new Set(sheets.flatMap((sheet) => sheet.headers))];
   const mapping = suggestOrderImportMapping(allHeaders);
@@ -238,16 +250,18 @@ export async function POST(request: NextRequest) {
     const allAgencies = await db.select().from(agencies);
     const clientsByValue = new Map<string, typeof allClients[number]>();
     const agenciesByValue = new Map<string, typeof allAgencies[number]>();
+    const ambiguousClients = new Set<string>();
+    const ambiguousAgencies = new Set<string>();
     const clientCodes = new Set<string>();
     const agencyCodes = new Set<string>();
     for (const client of allClients) {
-      clientsByValue.set(normalizeImportHeader(client.name), client);
-      clientsByValue.set(normalizeImportHeader(client.code), client);
+      registerReference(clientsByValue, ambiguousClients, client, client.name);
+      registerReference(clientsByValue, ambiguousClients, client, client.code);
       clientCodes.add(client.code);
     }
     for (const agency of allAgencies) {
-      agenciesByValue.set(normalizeImportHeader(agency.name), agency);
-      agenciesByValue.set(normalizeImportHeader(agency.code), agency);
+      registerReference(agenciesByValue, ambiguousAgencies, agency, agency.name);
+      registerReference(agenciesByValue, ambiguousAgencies, agency, agency.code);
       agencyCodes.add(agency.code);
     }
 
@@ -291,22 +305,32 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      let client = clientsByValue.get(normalizeImportHeader(clientValue));
+      const clientKey = normalizeImportHeader(clientValue);
+      if (ambiguousClients.has(clientKey)) {
+        skipped.push({ orderNumber: group.orderNumber, reason: `Client ambigu : ${clientValue}` });
+        continue;
+      }
+      let client = clientsByValue.get(clientKey);
       if (!client && createMissing) {
         const code = makeCode(clientValue, "CLIENT", clientCodes);
         [client] = await db.insert(clients).values({ name: clientValue, code }).returning();
-        clientsByValue.set(normalizeImportHeader(client.name), client);
-        clientsByValue.set(normalizeImportHeader(client.code), client);
+        registerReference(clientsByValue, ambiguousClients, client, client.name);
+        registerReference(clientsByValue, ambiguousClients, client, client.code);
         createdClients++;
       }
-      if (!client) { skipped.push({ orderNumber: group.orderNumber || "(sans numéro)", reason: `Client introuvable : ${clientValue}` }); continue; }
+      if (!client) { skipped.push({ orderNumber: group.orderNumber, reason: `Client introuvable : ${clientValue}` }); continue; }
 
-      let agency = agencyValue ? agenciesByValue.get(normalizeImportHeader(agencyValue)) : undefined;
-      if (!agency && agencyValue && createMissing) {
+      const agencyKey = normalizeImportHeader(agencyValue);
+      if (ambiguousAgencies.has(agencyKey)) {
+        skipped.push({ orderNumber: group.orderNumber, reason: `Agence ambiguë : ${agencyValue}` });
+        continue;
+      }
+      let agency = agenciesByValue.get(agencyKey);
+      if (!agency && createMissing) {
         const code = makeCode(agencyValue, "AGENCE", agencyCodes);
         [agency] = await db.insert(agencies).values({ name: agencyValue, code }).returning();
-        agenciesByValue.set(normalizeImportHeader(agency.name), agency);
-        agenciesByValue.set(normalizeImportHeader(agency.code), agency);
+        registerReference(agenciesByValue, ambiguousAgencies, agency, agency.name);
+        registerReference(agenciesByValue, ambiguousAgencies, agency, agency.code);
         createdAgencies++;
       }
       if (!agency) { skipped.push({ orderNumber: group.orderNumber, reason: `Agence introuvable : ${agencyValue}` }); continue; }
