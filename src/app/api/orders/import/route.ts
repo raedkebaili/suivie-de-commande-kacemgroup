@@ -13,6 +13,7 @@ import {
   normalizeImportHeader,
   suggestOrderImportMapping,
 } from "@/lib/order-import-fields";
+import { inferCommercialStatusFromExcel, normalizeExcelFillColor } from "@/lib/order-import-colors";
 
 type Merge = { s: { r: number; c: number }; e: { r: number; c: number } };
 type WorksheetLike = { [key: string]: unknown; "!merges"?: Merge[]; "!ref"?: string };
@@ -22,6 +23,7 @@ type ParsedSheet = {
   headerRow: number;
   headers: string[];
   rows: string[][];
+  rowColors: (string | null)[];
   mapping: Record<string, string>;
 };
 
@@ -90,6 +92,51 @@ function mergeCells(matrix: unknown[][], sheet: WorksheetLike) {
   }
 }
 
+function cellFillColor(cell: unknown): string | null {
+  if (!cell || typeof cell !== "object") return null;
+  const record = cell as Record<string, unknown>;
+  const candidates: unknown[] = [record, record.s, record.style, record.fill];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const style = candidate as Record<string, unknown>;
+    const nestedFill = style.fill && typeof style.fill === "object" ? style.fill as Record<string, unknown> : null;
+    const colors = [style.fgColor, style.bgColor, style.color, nestedFill?.fgColor, nestedFill?.bgColor];
+    for (const color of colors) {
+      if (typeof color === "string") {
+        const normalized = normalizeExcelFillColor(color);
+        if (normalized) return normalized;
+      }
+      if (color && typeof color === "object") {
+        const colorRecord = color as Record<string, unknown>;
+        for (const key of ["rgb", "argb", "hex", "value"]) {
+          const normalized = normalizeExcelFillColor(colorRecord[key]);
+          if (normalized) return normalized;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function worksheetCellColor(
+  XLSX: typeof import("xlsx"),
+  worksheet: WorksheetLike,
+  row: number,
+  column: number,
+): string | null {
+  let sourceRow = row;
+  let sourceColumn = column;
+  for (const merge of worksheet["!merges"] || []) {
+    if (row >= merge.s.r && row <= merge.e.r && column >= merge.s.c && column <= merge.e.c) {
+      sourceRow = merge.s.r;
+      sourceColumn = merge.s.c;
+      break;
+    }
+  }
+  const address = XLSX.utils.encode_cell({ r: sourceRow, c: sourceColumn });
+  return cellFillColor(worksheet[address]);
+}
+
 function parseSheet(XLSX: typeof import("xlsx"), name: string, index: number, worksheet: WorksheetLike): ParsedSheet | null {
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(worksheet as unknown as import("xlsx").WorkSheet, {
     header: 1,
@@ -109,19 +156,32 @@ function parseSheet(XLSX: typeof import("xlsx"), name: string, index: number, wo
   if (width === 0) return null;
 
   const headers = Array.from({ length: width }, (_, column) => rawHeaders[column] || `Colonne ${column + 1}`);
+  const mapping = suggestOrderImportMapping(headers);
+  const orderNumberColumn = mapping.orderNumber ? headers.findIndex((header) => header === mapping.orderNumber) : -1;
+  const range = typeof worksheet["!ref"] === "string" ? XLSX.utils.decode_range(worksheet["!ref"] as string) : null;
+  const originRow = range?.s.r || 0;
+  const originColumn = range?.s.c || 0;
   const dateColumns = new Set(headers.map((header, column) => normalizeImportHeader(header).includes("date") ? column : -1).filter((column) => column >= 0));
   const rows: string[][] = [];
+  const rowColors: (string | null)[] = [];
   for (let row = headerRow + 1; row < matrix.length; row++) {
     const values = Array.from({ length: width }, (_, column) => dateColumns.has(column) ? excelDate(matrix[row]?.[column]) : cellText(matrix[row]?.[column]));
     if (values.every((value) => value === "")) continue;
     rows.push(values);
+    const preferredColor = orderNumberColumn >= 0
+      ? worksheetCellColor(XLSX, worksheet, originRow + row, originColumn + orderNumberColumn)
+      : null;
+    const rowColor = preferredColor || Array.from({ length: width }, (_, column) =>
+      worksheetCellColor(XLSX, worksheet, originRow + row, originColumn + column),
+    ).find((color) => color !== null) || null;
+    rowColors.push(rowColor);
   }
-  return { index, name, headerRow, headers, rows, mapping: suggestOrderImportMapping(headers) };
+  return { index, name, headerRow, headers, rows, rowColors, mapping };
 }
 
 async function readWorkbook(file: File): Promise<ParsedSheet[]> {
   const XLSX = await import("xlsx");
-  const workbook = XLSX.read(Buffer.from(await file.arrayBuffer()), { type: "buffer", cellDates: true, raw: true });
+  const workbook = XLSX.read(Buffer.from(await file.arrayBuffer()), { type: "buffer", cellDates: true, cellStyles: true, raw: true });
   const sheets: ParsedSheet[] = [];
   workbook.SheetNames.forEach((name, index) => {
     const worksheet = workbook.Sheets[name] as unknown as WorksheetLike;
@@ -153,13 +213,6 @@ function parseDate(value: string): string {
   if (fr) return `${fr[3]}-${fr[2].padStart(2, "0")}-${fr[1].padStart(2, "0")}`;
   const parsed = new Date(raw);
   return Number.isNaN(parsed.getTime()) ? new Date().toISOString().slice(0, 10) : parsed.toISOString().slice(0, 10);
-}
-
-function normalizeCommercialStatus(value: string): "SUR_STOCK" | "BON_COMMANDE" | "PREVISION" {
-  const normalized = normalizeImportHeader(value);
-  if (normalized.includes("stock") || normalized.includes("besoininterne")) return "SUR_STOCK";
-  if (normalized.includes("boncommande") || normalized.includes("commande")) return "BON_COMMANDE";
-  return "PREVISION";
 }
 
 function normalizeProductionStatus(value: string): "EN_INSTANCE" | "EN_PRODUCTION" | "LIVREE" | "ANNULEE" {
@@ -215,6 +268,11 @@ function previewResponse(sheets: ParsedSheet[]) {
       rowCount: sheet.rows.length,
       mapping: sheet.mapping,
       sample: sheet.rows.slice(0, 8),
+      sampleColors: sheet.rowColors.slice(0, 8),
+      colorSummary: [...sheet.rowColors.reduce((counts, color) => {
+        if (color) counts.set(color, (counts.get(color) || 0) + 1);
+        return counts;
+      }, new Map<string, number>())].map(([color, count]) => ({ color, count })),
     })),
     warnings: missing.length > 0 ? [`Colonnes obligatoires non détectées : ${missing.join(", ")}`] : [],
   };
@@ -292,7 +350,11 @@ export async function POST(request: NextRequest) {
       const first = group.rows[0];
       const clientValue = sourceValue(first, "client", mapping).trim();
       const agencyValue = sourceValue(first, "agency", mapping).trim();
-      const status = normalizeCommercialStatus(sourceValue(first, "commercialStatus", mapping));
+      const groupColor = group.rows
+        .map((row) => row.sheet.rowColors[row.rowIndex])
+        .find((color): color is string => color !== null && color !== undefined);
+      const commercialValue = sourceValue(first, "commercialStatus", mapping) || sourceValue(first, "productionStatus", mapping);
+      const status = inferCommercialStatusFromExcel(commercialValue, groupColor);
       if (!clientValue) { skipped.push({ orderNumber: group.orderNumber, reason: "Client vide" }); continue; }
       if (!agencyValue) { skipped.push({ orderNumber: group.orderNumber, reason: "Agence vide" }); continue; }
       const inconsistentReference = group.rows.some((row) =>
