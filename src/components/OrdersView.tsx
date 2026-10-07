@@ -18,6 +18,21 @@ import OrderItemRow from "@/components/OrderItemRow";
 import DocumentsPanel, { PendingDocumentsZone, uploadPendingDocuments, documentDownloadUrl, type PendingDocument } from "@/components/DocumentsPanel";
 
 type FullOrder = Order & { totalQty?: number; totalDelivered?: number; totalProduced?: number; totalRemaining?: number; documentCount?: number; hasCahierDesCharges?: boolean; hasPhotometricStudy?: boolean };
+type OrderImportPreview = {
+  fields: { key: string; label: string; required: boolean }[];
+  mapping: Record<string, string>;
+  sheets: { index: number; name: string; headerRow: number; headers: string[]; rowCount: number; mapping: Record<string, string>; sample: string[][] }[];
+  warnings: string[];
+};
+type OrderImportResult = {
+  importedOrders: number;
+  importedItems: number;
+  createdClients: number;
+  createdAgencies: number;
+  imported: { orderNumber: string; items: number }[];
+  skipped: { orderNumber: string; reason: string }[];
+  warnings: string[];
+};
 
 function normalizeOrderSearch(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
@@ -187,10 +202,18 @@ export default function OrdersView({ user }: { user: User }) {
   const [fs, setFs] = useState(""); const [fa, setFa] = useState(""); const [fp, setFp] = useState(""); const [fphoto, setFphoto] = useState(false);
   const [error, setError] = useState(""); const [saving, setSaving] = useState(false);
   const [expandedOrders, setExpandedOrders] = useState<Set<number>>(new Set());
-  const [showImport, setShowImport] = useState(false); const [importType, setImportType] = useState("clients");
+  const [showImport, setShowImport] = useState(false);
+  const [orderImportFile, setOrderImportFile] = useState<File | null>(null);
+  const [orderImportPreview, setOrderImportPreview] = useState<OrderImportPreview | null>(null);
+  const [orderImportMapping, setOrderImportMapping] = useState<Record<string, string>>({});
+  const [orderImportSheets, setOrderImportSheets] = useState<number[]>([]);
+  const [orderImportCreateMissing, setOrderImportCreateMissing] = useState(true);
+  const [orderImportDuplicateMode, setOrderImportDuplicateMode] = useState("skip");
+  const [orderImportLoading, setOrderImportLoading] = useState(false);
+  const [orderImportResult, setOrderImportResult] = useState<OrderImportResult | null>(null);
   const [watchLive, setWatchLive] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [importMsg, setImportMsg] = useState(""); const fileRef = useRef<HTMLInputElement>(null);
+  const importFileInputRef = useRef<HTMLInputElement>(null);
   const [showExpHistory, setShowExpHistory] = useState(false);
   const [expItemId, setExpItemId] = useState<number | null>(null);
   const [expBatches, setExpBatches] = useState<ExpeditionBatch[]>([]);
@@ -547,7 +570,34 @@ export default function OrdersView({ user }: { user: User }) {
     const selected=current[itemId]||[];
     return {...current,[itemId]:selected.includes(materialId)?selected.filter(id=>id!==materialId):[...selected,materialId]};
   });
-  const hi=async()=>{const f=fileRef.current?.files?.[0];if(!f)return;const fd=new FormData();fd.append("file",f);fd.append("type",importType);try{const r=await apiFetch<{imported:number}>("/api/import",{method:"POST",body:fd});setImportMsg(`${r.imported} importés!`);if(importType==="clients"){const d=await apiFetch<{clients:Client[]}>("/api/clients");setClients(d.clients)}if(importType==="agencies"){const d=await apiFetch<{agencies:Agency[]}>("/api/agencies");setAgencies(d.agencies)}}catch(err:unknown){setImportMsg(err instanceof Error?err.message:"Erreur")}};
+  const availableImportHeaders = useMemo(() => [...new Set(orderImportPreview?.sheets.flatMap((sheet) => sheet.headers) || [])], [orderImportPreview]);
+  const resetOrderImport = () => {
+    setOrderImportFile(null); setOrderImportPreview(null); setOrderImportMapping({}); setOrderImportSheets([]); setOrderImportResult(null);
+    if (importFileInputRef.current) importFileInputRef.current.value = "";
+  };
+  const previewOrderImport = async (file: File) => {
+    setOrderImportFile(file); setOrderImportLoading(true); setOrderImportResult(null); setError("");
+    try {
+      const fd = new FormData(); fd.append("file", file); fd.append("mode", "preview");
+      const preview = await apiFetch<OrderImportPreview>("/api/orders/import", { method: "POST", body: fd });
+      setOrderImportPreview(preview); setOrderImportMapping(preview.mapping); setOrderImportSheets(preview.sheets.map((sheet) => sheet.index));
+    } catch (err) { setError(err instanceof Error ? err.message : "Impossible de lire ce fichier Excel"); }
+    finally { setOrderImportLoading(false); }
+  };
+  const importOrdersFromExcel = async () => {
+    if (!orderImportFile || !orderImportPreview) return;
+    const missing = orderImportPreview.fields.filter((field) => field.required && !orderImportMapping[field.key]);
+    if (missing.length > 0) { setError(`Mappage incomplet : ${missing.map((field) => field.label).join(", ")}`); return; }
+    setOrderImportLoading(true); setError("");
+    try {
+      const fd = new FormData(); fd.append("file", orderImportFile); fd.append("mode", "import");
+      fd.append("mapping", JSON.stringify(orderImportMapping)); fd.append("sheetIndexes", JSON.stringify(orderImportSheets));
+      fd.append("createMissing", orderImportCreateMissing ? "1" : "0"); fd.append("duplicateMode", orderImportDuplicateMode);
+      const result = await apiFetch<OrderImportResult>("/api/orders/import", { method: "POST", body: fd });
+      setOrderImportResult(result); await fetchOrders();
+    } catch (err) { setError(err instanceof Error ? err.message : "Erreur lors de l'import des commandes"); }
+    finally { setOrderImportLoading(false); }
+  };
 
   // ── Études photométriques ──
   const loadStudiesForOrders = useCallback(async (orderIds: number[]) => {
@@ -1010,7 +1060,7 @@ export default function OrdersView({ user }: { user: User }) {
         </>}
       </div>}
       <div className="flex-1"/>
-      <button onClick={()=>setShowImport(true)} className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700">📥 Import</button>
+      {ce()&&<button onClick={()=>{resetOrderImport();setShowImport(true)}} className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700" title="Importer des commandes depuis le modèle Excel archive">📥 Importer commandes</button>}
       <button onClick={ee} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">📤 Export</button>
       {ct()&&<button onClick={()=>openPhotoStudyModal()} className="px-4 py-1.5 bg-sky-600 text-white rounded-lg text-sm hover:bg-sky-700">🔬 Nouvelle Étude Photométrique</button>}
       {canCreateOrder()&&<button onClick={()=>{rf();aiInit();setShowModal(true)}} title={planifStockOnly?"Créer une commande Sur Stock / Besoin interne":"Créer une commande"} className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">+ Nouvelle{planifStockOnly?" (Sur Stock)":""}</button>}
@@ -1291,7 +1341,14 @@ export default function OrdersView({ user }: { user: User }) {
 
       <div className="sticky bottom-0 bg-white dark:bg-gray-900 border-t px-5 py-3 rounded-b-2xl flex justify-end gap-2"><button onClick={()=>setShowModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Fermer</button>{user.role !== "acces_agence" && <button onClick={handleSave} disabled={saving} className="px-6 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving?"...":editingOrder?"Enregistrer":"Créer"}</button>}</div></div></div>)}
 
-    {showImport&&<div className="fixed inset-0 z-50 flex items-center justify-center"><div className="absolute inset-0 bg-black/50" onClick={()=>setShowImport(false)}/><div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6"><h4 className="text-lg font-semibold mb-4">📥 Import Excel</h4>{importMsg&&<div className="mb-3 p-2 rounded-lg bg-green-50 text-green-700 text-sm">{importMsg}</div>}<div className="space-y-3"><div><label className="block text-xs font-medium text-gray-600 mb-1">Type</label><select value={importType} onChange={e=>setImportType(e.target.value)} className="w-full px-3 py-2 bg-white border rounded-lg text-sm"><option value="clients">Clients</option><option value="agencies">Agences</option></select></div><div><label className="block text-xs font-medium text-gray-600 mb-1">Fichier .xlsx</label><input type="file" accept=".xlsx,.xls" ref={fileRef} className="w-full text-sm"/></div></div><div className="flex justify-end gap-2 mt-6"><button onClick={()=>setShowImport(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Annuler</button><button onClick={hi} className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700">Importer</button></div></div></div>}
+    {showImport&&<div className="fixed inset-0 z-50 flex items-center justify-center p-4"><div className="absolute inset-0 bg-black/50" onClick={()=>{setShowImport(false);resetOrderImport()}}/><div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-6xl mx-4 max-h-[92vh] overflow-y-auto p-6"><div className="flex items-start justify-between gap-3 mb-4"><div><h4 className="text-lg font-semibold">📥 Importer des commandes Excel</h4><p className="text-xs text-gray-500 mt-1">Le modèle reprend les colonnes de l&apos;archive commande. Un ancien fichier peut être corrigé par mappage avant import.</p></div><button onClick={()=>{setShowImport(false);resetOrderImport()}} className="text-2xl text-gray-500">×</button></div>
+      {!orderImportPreview ? <div className="space-y-4"><div className="rounded-xl border-2 border-dashed border-gray-300 p-8 text-center"><p className="text-sm font-semibold mb-2">1. Sélectionner le fichier historique</p><input ref={importFileInputRef} type="file" accept=".xlsx,.xls" onChange={event=>{const file=event.target.files?.[0];if(file)void previewOrderImport(file)}} className="mx-auto text-sm"/><p className="text-xs text-gray-500 mt-2">Le système détecte la ligne d&apos;en-tête, les feuilles et les colonnes fusionnées comme l&apos;archive.</p></div>{orderImportLoading&&<div className="text-center text-sm text-blue-700">Analyse du fichier en cours…</div>}<div className="flex items-center justify-between"><button onClick={()=>window.open("/api/templates?type=orders","_blank")} className="px-3 py-2 bg-gray-200 rounded-lg text-sm">⬇ Télécharger le modèle archive commande</button><button onClick={()=>{setShowImport(false);resetOrderImport()}} className="px-4 py-2 bg-gray-100 rounded-lg text-sm">Annuler</button></div></div> : <div className="space-y-4"><div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-sm"><b>2. Vérifier le mappage</b><span className="ml-2 text-xs">{orderImportPreview.sheets.length} feuille(s), {orderImportPreview.sheets.reduce((sum,sheet)=>sum+sheet.rowCount,0)} ligne(s) détectée(s).</span></div>{orderImportPreview.warnings.length>0&&<div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800">{orderImportPreview.warnings.map((warning,index)=><div key={index}>⚠ {warning}</div>)}</div>}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">{orderImportPreview.fields.map(field=><label key={field.key} className="text-xs"><span className="block font-semibold mb-1">{field.label}{field.required&&<b className="text-red-600"> *</b>}</span><select value={orderImportMapping[field.key]||""} onChange={event=>setOrderImportMapping({...orderImportMapping,[field.key]:event.target.value})} className="w-full px-2 py-1.5 border rounded bg-white dark:bg-gray-800"><option value="">— Ne pas importer —</option>{availableImportHeaders.map(header=><option key={`${field.key}-${header}`} value={header}>{header}</option>)}</select></label>)}</div>
+        <div className="border rounded-xl p-3 space-y-3"><p className="font-semibold text-sm">Feuilles et options de liaison</p><div className="flex flex-wrap gap-3 text-xs">{orderImportPreview.sheets.map(sheet=><label key={sheet.index} className="flex items-center gap-1"><input type="checkbox" checked={orderImportSheets.includes(sheet.index)} onChange={event=>setOrderImportSheets(current=>event.target.checked?[...current,sheet.index]:current.filter(index=>index!==sheet.index))}/>{sheet.name} ({sheet.rowCount})</label>)}</div><label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={orderImportCreateMissing} onChange={event=>setOrderImportCreateMissing(event.target.checked)}/>Créer automatiquement les clients/agences absents pour relier les anciennes données</label><label className="flex items-center gap-2 text-xs"><span>Commande déjà existante :</span><select value={orderImportDuplicateMode} onChange={event=>setOrderImportDuplicateMode(event.target.value)} className="px-2 py-1 border rounded"><option value="skip">Ignorer</option><option value="new">Créer avec un nouveau numéro</option></select></label></div>
+        <div className="overflow-x-auto border rounded-xl"><table className="w-full text-xs"><thead><tr className="bg-gray-50"><th className="px-2 py-2 text-left">Feuille</th><th className="px-2 py-2 text-left">Ligne</th>{orderImportPreview.fields.slice(0,7).map(field=><th key={field.key} className="px-2 py-2 text-left">{field.label}</th>)}</tr></thead><tbody>{orderImportPreview.sheets.flatMap(sheet=>sheet.sample.slice(0,3).map((row,rowIndex)=><tr key={`${sheet.index}-${rowIndex}`} className="border-t"><td className="px-2 py-1">{sheet.name}</td><td className="px-2 py-1">{sheet.headerRow+rowIndex+1}</td>{orderImportPreview.fields.slice(0,7).map(field=>{const source=orderImportMapping[field.key];const col=source?sheet.headers.findIndex(header=>header===source): -1;return <td key={field.key} className="px-2 py-1 max-w-[180px] truncate">{col>=0?row[col]:"—"}</td>})}</tr>))}</tbody></table></div>
+        {orderImportResult&&<div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm"><b>Import terminé :</b> {orderImportResult.importedOrders} commande(s), {orderImportResult.importedItems} article(s), {orderImportResult.createdClients} client(s) et {orderImportResult.createdAgencies} agence(s) créé(s).{orderImportResult.skipped.length>0&&<span className="block text-xs mt-1 text-amber-800">{orderImportResult.skipped.length} ligne(s)/commande(s) ignorée(s) : {orderImportResult.skipped.slice(0,5).map(item=>`${item.orderNumber} — ${item.reason}`).join(" ; ")}</span>}</div>}
+        <div className="flex justify-end gap-2"><button onClick={()=>{setOrderImportPreview(null);setOrderImportResult(null)}} className="px-4 py-2 bg-gray-100 rounded-lg text-sm">Changer de fichier</button><button disabled={orderImportLoading||orderImportSheets.length===0} onClick={()=>void importOrdersFromExcel()} className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm disabled:opacity-50">{orderImportLoading?"Import en cours…":"Importer dans le tableau des commandes"}</button></div></div>}
+    </div></div>}
   
     {/* MODIFICATION HISTORY MODAL */}
     {showModHistory&&<div className="fixed inset-0 z-50 flex items-center justify-center"><div className="absolute inset-0 bg-black/50" onClick={()=>setShowModHistory(false)}/><div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto p-6"><h4 className="text-lg font-semibold mb-4 text-gray-800 dark:text-white">📝 Historique des modifications</h4>
