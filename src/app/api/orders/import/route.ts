@@ -230,7 +230,7 @@ export async function POST(request: NextRequest) {
     const selectedSheets = selectedIndexes.length > 0 ? sheets.filter((sheet) => selectedIndexes.includes(sheet.index)) : sheets;
     const createMissing = String(form.get("createMissing") || "0") === "1";
     const duplicateMode = String(form.get("duplicateMode") || "skip");
-    const requiredKeys = ["client", "articleName", "quantity"];
+    const requiredKeys = ["orderNumber", "client", "agency", "articleName", "quantity"];
     const missingKeys = requiredKeys.filter((key) => !mapping[key]);
     if (missingKeys.length > 0) return NextResponse.json({ error: `Mappage incomplet : ${missingKeys.join(", ")}` }, { status: 400 });
 
@@ -252,11 +252,16 @@ export async function POST(request: NextRequest) {
     }
 
     const groups = new Map<string, ImportGroup>();
+    const rejectedRows: { row: ImportRow; reason: string }[] = [];
     for (const sheet of selectedSheets) {
       sheet.rows.forEach((cells, rowIndex) => {
         const row = { sheet, rowIndex, cells };
         const number = sourceValue(row, "orderNumber", mapping).trim();
-        const key = number ? `number:${number}` : `row:${sheet.index}:${rowIndex}`;
+        if (!number) {
+          rejectedRows.push({ row, reason: "Numéro de commande vide" });
+          return;
+        }
+        const key = `number:${number}`;
         const group = groups.get(key) || { key, orderNumber: number, rows: [] };
         group.rows.push(row);
         groups.set(key, group);
@@ -265,7 +270,7 @@ export async function POST(request: NextRequest) {
 
     const imported: { orderNumber: string; items: number }[] = [];
     const skipped: { orderNumber: string; reason: string }[] = [];
-    const warnings: string[] = [];
+    const warnings: string[] = rejectedRows.map(({ row, reason }) => `${row.sheet.name}, ligne ${row.sheet.headerRow + row.rowIndex + 2} : ${reason}`);
     let createdClients = 0;
     let createdAgencies = 0;
 
@@ -274,7 +279,17 @@ export async function POST(request: NextRequest) {
       const clientValue = sourceValue(first, "client", mapping).trim();
       const agencyValue = sourceValue(first, "agency", mapping).trim();
       const status = normalizeCommercialStatus(sourceValue(first, "commercialStatus", mapping));
-      if (!clientValue) { skipped.push({ orderNumber: group.orderNumber || "(sans numéro)", reason: "Client vide" }); continue; }
+      if (!clientValue) { skipped.push({ orderNumber: group.orderNumber, reason: "Client vide" }); continue; }
+      if (!agencyValue) { skipped.push({ orderNumber: group.orderNumber, reason: "Agence vide" }); continue; }
+      const inconsistentReference = group.rows.some((row) =>
+        normalizeImportHeader(sourceValue(row, "client", mapping)) !== normalizeImportHeader(clientValue)
+        || normalizeImportHeader(sourceValue(row, "agency", mapping)) !== normalizeImportHeader(agencyValue),
+      );
+      if (inconsistentReference) {
+        skipped.push({ orderNumber: group.orderNumber, reason: "Client ou agence ambigu entre les lignes" });
+        warnings.push(`Commande ${group.orderNumber} ignorée : client/agence différents selon les lignes.`);
+        continue;
+      }
 
       let client = clientsByValue.get(normalizeImportHeader(clientValue));
       if (!client && createMissing) {
@@ -294,19 +309,7 @@ export async function POST(request: NextRequest) {
         agenciesByValue.set(normalizeImportHeader(agency.code), agency);
         createdAgencies++;
       }
-      if (!agency && status === "SUR_STOCK") {
-        agency = agenciesByValue.get("interne");
-        if (!agency) {
-          const [existingInternal] = await db.select().from(agencies).where(eq(agencies.code, "INTERNE")).limit(1);
-          agency = existingInternal;
-          if (!agency && createMissing) {
-            [agency] = await db.insert(agencies).values({ name: "Besoin interne", code: "INTERNE" }).returning();
-            createdAgencies++;
-          }
-          if (agency) agenciesByValue.set("interne", agency);
-        }
-      }
-      if (!agency) { skipped.push({ orderNumber: group.orderNumber || "(sans numéro)", reason: `Agence introuvable : ${agencyValue || "valeur vide"}` }); continue; }
+      if (!agency) { skipped.push({ orderNumber: group.orderNumber, reason: `Agence introuvable : ${agencyValue}` }); continue; }
 
       const sourceNumber = group.orderNumber;
       let orderNumber = sourceNumber;
@@ -319,7 +322,13 @@ export async function POST(request: NextRequest) {
 
       const items = group.rows.map((row) => {
         const articleName = sourceValue(row, "articleName", mapping).trim();
-        const quantity = Math.max(1, Math.round(parseNumber(sourceValue(row, "quantity", mapping), 1)));
+        const quantityRaw = sourceValue(row, "quantity", mapping).trim();
+        const quantityValue = parseNumber(quantityRaw, Number.NaN);
+        if (!articleName || !quantityRaw || !Number.isFinite(quantityValue) || quantityValue < 1) {
+          warnings.push(`${row.sheet.name}, ligne ${row.sheet.headerRow + row.rowIndex + 2} : article et quantité positifs sont obligatoires.`);
+          return null;
+        }
+        const quantity = Math.round(quantityValue);
         const producedQty = Math.max(0, Math.round(parseNumber(sourceValue(row, "producedQty", mapping), 0)));
         const deliveredSource = sourceValue(row, "deliveredQty", mapping);
         const remainingSource = sourceValue(row, "remainingQty", mapping);
@@ -349,8 +358,8 @@ export async function POST(request: NextRequest) {
           unitPrice: parseNumber(sourceValue(row, "unitPrice", mapping), 0) || null,
           description: sourceValue(row, "description", mapping).trim() || null,
         };
-      }).filter((item) => item.articleName);
-      if (items.length === 0) { skipped.push({ orderNumber: group.orderNumber || "(sans numéro)", reason: "Aucun article exploitable" }); continue; }
+      }).filter((item): item is NonNullable<typeof item> => item !== null);
+      if (items.length === 0) { skipped.push({ orderNumber: group.orderNumber, reason: "Aucun article exploitable" }); continue; }
 
       const productionStatus = normalizeProductionStatus(sourceValue(first, "productionStatus", mapping));
       await db.transaction(async (tx) => {

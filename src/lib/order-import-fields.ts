@@ -13,7 +13,7 @@ export type OrderImportField = {
  * pas écrasés par un ancien fichier (traçabilité de la plateforme).
  */
 export const ORDER_IMPORT_FIELDS: OrderImportField[] = [
-  { key: "orderNumber", label: "N° Commande", aliases: ["n commande", "n° commande", "numero commande", "num commande", "commande", "n commande"] },
+  { key: "orderNumber", label: "N° Commande", required: true, aliases: ["n commande", "n° commande", "numero commande", "num commande", "commande", "n commande"] },
   { key: "orderDate", label: "Date Commande", aliases: ["date commande", "date", "date de commande"] },
   { key: "priority", label: "Priorité", aliases: ["priorite", "priorité", "urgence"] },
   { key: "client", label: "Client", required: true, aliases: ["client", "clients", "nom client", "raison sociale"] },
