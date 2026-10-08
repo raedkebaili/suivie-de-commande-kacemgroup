@@ -3,7 +3,7 @@ export const maxDuration = 120;
 
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { agencies, clients, orderItems, orders } from "@/db/schema";
+import { agencies, clients, itemTechnicalComponents, matieres, materialCategories, orderItems, orders } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
@@ -283,6 +283,44 @@ function makeCode(value: string, prefix: string, used: Set<string>): string {
   return code;
 }
 
+const TECHNICAL_COMPONENT_KEYS = ["pcb", "colorTemperature", "lens", "driver", "electricalClass", "accessories", "otherTechSpecs"] as const;
+
+function technicalSourceValues(value: unknown): string[] {
+  return String(value || "")
+    .split(/[|;,]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+const TECHNICAL_CATEGORY_ALIASES: Record<string, string[]> = {
+  pcb: ["pcb", "carte pcb"],
+  colorTemperature: ["temperaturecouleur", "couleur", "tc", "temperature"],
+  lens: ["lentille", "optique"],
+  driver: ["driver", "alimentation"],
+  electricalClass: ["classeelectrique", "classeelec", "classe"],
+  accessories: ["accessoires", "accessory"],
+  otherTechSpecs: ["autresspecifications", "autresspecs", "specificationstechniques"],
+};
+
+function technicalCategoryForKey(categories: (typeof materialCategories.$inferSelect)[], key: string) {
+  const aliases = [key, ...(TECHNICAL_CATEGORY_ALIASES[key] || [])].map(normalizeImportHeader);
+  return categories.find((category) => aliases.includes(normalizeImportHeader(category.key)))
+    || categories.find((category) => aliases.includes(normalizeImportHeader(category.name)));
+}
+
+function materialForTechnicalValue(
+  materials: (typeof matieres.$inferSelect)[],
+  categoryId: number,
+  value: string,
+) {
+  const normalized = normalizeImportHeader(value);
+  return materials.find((material) => material.categoryId === categoryId && (
+    normalizeImportHeader(material.reference) === normalized
+    || normalizeImportHeader(material.name) === normalized
+    || (normalized.length >= 3 && ((normalizeImportHeader(material.reference).length >= 3 && normalized.includes(normalizeImportHeader(material.reference))) || (normalizeImportHeader(material.name).length >= 3 && normalized.includes(normalizeImportHeader(material.name)))))
+  ));
+}
+
 function registerReference<T extends { id: number }>(map: Map<string, T>, ambiguous: Set<string>, value: T, raw: string) {
   const key = normalizeImportHeader(raw);
   if (!key || ambiguous.has(key)) return;
@@ -364,6 +402,8 @@ export async function POST(request: NextRequest) {
       registerReference(agenciesByValue, ambiguousAgencies, agency, agency.code);
       agencyCodes.add(agency.code);
     }
+    const allMaterialCategories = await db.select().from(materialCategories);
+    const allMaterials = await db.select().from(matieres);
 
     const groups = new Map<string, ImportGroup>();
     const rejectedRows: { row: ImportRow; reason: string }[] = [];
@@ -510,7 +550,42 @@ export async function POST(request: NextRequest) {
           createdBy: user.id,
           createdByName: user.fullName,
         }).returning({ id: orders.id });
-        await tx.insert(orderItems).values(items.map((item) => ({ ...item, orderId: createdOrder.id })));
+        const createdItems = await tx.insert(orderItems).values(items.map((item) => ({ ...item, orderId: createdOrder.id }))).returning({ id: orderItems.id });
+        const componentRows: (typeof itemTechnicalComponents.$inferInsert)[] = [];
+        const componentKeys = new Set<string>();
+        items.forEach((item, itemIndex) => {
+          const createdItem = createdItems[itemIndex];
+          if (!createdItem) return;
+          for (const key of TECHNICAL_COMPONENT_KEYS) {
+            const category = technicalCategoryForKey(allMaterialCategories, key);
+            if (!category) continue;
+            const values = technicalSourceValues((item as Record<string, unknown>)[key]);
+            for (const value of values) {
+              const material = materialForTechnicalValue(allMaterials, category.id, value);
+              if (!material || !material.categoryId) {
+                warnings.push(`Commande ${orderNumber}, article ${item.articleName} : valeur technique « ${value} » non reliée à la catégorie « ${category.name} ».`);
+                continue;
+              }
+              const dedupeKey = `${createdItem.id}:${material.id}`;
+              if (componentKeys.has(dedupeKey)) continue;
+              componentKeys.add(dedupeKey);
+              componentRows.push({
+                itemId: createdItem.id,
+                orderId: createdOrder.id,
+                categoryId: category.id,
+                materialId: material.id,
+                categoryKey: category.key,
+                categoryName: category.name,
+                materialReference: material.reference,
+                materialLabel: material.name,
+                isTelegestion: category.isTelegestion,
+                enteredById: user.id,
+                enteredByName: user.fullName,
+              });
+            }
+          }
+        });
+        if (componentRows.length > 0) await tx.insert(itemTechnicalComponents).values(componentRows);
       });
       imported.push({ orderNumber, items: items.length });
     }
