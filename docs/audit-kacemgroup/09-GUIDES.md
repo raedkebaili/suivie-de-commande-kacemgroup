@@ -16,7 +16,7 @@ npx next dev                      # http://localhost:3000
 curl http://localhost:3000/api/health   # déclenche les seeds (admin…)
 ```
 
-Connexion initiale : `admin / admin123` — **à changer immédiatement**
+Connexion initiale : `admin / mot de passe initial configuré hors dépôt` — **à changer immédiatement**
 (onglet Utilisateurs). Vérifications rapides : `npm run typecheck`, `npm run lint`.
 
 ## 9-B. Configuration (toutes les variables réellement lues)

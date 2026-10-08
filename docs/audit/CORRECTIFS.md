@@ -11,7 +11,7 @@
 | # | Risque (audit) | Correctif | Fichiers | Vérifié |
 |---|---|---|---|---|
 | R1 | Secret JWT codé en dur | `JWT_SECRET` exigé, vérification à l'usage (aucune valeur de repli) | `lib/auth.ts` | build ✓ |
-| R2 | admin/admin123 affiché + jamais forcé | Suppression de l'indice ; compte semé temporaire `Admin@2024` + **`must_change_password`** + écran forcé bloquant toute l'app ; nouvelle route `POST /api/auth/change-password` | `auth.ts`, schéma, `login/page.tsx`, `ForcePasswordChange.tsx`, `auth/change-password` | curl 4–6 ✓ |
+| R2 | admin / mot de passe initial configuré hors dépôt affiché + jamais forcé | Suppression de l'indice ; compte semé temporaire `<mot de passe initial hors dépôt>` + **`must_change_password`** + écran forcé bloquant toute l'app ; nouvelle route `POST /api/auth/change-password` | `auth.ts`, schéma, `login/page.tsx`, `ForcePasswordChange.tsx`, `auth/change-password` | curl 4–6 ✓ |
 | R3 | Sauvegarde auto liée à un navigateur ouvert | **Planificateur côté serveur** (instrumentation Next.js, vérification chaque minute, idempotent par jour) ; secret cron en comparaison timing-safe avec repli `JWT_SECRET` | `instrumentation.ts`, `backup/auto/route.ts` | log serveur ✓ |
 | R4 | Force brute sur le login | Rate limiting en mémoire : **5 échecs / 15 min** par IP+identifiant, 429 + `Retry-After`, reset au succès, journal `LOGIN_FAILED` | `lib/rate-limit.ts`, `auth/login` | curl 7 ✓ |
 | R5 | IDOR notifications | Clause `(id, userId)` obligatoire ; 404 hors périmètre | `notifications/[id]` | curl 10 ✓ |
@@ -48,7 +48,7 @@ Chaque correctif est isolé et réversible :
 
 ## Points d'attention post-déploiement
 
-- **Premier démarrage** : connexion admin avec `Admin@2024` ⇒ changement
+- **Premier démarrage** : connexion admin avec `<mot de passe initial hors dépôt>` ⇒ changement
   obligatoire (l'écran bloquant se substitue à toute l'application).
 - Mettre à jour `INSTALL-GUIDE.md` sur le poste de prod : nouvelles variables
   obligatoires `APP_ENCRYPTION_KEY` et `BACKUP_SECRET` (voir `.env.example`).

@@ -18,7 +18,7 @@
 
 | Route | Verbe | Rôles | Objectif / règles |
 |---|---|---|---|
-| `/api/auth/login` | POST | public | Vérifie bcrypt, contrôle `active`, renvoie `{token, user}`. **Effet de bord** : appelle `seedDefaultUser()` (crée `admin/admin123` si absent). Journalise `LOGIN`. Pas de rate-limit. |
+| `/api/auth/login` | POST | public | Vérifie bcrypt, contrôle `active`, renvoie `{token, user}`. **Effet de bord** : appelle `seedDefaultUser()` (crée `admin / mot de passe initial configuré hors dépôt` si absent). Journalise `LOGIN`. Pas de rate-limit. |
 | `/api/auth/me` | GET | ✓ | Renvoie l'utilisateur du JWT (sans relecture DB). Seed admin également. |
 | `/api/auth/logout` | POST | ✓ | Journalise `LOGOUT`, renvoie toujours succès (token non révoqué). |
 | `/api/health` | GET | public | Santé + **seeds idempotents** (admin, catégories matières, recouvrement, couleurs archive/planning). `200 {ok:true}` / `500`. |
@@ -99,7 +99,7 @@
 | `/api/colors` | GET | ✓ | Couleurs dynamiques (tous les clients en ont besoin). |
 | `/api/colors` | PUT/POST | SA | Modification/création de couleurs (onglet Couleurs). |
 | `/api/settings` | GET/PUT | SA | Paramètres système (dont `backup_time`, `backup_max_count`). |
-| `/api/admin/reset-database` | POST | SA | **Réinitialisation totale** : confirmation texte `REINITIALISER` + **mot de passe admin revérifié** ; `TRUNCATE … RESTART IDENTITY CASCADE` sur 16 tables explicites (le CASCADE vide de fait toutes les tables FK-dépendantes) puis recrée `admin/admin123`. |
+| `/api/admin/reset-database` | POST | SA | **Réinitialisation totale** : confirmation texte `REINITIALISER` + **mot de passe admin revérifié** ; `TRUNCATE … RESTART IDENTITY CASCADE` sur 16 tables explicites (le CASCADE vide de fait toutes les tables FK-dépendantes) puis recrée `admin / mot de passe initial configuré hors dépôt`. |
 
 ## 4.7 Sauvegarde / restauration
 

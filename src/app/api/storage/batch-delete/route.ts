@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
-import { FOLDER_MIME, ensureRootFolder, friendlyDriveError, getDriveClient } from "@/lib/google-drive";
+import { FOLDER_MIME, assertInsideRoot, ensureRootFolder, friendlyDriveError, getDriveClient } from "@/lib/google-drive";
 
 const CONFIRMATION_TEXT = "SUPPRIMER";
 
@@ -47,17 +47,23 @@ export async function POST(request: NextRequest) {
         for (const f of res.data.files || []) {
           if (!f.id || f.id === root.id) continue;
           if (f.mimeType === FOLDER_MIME) continue; // on ne supprime que les fichiers
-          targets.push({ id: f.id, name: f.name || "" });
+          if (await assertInsideRoot(f.id)) targets.push({ id: f.id, name: f.name || "" });
         }
         pageToken = res.data.nextPageToken || undefined;
         if (!pageToken) break;
       }
     } else {
-      const ids = Array.isArray(body.ids) ? body.ids.map(String).filter(Boolean) : [];
+      const rawIds = Array.isArray(body.ids) ? body.ids as unknown[] : [];
+      const ids: string[] = [...new Set<string>(rawIds.map((value) => String(value)).filter((value) => Boolean(value)))];
       if (ids.length === 0) return NextResponse.json({ error: "Aucun élément sélectionné" }, { status: 400 });
-      targets = ids
-        .filter((id: string) => !(cfg.rootFolderId && id === cfg.rootFolderId))
-        .map((id: string) => ({ id, name: id }));
+      if (ids.length > 100) return NextResponse.json({ error: "100 éléments maximum par opération" }, { status: 400 });
+      const validIds: string[] = [];
+      for (const id of ids) {
+        if (cfg.rootFolderId && id === cfg.rootFolderId) continue;
+        if (await assertInsideRoot(id)) validIds.push(id);
+      }
+      targets = validIds.map((id) => ({ id, name: id }));
+      if (targets.length === 0) return NextResponse.json({ error: "Aucun élément du stockage applicatif sélectionné" }, { status: 404 });
     }
 
     let deleted = 0;

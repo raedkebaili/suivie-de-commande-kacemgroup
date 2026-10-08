@@ -75,8 +75,8 @@ Après la création, Neon affiche une page avec l'URL de connexion.
 1. Dans la section **Connection string**, cliquez sur l'icône de copie
 2. L'URL ressemble à ceci :
 
-```
-postgresql://neondb_owner:AbCdEf123456@ep-xyz-abc-123456.eu-central-1.aws.neon.tech/otp_db?sslmode=require
+```text
+<valeur-de-connexion-Neon-a-conserver-hors-du-depot>
 ```
 
 3. **GARDEZ CETTE URL** — vous en aurez besoin à l'étape 3
@@ -222,12 +222,9 @@ npm install
 
 Créez un fichier `.env` à la racine du projet avec l'URL Neon :
 
-```bash
-# Windows (PowerShell)
-echo 'DATABASE_URL=postgresql://neondb_owner:VOTRE_MOT_DE_PASSE@ep-xyz.neon.tech/otp_db?sslmode=require' > .env
-
-# macOS / Linux
-echo 'DATABASE_URL=postgresql://neondb_owner:VOTRE_MOT_DE_PASSE@ep-xyz.neon.tech/otp_db?sslmode=require' > .env
+```text
+Configurez DATABASE_URL directement dans l’environnement du déploiement,
+avec la valeur fournie par Neon. Ne l’écrivez pas dans Git ni dans ce guide.
 ```
 
 > Remplacez l'URL par la vraie URL Neon copiée à l'étape 2.3.
@@ -439,7 +436,7 @@ cd ordertrack-pro
 npm install
 
 # ── 3. Configurer le .env local (pour les migrations) ──
-echo 'DATABASE_URL=postgresql://user:pass@host.neon.tech/otp_db?sslmode=require' > .env
+# Configurez DATABASE_URL dans l’environnement hors dépôt avec la valeur fournie par l’hébergeur
 
 # ── 4. Générer un JWT_SECRET ──
 node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"

@@ -19,6 +19,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
   const [order] = await db.select().from(orders).where(eq(orders.id, parseInt(id))).limit(1);
   if (!order) return NextResponse.json({ error: "Non trouvée" }, { status: 404 });
+  const agencyScope = agencyScopeForUser(a.user);
+  if (agencyScope && !agencyScope.includes(order.agencyId)) {
+    return NextResponse.json({ error: "Commande inaccessible" }, { status: 404 });
+  }
   const items = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
   const components = await db.select().from(itemTechnicalComponents).where(eq(itemTechnicalComponents.orderId, order.id));
   const plans = await db.select({

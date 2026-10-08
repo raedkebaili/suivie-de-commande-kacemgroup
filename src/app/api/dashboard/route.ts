@@ -12,9 +12,14 @@ export async function GET(request: NextRequest) {
   const agencyScope = agencyScopeForUser(user);
   const orderScope = agencyScope ? inArray(orders.agencyId, agencyScope) : undefined;
 
+  const visibleClientIds = agencyScope
+    ? db.select({ clientId: orders.clientId }).from(orders).where(orderScope)
+    : undefined;
   const totalOrders = await db.select({ count: count() }).from(orders).where(orderScope);
-  const totalClients = await db.select({ count: count() }).from(clients);
-  const totalAgencies = await db.select({ count: count() }).from(agencies);
+  const totalClients = await db.select({ count: count() }).from(clients)
+    .where(visibleClientIds ? inArray(clients.id, visibleClientIds) : undefined);
+  const totalAgencies = await db.select({ count: count() }).from(agencies)
+    .where(agencyScope ? inArray(agencies.id, agencyScope) : undefined);
 
   // Production pipeline state: EN_INSTANCE / EN_PRODUCTION / LIVREE / ANNULEE
   // This is the REAL lifecycle status of an order (orders.productionStatus),

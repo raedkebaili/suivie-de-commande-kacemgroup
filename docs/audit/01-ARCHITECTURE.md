@@ -30,7 +30,7 @@ Services externes
   thème sombre, **planificateur de sauvegarde** (superadmin), pont
   **Electron** (`onShortcut` F2/F6…), ouverture de modales par `CustomEvent`.
 - **`src/app/login/page.tsx`** : formulaire — appelle `POST /api/auth/login`,
-  stocke le JWT. *Affiche « admin / admin123 » en clair (voir 05).*
+  stocke le JWT. *Affiche « admin / mot de passe initial configuré hors dépôt » en clair (voir 05).*
 
 ### Onglets et rôles
 

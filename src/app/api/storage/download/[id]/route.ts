@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
-import { friendlyDriveError, getDriveClient } from "@/lib/google-drive";
+import { assertInsideRoot, friendlyDriveError, getDriveClient } from "@/lib/google-drive";
 
 /**
  * Authentifie la requête via le Bearer legacy ou le cookie HttpOnly de session.
@@ -29,6 +29,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   try {
     const { drive } = await getDriveClient();
+    if (!(await assertInsideRoot(id))) {
+      return NextResponse.json({ error: "Fichier hors du stockage applicatif" }, { status: 404 });
+    }
     const meta = await drive.files.get({ fileId: id, fields: "id,name,mimeType,size" });
     const res = await drive.files.get({ fileId: id, alt: "media" }, { responseType: "arraybuffer" });
 

@@ -46,7 +46,7 @@ d'injection SQL** constatée ; **pas de XSS** constatée.
    variable d'environnement, tout jeton est forgeable par quiconque lit le
    code (dépôt public). *Le setup Windows génère bien un secret aléatoire,
    mais le fallback demeure.* → exiger la variable, supprimer le fallback.
-2. **Identifiants par défaut `admin / admin123`** semés
+2. **Identifiants par défaut `admin / mot de passe initial configuré hors dépôt`** semés
    automatiquement **et affichés sur la page de connexion**
    (`login/page.tsx`). Aucun changement de mot de passe n'est forcé à la
    première connexion. → retirer l'affichage, forcer la rotation.

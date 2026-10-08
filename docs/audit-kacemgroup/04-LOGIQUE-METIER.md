@@ -2,7 +2,7 @@
 
 ## 5.1 Cycle de vie d'un utilisateur
 
-Créé par le SA (`/api/users`) avec un rôle ; `admin/admin123` est seedé si la
+Créé par le SA (`/api/users`) avec un rôle ; `admin / mot de passe initial configuré hors dépôt` est seedé si la
 base est vide. `active=false` bloque le login, **mais** un JWT déjà émis reste
 valide 24 h (ni le rôle ni `active` ne sont relus en base à chaque requête).
 Suppression possible par le SA (contraintes FK : SET NULL sur les historiques,

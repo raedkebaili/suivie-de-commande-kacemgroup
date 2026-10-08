@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromHeaders } from "@/lib/auth";
-import { FOLDER_MIME, ensureRootFolder, friendlyDriveError, getDriveClient } from "@/lib/google-drive";
+import { FOLDER_MIME, assertInsideRoot, ensureRootFolder, friendlyDriveError, getDriveClient } from "@/lib/google-drive";
 
 /**
  * GET /api/storage/stats
@@ -34,6 +34,7 @@ export async function GET(request: NextRequest) {
         pageSize: 1000, pageToken, spaces: "drive",
       });
       for (const f of res.data.files || []) {
+        if (!f.id || !(await assertInsideRoot(f.id))) continue;
         if (f.mimeType === FOLDER_MIME) { folderCount++; continue; }
         fileCount++;
         if (f.size) totalSize += Number(f.size);

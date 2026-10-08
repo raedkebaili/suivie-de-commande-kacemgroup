@@ -321,31 +321,17 @@ export default function OrdersView({ user }: { user: User }) {
   // Saisie de l'en-tête et des articles : commercial, ou planificateur en création
   const canEditOrderForm = () => ce() || (planifStockOnly && !editingOrder);
 
-  // ── Visibilité des colonnes (config globale administrée par le superadmin) ──
+  // ── Visibilité et filtres du tableau : préférences privées par utilisateur ──
   const isColVisible = (k:string):boolean => !hiddenCols.includes(k);
   const visibleColCount = ORDER_TABLE_TOTAL_COLS - ORDER_TABLE_COLUMNS.filter(c=>hiddenCols.includes(c.key)).length;
-  const toggleColumn = async (key:string) => {
-    const next = hiddenCols.includes(key) ? hiddenCols.filter(k=>k!==key) : [...hiddenCols, key];
-    const prev = hiddenCols;
-    setHiddenCols(next); // mise à jour optimiste
-    try { await apiFetch("/api/orders/column-visibility", { method:"PUT", body: JSON.stringify({ hiddenColumns: next }) }); }
-    catch (err) { setHiddenCols(prev); alert(err instanceof Error ? err.message : "Erreur d'enregistrement"); }
+  const toggleColumn = (key:string) => {
+    setHiddenCols(current => current.includes(key) ? current.filter(k=>k!==key) : [...current, key]);
   };
-  // Masquage de la ligne TOTAL des articles (admin)
-  const toggleTotalRow = async () => {
-    const next = !hideTotalRow;
-    setHideTotalRow(next); // mise à jour optimiste
-    try { await apiFetch("/api/orders/column-visibility", { method:"PUT", body: JSON.stringify({ hideTotalRow: next }) }); }
-    catch (err) { setHideTotalRow(!next); alert(err instanceof Error ? err.message : "Erreur d'enregistrement"); }
-  };
+  const toggleTotalRow = () => setHideTotalRow(current => !current);
   // Masquage d'un état de production précis (le badge seulement, pas la colonne)
   const isProdStateVisible = (k:string):boolean => !hiddenProdStates.includes(k);
-  const toggleProdState = async (key:string) => {
-    const next = hiddenProdStates.includes(key) ? hiddenProdStates.filter(k=>k!==key) : [...hiddenProdStates, key];
-    const prev = hiddenProdStates;
-    setHiddenProdStates(next); // mise à jour optimiste
-    try { await apiFetch("/api/orders/column-visibility", { method:"PUT", body: JSON.stringify({ hiddenProductionStates: next }) }); }
-    catch (err) { setHiddenProdStates(prev); alert(err instanceof Error ? err.message : "Erreur d'enregistrement"); }
+  const toggleProdState = (key:string) => {
+    setHiddenProdStates(current => current.includes(key) ? current.filter(k=>k!==key) : [...current, key]);
   };
 
   const fetchOrders = useCallback(async()=>{
@@ -376,30 +362,28 @@ export default function OrdersView({ user }: { user: User }) {
   ]).finally(()=>setLoading(false))},[fetchOrders]);
 
   // Les réglages du tableau sont isolés par utilisateur et stockés côté serveur.
-  // Les anciens réglages globaux restent le fallback pour une première connexion.
   useEffect(() => {
     let cancelled = false;
     setTablePreferencesLoaded(false);
-    Promise.all([
-      apiFetch<{ preferences: Partial<OrdersTablePreferences> | null }>("/api/orders/preferences").catch(() => ({ preferences: null })),
-      apiFetch<{ hiddenColumns: string[]; hiddenProductionStates?: string[]; hideTotalRow?: boolean }>("/api/orders/column-visibility").catch(() => ({ hiddenColumns: [], hiddenProductionStates: [], hideTotalRow: false })),
-    ]).then(([personal, global]) => {
-      if (cancelled) return;
-      const saved = personal.preferences;
-      setFs(saved?.fs ?? "");
-      setFa(saved?.fa ?? "");
-      setFf(saved?.ff ?? "");
-      setFp(saved?.fp ?? "");
-      setFtel(saved?.ftel ?? false);
-      setFphoto(saved?.fphoto ?? false);
-      setSearchTerm(saved?.searchTerm ?? "");
-      setSortField(saved?.sortField ?? "date");
-      setSortDir(saved?.sortDir ?? "desc");
-      setHiddenCols(saved?.hiddenCols ?? global.hiddenColumns ?? []);
-      setHiddenProdStates(saved?.hiddenProdStates ?? global.hiddenProductionStates ?? []);
-      setHideTotalRow(saved?.hideTotalRow ?? !!global.hideTotalRow);
-      setTablePreferencesLoaded(true);
-    }).catch(() => { if (!cancelled) setTablePreferencesLoaded(true); });
+    apiFetch<{ preferences: Partial<OrdersTablePreferences> | null }>("/api/orders/preferences")
+      .catch(() => ({ preferences: null }))
+      .then((personal) => {
+        if (cancelled) return;
+        const saved = personal.preferences;
+        setFs(saved?.fs ?? "");
+        setFa(saved?.fa ?? "");
+        setFf(saved?.ff ?? "");
+        setFp(saved?.fp ?? "");
+        setFtel(saved?.ftel ?? false);
+        setFphoto(saved?.fphoto ?? false);
+        setSearchTerm(saved?.searchTerm ?? "");
+        setSortField(saved?.sortField ?? "date");
+        setSortDir(saved?.sortDir ?? "desc");
+        setHiddenCols(saved?.hiddenCols ?? []);
+        setHiddenProdStates(saved?.hiddenProdStates ?? []);
+        setHideTotalRow(saved?.hideTotalRow ?? false);
+        setTablePreferencesLoaded(true);
+      });
     return () => { cancelled = true; };
   }, [user.id]);
 

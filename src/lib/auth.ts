@@ -14,6 +14,7 @@ import { users, activityLogs, modificationLogs } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { readAuthCookie } from "@/lib/auth-cookie";
 import { getAssignedAgencyIds } from "@/lib/agency-access";
+import { initialAdminPasswordError, shouldSeedDefaultUser } from "@/lib/admin-bootstrap";
 
 const TOKEN_TTL = "12h";
 
@@ -78,18 +79,25 @@ export async function logActivity(uid: number, uname: string, action: string, de
   await db.insert(activityLogs).values({ userId: uid, username: uname, action, details: details || null });
 }
 
-/** Mot de passe initial du compte admin semé — changement OBLIGATOIRE (R2). */
-export const DEFAULT_ADMIN_PASSWORD = "Admin@2024";
-
+/**
+ * Initialise le premier compte administrateur uniquement dans une base vide.
+ * Le mot de passe initial vient de la variable d'environnement dédiée et doit
+ * être remplacé à la première connexion. Un compte `admin` supprimé alors
+ * que d'autres utilisateurs existent ne doit jamais être recréé en secret.
+ */
 export async function seedDefaultUser() {
-  const ex = await db.select().from(users).where(eq(users.username, "admin")).limit(1);
-  if (ex.length === 0) {
-    const h = await hashPassword(DEFAULT_ADMIN_PASSWORD);
-    // mustChangePassword = true : connexion possible uniquement pour choisir
-    // un nouveau mot de passe unique, aucun accès aux modules avant cela.
-    await db.insert(users).values({ username: "admin", passwordHash: h, role: "superadmin", fullName: "Super Administrateur", active: true, darkMode: false, mustChangePassword: true });
-    console.log("[Seed] Compte admin initialisé — changement de mot de passe obligatoire à la 1re connexion");
-  }
+  const [existingUser] = await db.select({ id: users.id }).from(users).limit(1);
+  if (!shouldSeedDefaultUser(existingUser)) return;
+
+  const initialPassword = process.env.INITIAL_ADMIN_PASSWORD;
+  const initialPasswordError = initialAdminPasswordError(initialPassword);
+  if (initialPasswordError) throw new Error(initialPasswordError);
+
+  const h = await hashPassword(initialPassword as string);
+  // mustChangePassword = true : connexion possible uniquement pour choisir
+  // un nouveau mot de passe unique, aucun accès aux modules avant cela.
+  await db.insert(users).values({ username: "admin", passwordHash: h, role: "superadmin", fullName: "Super Administrateur", active: true, darkMode: false, mustChangePassword: true });
+  console.log("[Seed] Compte administrateur initialisé — changement de mot de passe obligatoire à la 1re connexion");
 }
 
 export async function logModification(orderId: number, userId: number, username: string, field: string, oldValue: string | null, newValue: string | null) {

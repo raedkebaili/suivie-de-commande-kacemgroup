@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
-import { FOLDER_MIME, ensureRootFolder, friendlyDriveError, getDriveClient } from "@/lib/google-drive";
+import { FOLDER_MIME, assertInsideRoot, ensureRootFolder, friendlyDriveError, getDriveClient } from "@/lib/google-drive";
 
 /**
  * POST /api/storage/folders — crée un dossier
@@ -21,6 +21,9 @@ export async function POST(request: NextRequest) {
     const { drive } = await getDriveClient();
     const root = await ensureRootFolder();
     const parentId = String(body.parentId || "") || root.id;
+    if (parentId !== root.id && !(await assertInsideRoot(parentId))) {
+      return NextResponse.json({ error: "Dossier parent hors du stockage applicatif" }, { status: 404 });
+    }
 
     const created = await drive.files.create({
       requestBody: { name, mimeType: FOLDER_MIME, parents: [parentId] },
@@ -50,9 +53,13 @@ export async function GET(request: NextRequest) {
       q: `mimeType='${FOLDER_MIME}' and trashed=false`,
       fields: "files(id,name,parents)", pageSize: 200, orderBy: "name", spaces: "drive",
     });
+    const folders = (await Promise.all((res.data.files || []).map(async (f) => {
+      if (!f.id || f.id === root.id || !(await assertInsideRoot(f.id))) return null;
+      return { id: f.id, name: f.name, parents: f.parents || [] };
+    }))).filter((folder): folder is { id: string; name: string | null | undefined; parents: string[] } => folder !== null);
     return NextResponse.json({
       root: { id: root.id, name: root.name },
-      folders: (res.data.files || []).map(f => ({ id: f.id, name: f.name, parents: f.parents || [] })),
+      folders,
     });
   } catch (error) {
     const { message, status } = friendlyDriveError(error);

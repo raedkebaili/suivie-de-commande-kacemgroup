@@ -167,7 +167,7 @@ commande) + log.
 | `POST /api/backup/auto` | SA | Sauvegarde automatique (appelée par le planificateur navigateur), rotation `backup_max_count` |
 | `GET /api/backup/history` | SA | Historique sans le contenu |
 | `GET /api/backup/download/[id]` | SA | Téléchargement d'une sauvegarde passée |
-| `POST /api/admin/reset-database` | SA | **RAZ complète** : texte `REINITIALISER` + mot de passe admin requis, `TRUNCATE … RESTART IDENTITY CASCADE`, recrée admin/admin123 |
+| `POST /api/admin/reset-database` | SA | **RAZ complète** : texte `REINITIALISER` + mot de passe admin requis, `TRUNCATE … RESTART IDENTITY CASCADE`, recrée admin / mot de passe initial configuré hors dépôt |
 
 ## Transverses
 

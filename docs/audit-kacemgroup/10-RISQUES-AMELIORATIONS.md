@@ -5,7 +5,7 @@
 | # | Risque | Prob. | Impact | Mitigation proposée (avec accord) |
 |---|---|---|---|---|
 | R1 | Secret JWT de repli utilisé en production (SEC-1) | moyenne | **critique** | échec explicite au démarrage si `JWT_SECRET` absent (comportement sinon inchangé) |
-| R2 | Compte `admin/admin123` résiduel, identifiants affichés (SEC-2) | moyenne | **critique** | retirer l'affichage du login ; imposer le changement à la 1ʳᵉ connexion |
+| R2 | Compte `admin / mot de passe initial configuré hors dépôt` résiduel, identifiants affichés (SEC-2) | moyenne | **critique** | retirer l'affichage du login ; imposer le changement à la 1ʳᵉ connexion |
 | R3 | Dérive des dépendances (pas de lockfile) | haute | moyen | commiter `package-lock.json` et épingler |
 | R4 | Non-régression non testable (0 test) | haute | élevé | socle minimal de tests sur numérotation, idempotence planning, promotion priorités |
 | R5 | Vulnérabilités `xlsx` (SEC-5) | moyenne | élevé | migrer vers la distribution SheetJS officielle (`https://cdn.sheetjs.com`) ou `exceljs` pour l'export |
@@ -31,7 +31,7 @@
 
 Ordre conseillé — chaque lot est indépendant et réversible :
 
-1. **Hygiène immédiate (1 j)** : retirer `admin/admin123` de la page login ;
+1. **Hygiène immédiate (1 j)** : retirer `admin / mot de passe initial configuré hors dépôt` de la page login ;
    documenter `APP_ENCRYPTION_KEY`/`BACKUP_SECRET` dans `.env.example` ;
    supprimer `drizzle.config.json` (ou l'aligner) ; commiter le lockfile ;
    protéger `/api/orders/next-number`.

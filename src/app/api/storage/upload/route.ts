@@ -2,10 +2,12 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
-import { bufferToStream, ensureRootFolder, friendlyDriveError, getDriveClient } from "@/lib/google-drive";
+import { assertInsideRoot, bufferToStream, ensureRootFolder, friendlyDriveError, getDriveClient } from "@/lib/google-drive";
 
 // Validation côté SERVEUR (doublée côté client) : PDF uniquement par défaut
 const MAX_SIZE = 50 * 1024 * 1024; // 50 Mo par fichier
+const MAX_FILES = 20;
+const MAX_TOTAL_SIZE = 500 * 1024 * 1024;
 const ALLOWED_MIME = ["application/pdf"];
 
 /**
@@ -25,10 +27,16 @@ export async function POST(request: NextRequest) {
     const single = fd.get("file");
     if (single instanceof File) files.push(single);
     if (files.length === 0) return NextResponse.json({ error: "Aucun fichier fourni" }, { status: 400 });
+    if (files.length > MAX_FILES) return NextResponse.json({ error: `${MAX_FILES} fichiers maximum par envoi` }, { status: 400 });
+    const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+    if (totalSize > MAX_TOTAL_SIZE) return NextResponse.json({ error: "Taille totale maximale : 500 Mo par envoi" }, { status: 400 });
 
     const { drive } = await getDriveClient();
     const root = await ensureRootFolder();
     const folderId = String(fd.get("folderId") || "") || root.id;
+    if (folderId !== root.id && !(await assertInsideRoot(folderId))) {
+      return NextResponse.json({ error: "Dossier hors du stockage applicatif" }, { status: 404 });
+    }
 
     const uploaded: { name: string; id: string; size: number }[] = [];
     const failed: { name: string; reason: string }[] = [];

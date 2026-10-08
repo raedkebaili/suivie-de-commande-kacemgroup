@@ -58,7 +58,7 @@ Dépendances de développement : Tailwind/PostCSS, TypeScript, ESLint 9.39 (flat
 | `next.config.ts` | `allowedDevOrigins` (localhost + IP LAN codée en dur `192.168.0.199` + env `NEXT_ALLOWED_DEV_ORIGINS`), `poweredByHeader: false`, `compress: true`, `reactStrictMode: true` |
 | `tsconfig.json` | strict, `moduleResolution: bundler`, alias `@/* → ./src/*`, inclut `**/*.ts(x)` |
 | `drizzle.config.ts` | lit `DATABASE_URL` depuis `.env` (échoue explicitement si absent) |
-| `drizzle.config.json` | ⚠️ **doublon** avec URL codée en dur `postgresql://postgres:postgres@127.0.0.1:5432/app_db` — risque de divergence/d'usage accidentel |
+| `drizzle.config.json` | supprimé : il ne doit exister aucune connexion locale codée en dur |
 | `eslint.config.mjs` | `eslint-config-next/core-web-vitals` + ignores |
 | `postcss.config.mjs` | `@tailwindcss/postcss` uniquement |
 | `.gitignore` | correct : `.env*`, `node_modules`, `.next`, `backups/`, `dist/` |

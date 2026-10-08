@@ -19,7 +19,7 @@ expédition, recouvrement, archivage et sauvegardes.
 
 ## Prérequis
 
-- Node.js **20.9 ou supérieur** (requis par Next.js 16.2.6).
+- Node.js **20.9 ou supérieur** (requis par Next.js 16.4.0).
 - npm.
 - PostgreSQL accessible par `DATABASE_URL`.
 
@@ -28,15 +28,16 @@ expédition, recouvrement, archivage et sauvegardes.
 ```bash
 npm ci
 cp .env.example .env
-# Renseigner DATABASE_URL et générer les secrets requis dans .env.
+# Renseigner DATABASE_URL, INITIAL_ADMIN_PASSWORD et les secrets requis dans .env.
 npx drizzle-kit push
 npm run dev
 ```
 
 L'application est disponible sur <http://localhost:3000>. Le premier appel à
 `/api/health` initialise les référentiels par défaut et le compte administrateur
-temporaire. Le changement du mot de passe temporaire est obligatoire avant
-l'accès aux modules.
+à partir de `INITIAL_ADMIN_PASSWORD`. Le changement de ce mot de passe est
+obligatoire avant l'accès aux modules. Les fichiers `.env` et les valeurs de
+connexion restent hors du dépôt.
 
 Les variables sensibles ne doivent jamais être commitées :
 `DATABASE_URL`, `JWT_SECRET`, `APP_ENCRYPTION_KEY` et `BACKUP_SECRET`.
@@ -68,9 +69,11 @@ npm start            # démarrage du build
 | `src/components` | Vues de dashboard, commandes, production et administration |
 
 Les rôles applicatifs sont `superadmin`, `commercial`, `technique`,
-`planification`, `consultant_prod` et `recouvrement`. Les routes API vérifient
-l'authentification et les rôles côté serveur ; les restrictions d'affichage de
-la sidebar ne constituent pas une frontière de sécurité.
+`planification`, `consultant_prod`, `recouvrement`, `gerant` (affiché
+**Gérant**) et `acces_agence`. Les routes API vérifient l'authentification, les
+rôles et, lorsque nécessaire, le périmètre agence côté serveur ; les
+restrictions d'affichage de la sidebar ne constituent pas une frontière de
+sécurité.
 
 ## Déploiement
 
@@ -85,5 +88,6 @@ la sidebar ne constituent pas une frontière de sécurité.
 
 - `DEPLOYMENT.md` : déploiement Vercel + Neon.
 - `INSTALL-GUIDE.md` : installation Windows et réseau local.
-- `AUDIT_COMPLET.md` : audit historique détaillé.
-- `docs/AUDIT-REPRISE.md` et `docs/audit/` : audits et correctifs historiques.
+- `GUIDE_UTILISATION_FR_2026-10-08.md` : guide détaillé français, rôles, flux, limites et procédures.
+- `docs/audit/AUDIT-2026-10-08.md` : audit complet actuel et risques résiduels.
+- `AUDIT_COMPLET.md`, `docs/AUDIT-REPRISE.md` et `docs/audit/` : audits et correctifs historiques.
