@@ -29,7 +29,7 @@ function normalizeStatus(status: string): ExpeditionPlanStatus {
 export async function GET(request: NextRequest) {
   const user = await getUserFromHeaders(request);
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  if (!MANAGER_ROLES.includes(user.role)) return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+  if (![...MANAGER_ROLES, "gerant"].includes(user.role)) return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
 
   const params = new URL(request.url).searchParams;
   const date = params.get("date");
