@@ -52,5 +52,6 @@ describe("modèle et mappage import commandes", () => {
     expect(normalizeImportedPriority("Priorité 3")).toBe("P3");
     expect(normalizeImportedPriority("P7")).toBe("P7");
     expect(normalizeImportedPriority(0)).toBe("NORMALE");
+    expect(normalizeImportedPriority(1, "LIVREE")).toBe("NORMALE");
   });
 });

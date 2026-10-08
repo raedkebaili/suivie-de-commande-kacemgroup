@@ -575,12 +575,15 @@ export async function POST(request: NextRequest) {
       }).filter((item): item is NonNullable<typeof item> => item !== null);
       if (items.length === 0) { skipped.push({ orderNumber: group.orderNumber, reason: "Aucun article exploitable" }); continue; }
 
-      const productionStatus = inferProductionStatusFromExcel(sourceValue(first, "productionStatus", mapping), groupColor);
+      const productionStatus = inferProductionStatusFromExcel(firstSourceValue(group.rows, "productionStatus", mapping), groupColor);
+      // Comme dans le reste de l'application, une commande livrée sort de la
+      // file de priorités : la priorité importée redevient NORMALE.
+      const importedPriority = normalizeImportedPriority(firstSourceValue(group.rows, "priority", mapping), productionStatus);
       await db.transaction(async (tx) => {
         const [createdOrder] = await tx.insert(orders).values({
           orderNumber,
           orderDate: parseDate(sourceValue(first, "orderDate", mapping)),
-          priority: normalizeImportedPriority(firstSourceValue(group.rows, "priority", mapping)),
+          priority: importedPriority,
           clientId: client.id,
           agencyId: agency.id,
           status,

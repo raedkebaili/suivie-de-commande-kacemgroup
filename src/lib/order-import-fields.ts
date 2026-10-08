@@ -100,7 +100,8 @@ export function suggestOrderImportMapping(headers: string[]): Record<string, str
   return mapping;
 }
 
-export function normalizeImportedPriority(value: unknown): string {
+export function normalizeImportedPriority(value: unknown, productionStatus?: string): string {
+  if (productionStatus === "LIVREE") return "NORMALE";
   const normalized = normalizeImportHeader(value).toUpperCase();
   const numericPriority = /^(?:P|PRIORITE)?(10|[1-9])$/.exec(normalized);
   if (numericPriority) return `P${numericPriority[1]}`;
