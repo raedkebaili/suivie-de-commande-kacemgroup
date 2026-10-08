@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { agencies, users, userAgencyAccess } from "@/db/schema";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { hashPassword, logActivity, getUserFromHeaders } from "@/lib/auth";
 import { passwordPolicyError } from "@/lib/password-policy";
 
@@ -63,4 +63,30 @@ export async function POST(request: NextRequest) {
   });
   await logActivity(u.id, u.username, "CREATE_USER", `Utilisateur: ${username}`);
   return NextResponse.json({ user: { ...created, agencyIds } }, { status: 201 });
+}
+
+export async function DELETE(request: NextRequest) {
+  const u = await getUserFromHeaders(request);
+  if (!u || u.role !== "superadmin") return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+
+  let body: { confirmation?: unknown } = {};
+  try { body = await request.json(); } catch { /* confirmation is checked below */ }
+  if (body.confirmation !== "SUPPRIMER TOUS LES AUTRES UTILISATEURS") {
+    return NextResponse.json({ error: "Confirmation invalide" }, { status: 400 });
+  }
+
+  const deleted = await db.transaction(async (tx) => {
+    // Le compte connecté est conservé pour éviter de verrouiller la plateforme.
+    // Les références historiques sont neutralisées avant la suppression pour
+    // respecter les contraintes FK des commandes, usines et journaux.
+    await tx.execute(sql`UPDATE orders SET created_by = NULL WHERE created_by <> ${u.id}`);
+    await tx.execute(sql`UPDATE factories SET responsable_id = NULL WHERE responsable_id <> ${u.id}`);
+    await tx.execute(sql`UPDATE activity_logs SET user_id = NULL WHERE user_id <> ${u.id}`);
+    await tx.execute(sql`UPDATE modification_logs SET user_id = NULL WHERE user_id <> ${u.id}`);
+    await tx.execute(sql`DELETE FROM notifications WHERE user_id <> ${u.id}`);
+    return tx.delete(users).where(sql`${users.id} <> ${u.id}`).returning({ id: users.id });
+  });
+
+  await logActivity(u.id, u.username, "DELETE_ALL_USERS", `${deleted.length} utilisateurs supprimés (compte administrateur conservé)`);
+  return NextResponse.json({ deleted: deleted.length, preserved: u.username });
 }
