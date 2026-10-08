@@ -30,6 +30,7 @@ type BackupSettings = {
   enabled: boolean;
   time: string;
   maxCount: number;
+  idleTimeoutMinutes: number;
   lastRun: string | null;
   lastStatus: string | null;
   lastBackup: BackupHistoryItem | null;
@@ -101,6 +102,7 @@ export default function BackupView({ user }: { user: User }) {
   const [formEnabled, setFormEnabled] = useState(true);
   const [formTime, setFormTime] = useState("22:00");
   const [formMaxCount, setFormMaxCount] = useState(30);
+  const [formIdleTimeout, setFormIdleTimeout] = useState(30);
 
   // Charger les paramètres et l'historique
   const loadData = useCallback(async () => {
@@ -118,6 +120,7 @@ export default function BackupView({ user }: { user: User }) {
       setFormEnabled(settingsRes.enabled);
       setFormTime(settingsRes.time || "22:00");
       setFormMaxCount(settingsRes.maxCount || 30);
+      setFormIdleTimeout(settingsRes.idleTimeoutMinutes || 30);
     } catch (err) {
       console.error("Erreur chargement paramètres backup:", err);
     } finally {
@@ -214,6 +217,7 @@ export default function BackupView({ user }: { user: User }) {
           backup_enabled: String(formEnabled),
           backup_time: formTime,
           backup_max_count: String(formMaxCount),
+          session_idle_timeout_minutes: String(formIdleTimeout),
         }),
       });
       setMessage({ type: "success", text: "Paramètres de sauvegarde automatique enregistrés" });
@@ -341,7 +345,7 @@ export default function BackupView({ user }: { user: User }) {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
               {/* Activer/Désactiver */}
               <div className="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
                 <label className="flex items-center gap-3 cursor-pointer">
@@ -386,6 +390,25 @@ export default function BackupView({ user }: { user: User }) {
                     />
                     <span className="text-xs text-gray-500">sauvegardes</span>
                   </div>
+                </label>
+              </div>
+
+              {/* Déconnexion automatique */}
+              <div className="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+                <label className="block">
+                  <span className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Déconnexion après inactivité</span>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={1440}
+                      value={formIdleTimeout}
+                      onChange={(e) => setFormIdleTimeout(parseInt(e.target.value) || 30)}
+                      className="w-20 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-center text-gray-800 dark:text-white"
+                    />
+                    <span className="text-xs text-gray-500">minutes</span>
+                  </div>
+                  <span className="block mt-1 text-[11px] text-gray-400">1 à 1440 minutes, appliqué aux sessions ouvertes.</span>
                 </label>
               </div>
             </div>

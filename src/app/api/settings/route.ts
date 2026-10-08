@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { systemSettings } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
+import { MAX_SESSION_IDLE_TIMEOUT_MINUTES, MIN_SESSION_IDLE_TIMEOUT_MINUTES, SESSION_IDLE_TIMEOUT_KEY } from "@/lib/session-timeout";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,7 @@ const DEFAULT_SETTINGS: Record<string, { value: string; description: string }> =
   backup_max_count: { value: "30", description: "Nombre maximum de sauvegardes à conserver" },
   backup_last_run: { value: "", description: "Date/heure de la dernière sauvegarde automatique" },
   backup_last_status: { value: "", description: "Statut de la dernière sauvegarde automatique" },
+  session_idle_timeout_minutes: { value: "30", description: "Durée d'inactivité avant déconnexion automatique (en minutes)" },
 };
 
 /**
@@ -111,6 +113,15 @@ export async function PUT(request: NextRequest) {
         return NextResponse.json({ error: "Le nombre de sauvegardes doit être entre 1 et 365" }, { status: 400 });
       }
       maxCountUpdate.value = String(count);
+    }
+
+    const idleTimeoutUpdate = updates.find(u => u.key === SESSION_IDLE_TIMEOUT_KEY);
+    if (idleTimeoutUpdate) {
+      const minutes = Number(idleTimeoutUpdate.value);
+      if (!Number.isInteger(minutes) || minutes < MIN_SESSION_IDLE_TIMEOUT_MINUTES || minutes > MAX_SESSION_IDLE_TIMEOUT_MINUTES) {
+        return NextResponse.json({ error: `La durée d'inactivité doit être comprise entre ${MIN_SESSION_IDLE_TIMEOUT_MINUTES} et ${MAX_SESSION_IDLE_TIMEOUT_MINUTES} minutes` }, { status: 400 });
+      }
+      idleTimeoutUpdate.value = String(minutes);
     }
 
     // Appliquer les mises à jour
