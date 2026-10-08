@@ -11,6 +11,7 @@ import { generateOrderNumber } from "@/lib/order-number";
 import {
   ORDER_IMPORT_FIELDS,
   normalizeImportHeader,
+  normalizeImportedPriority,
   suggestOrderImportMapping,
 } from "@/lib/order-import-fields";
 import { inferCommercialStatusFromExcel, inferProductionStatusFromExcel, isExcelDeliveredFill, isExcelReadyFill, normalizeExcelFillColor, selectExcelGroupColor } from "@/lib/order-import-colors";
@@ -220,7 +221,7 @@ function propagateOrderFields(
   headers: string[],
   mapping: Record<string, string>,
 ) {
-  const carryKeys = ["orderNumber", "client", "agency", "affaire", "commercialStatus", "productionStatus"];
+  const carryKeys = ["orderNumber", "priority", "client", "agency", "affaire", "commercialStatus", "productionStatus"];
   const columns = new Map<string, number>();
   for (const key of carryKeys) {
     const source = mapping[key];
@@ -248,10 +249,18 @@ function sourceValue(row: ImportRow, key: string, mapping: Record<string, string
   return column >= 0 ? row.cells[column] || "" : "";
 }
 
+function firstSourceValue(rows: ImportRow[], key: string, mapping: Record<string, string>): string {
+  return rows.map((row) => sourceValue(row, key, mapping).trim()).find(Boolean) || "";
+}
+
 function parseNumber(value: string, fallback = 0): number {
   const normalized = String(value || "").replace(/\s/g, "").replace(/,(?=\d{1,2}$)/, ".").replace(/[^\d.-]/g, "");
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizeOrderNumber(value: string): string {
+  return String(value || "").trim().replace(/\s+/g, "").toUpperCase();
 }
 
 function parseDate(value: string): string {
@@ -263,15 +272,6 @@ function parseDate(value: string): string {
   if (fr) return `${fr[3]}-${fr[2].padStart(2, "0")}-${fr[1].padStart(2, "0")}`;
   const parsed = new Date(raw);
   return Number.isNaN(parsed.getTime()) ? new Date().toISOString().slice(0, 10) : parsed.toISOString().slice(0, 10);
-}
-
-function normalizePriority(value: string): string {
-  const normalized = normalizeImportHeader(value).toUpperCase();
-  if (/^P([1-9]|10)$/.test(normalized)) return normalized;
-  if (normalized.includes("tresurgent")) return "TRES_URGENTE";
-  if (normalized.includes("urgent")) return "URGENTE";
-  if (normalized.includes("prevision")) return "PREVISION";
-  return "NORMALE";
 }
 
 function makeCode(value: string, prefix: string, used: Set<string>): string {
@@ -293,32 +293,62 @@ function technicalSourceValues(value: unknown): string[] {
 }
 
 const TECHNICAL_CATEGORY_ALIASES: Record<string, string[]> = {
-  pcb: ["pcb", "carte pcb"],
+  pcb: ["pcb", "carte pcb", "cartes pcb"],
   colorTemperature: ["temperaturecouleur", "couleur", "tc", "temperature"],
-  lens: ["lentille", "optique"],
-  driver: ["driver", "alimentation"],
+  lens: ["lentille", "lentilles", "optique"],
+  driver: ["driver", "drivers", "alimentation", "alimentation led"],
   electricalClass: ["classeelectrique", "classeelec", "classe"],
-  accessories: ["accessoires", "accessory"],
+  accessories: ["accessoires", "accessoire", "accesoires", "accessory"],
   otherTechSpecs: ["autresspecifications", "autresspecs", "specificationstechniques"],
 };
 
+function technicalCategoryAliases(key: string): string[] {
+  return [key, ...(TECHNICAL_CATEGORY_ALIASES[key] || [])].map(normalizeImportHeader);
+}
+
 function technicalCategoryForKey(categories: (typeof materialCategories.$inferSelect)[], key: string) {
-  const aliases = [key, ...(TECHNICAL_CATEGORY_ALIASES[key] || [])].map(normalizeImportHeader);
+  const aliases = technicalCategoryAliases(key);
   return categories.find((category) => aliases.includes(normalizeImportHeader(category.key)))
     || categories.find((category) => aliases.includes(normalizeImportHeader(category.name)));
 }
 
 function materialForTechnicalValue(
   materials: (typeof matieres.$inferSelect)[],
-  categoryId: number,
+  category: typeof materialCategories.$inferSelect,
   value: string,
 ) {
   const normalized = normalizeImportHeader(value);
-  return materials.find((material) => material.categoryId === categoryId && (
-    normalizeImportHeader(material.reference) === normalized
-    || normalizeImportHeader(material.name) === normalized
-    || (normalized.length >= 3 && ((normalizeImportHeader(material.reference).length >= 3 && normalized.includes(normalizeImportHeader(material.reference))) || (normalizeImportHeader(material.name).length >= 3 && normalized.includes(normalizeImportHeader(material.name)))))
+  if (!normalized) return undefined;
+  const categoryAliases = new Set([
+    ...technicalCategoryAliases(category.key),
+    ...technicalCategoryAliases(category.name),
+  ]);
+  const categoryMatches = materials.filter((material) => (
+    material.categoryId === category.id
+    // Les anciennes matières peuvent encore avoir category_id NULL et leur
+    // catégorie historique uniquement dans la colonne texte `category`.
+    || categoryAliases.has(normalizeImportHeader(material.category))
   ));
+  const exact = categoryMatches.find((material) =>
+    normalizeImportHeader(material.reference) === normalized
+    || normalizeImportHeader(material.name) === normalized,
+  );
+  if (exact) return exact;
+  const partialMatches = categoryMatches.filter((material) => {
+    const reference = normalizeImportHeader(material.reference);
+    const name = normalizeImportHeader(material.name);
+    return normalized.length >= 3 && (
+      (reference.length >= 3 && (normalized.includes(reference) || reference.includes(normalized)))
+      || (name.length >= 3 && (normalized.includes(name) || name.includes(normalized)))
+    );
+  });
+  // Lorsque le catalogue porte une précision supplémentaire (ex. tension),
+  // conserver la matière la plus spécifique plutôt qu'une référence courte.
+  return partialMatches.sort((left, right) => {
+    const leftLength = Math.max(normalizeImportHeader(left.reference).length, normalizeImportHeader(left.name).length);
+    const rightLength = Math.max(normalizeImportHeader(right.reference).length, normalizeImportHeader(right.name).length);
+    return rightLength - leftLength;
+  })[0];
 }
 
 function registerReference<T extends { id: number }>(map: Map<string, T>, ambiguous: Set<string>, value: T, raw: string) {
@@ -408,14 +438,21 @@ export async function POST(request: NextRequest) {
     const groups = new Map<string, ImportGroup>();
     const rejectedRows: { row: ImportRow; reason: string }[] = [];
     for (const sheet of selectedSheets) {
+      let carriedOrderNumber = "";
       sheet.rows.forEach((cells, rowIndex) => {
         const row = { sheet, rowIndex, cells };
-        const number = sourceValue(row, "orderNumber", mapping).trim();
+        const explicitNumber = sourceValue(row, "orderNumber", mapping).trim();
+        const hasArticleData = Boolean(
+          sourceValue(row, "articleName", mapping).trim() || sourceValue(row, "quantity", mapping).trim(),
+        );
+        const number = explicitNumber || (hasArticleData ? carriedOrderNumber : "");
         if (!number) {
           rejectedRows.push({ row, reason: "Numéro de commande vide" });
           return;
         }
-        const key = `number:${number}`;
+        carriedOrderNumber = number;
+        const normalizedNumber = normalizeOrderNumber(number);
+        const key = `number:${normalizedNumber}`;
         const group = groups.get(key) || { key, orderNumber: number, rows: [] };
         group.rows.push(row);
         groups.set(key, group);
@@ -430,11 +467,15 @@ export async function POST(request: NextRequest) {
 
     for (const group of groups.values()) {
       const first = group.rows[0];
-      const clientValue = sourceValue(first, "client", mapping).trim();
-      const agencyValue = sourceValue(first, "agency", mapping).trim();
+      const clientValue = firstSourceValue(group.rows, "client", mapping);
+      const agencyValue = firstSourceValue(group.rows, "agency", mapping);
       const groupColor = selectExcelGroupColor(group.rows.map((row) => row.sheet.rowColors[row.rowIndex]));
-      const commercialValue = sourceValue(first, "commercialStatus", mapping) || sourceValue(first, "productionStatus", mapping);
-      const status = inferCommercialStatusFromExcel(commercialValue, groupColor);
+      const commercialValue = firstSourceValue(group.rows, "commercialStatus", mapping) || firstSourceValue(group.rows, "productionStatus", mapping);
+      const inferredStatus = inferCommercialStatusFromExcel(commercialValue, groupColor);
+      // L'ancien suivi utilise PREVISION comme état neutre de saisie. Pour
+      // l'import des commandes historiques, toute prévision détectée devient
+      // directement un bon de commande ; SUR_STOCK reste inchangé.
+      const status = inferredStatus === "PREVISION" ? "BON_COMMANDE" : inferredStatus;
       if (!clientValue) { skipped.push({ orderNumber: group.orderNumber, reason: "Client vide" }); continue; }
       if (!agencyValue) { skipped.push({ orderNumber: group.orderNumber, reason: "Agence vide" }); continue; }
       const inconsistentReference = group.rows.some((row) =>
@@ -442,9 +483,11 @@ export async function POST(request: NextRequest) {
         || normalizeImportHeader(sourceValue(row, "agency", mapping)) !== normalizeImportHeader(agencyValue),
       );
       if (inconsistentReference) {
-        skipped.push({ orderNumber: group.orderNumber, reason: "Client ou agence ambigu entre les lignes" });
-        warnings.push(`Commande ${group.orderNumber} ignorée : client/agence différents selon les lignes.`);
-        continue;
+        // Une cellule fusionnée ou une variante historique peut laisser une
+        // valeur différente sur une ligne secondaire. Ne pas perdre toute la
+        // commande : on conserve le premier client/agence et on signale la
+        // correction nécessaire dans le résultat d'import.
+        warnings.push(`Commande ${group.orderNumber} : client/agence différents selon les lignes ; première valeur conservée.`);
       }
 
       const clientKey = normalizeImportHeader(clientValue);
@@ -540,7 +583,7 @@ export async function POST(request: NextRequest) {
         const [createdOrder] = await tx.insert(orders).values({
           orderNumber,
           orderDate: parseDate(sourceValue(first, "orderDate", mapping)),
-          priority: normalizePriority(sourceValue(first, "priority", mapping)),
+          priority: normalizeImportedPriority(firstSourceValue(group.rows, "priority", mapping)),
           clientId: client.id,
           agencyId: agency.id,
           status,
@@ -561,8 +604,8 @@ export async function POST(request: NextRequest) {
             if (!category) continue;
             const values = technicalSourceValues((item as Record<string, unknown>)[key]);
             for (const value of values) {
-              const material = materialForTechnicalValue(allMaterials, category.id, value);
-              if (!material || !material.categoryId) {
+              const material = materialForTechnicalValue(allMaterials, category, value);
+              if (!material) {
                 warnings.push(`Commande ${orderNumber}, article ${item.articleName} : valeur technique « ${value} » non reliée à la catégorie « ${category.name} ».`);
                 continue;
               }

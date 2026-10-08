@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ORDER_IMPORT_HEADERS, suggestOrderImportMapping } from "../order-import-fields";
+import { ORDER_IMPORT_HEADERS, normalizeImportedPriority, suggestOrderImportMapping } from "../order-import-fields";
 
 describe("modèle et mappage import commandes", () => {
   it("reprend les colonnes du modèle export/archive commandes", () => {
@@ -44,5 +44,13 @@ describe("modèle et mappage import commandes", () => {
     expect(mapping.deliveredQty).toBe("quantité livré");
     expect(mapping.deliveryDate).toBe("date de livraison");
     expect(mapping.remainingQty).toBe("reste a livre");
+  });
+
+  it("convertit les priorités historiques numériques en clés P1 à P10", () => {
+    expect(normalizeImportedPriority(1)).toBe("P1");
+    expect(normalizeImportedPriority("10")).toBe("P10");
+    expect(normalizeImportedPriority("Priorité 3")).toBe("P3");
+    expect(normalizeImportedPriority("P7")).toBe("P7");
+    expect(normalizeImportedPriority(0)).toBe("NORMALE");
   });
 });
