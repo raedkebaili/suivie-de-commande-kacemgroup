@@ -312,7 +312,7 @@ export default function ArchiveView({ user }: { user: User }) {
           {canEditArchive && <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-1">✎ Modification des lignes autorisée pour votre rôle.</p>}
         </div>
         <button onClick={() => setIsTableFullscreen(value => !value)}
-          className="px-3 py-2 bg-slate-800 text-white rounded-lg text-sm hover:bg-slate-700"
+          className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
           title={isTableFullscreen ? "Quitter le plein écran" : "Afficher l'archive en plein écran"}>
           {isTableFullscreen ? "⤢ Quitter plein écran" : "⛶ Plein écran"}
         </button>

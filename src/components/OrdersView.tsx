@@ -120,6 +120,20 @@ function DeferredOrderDetails({
 
 type SortField = "date" | "alpha" | "number";
 type SortDir = "asc" | "desc";
+type OrdersTablePreferences = {
+  fs: string;
+  fa: string;
+  ff: string;
+  fp: string;
+  ftel: boolean;
+  fphoto: boolean;
+  searchTerm: string;
+  sortField: SortField;
+  sortDir: SortDir;
+  hiddenCols: string[];
+  hiddenProdStates: string[];
+  hideTotalRow: boolean;
+};
 
 // Colonnes masquables du tableau principal (config administrée par le superadmin,
 // stockée côté serveur dans system_settings — clé "orders_hidden_columns").
@@ -231,6 +245,8 @@ export default function OrdersView({ user }: { user: User }) {
   const [hiddenProdStates, setHiddenProdStates] = useState<string[]>([]);
   const [hideTotalRow, setHideTotalRow] = useState(false);
   const [showColMenu, setShowColMenu] = useState(false);
+  const [tablePreferencesLoaded, setTablePreferencesLoaded] = useState(false);
+  const tablePreferencesSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Incrémenté à chaque rafraîchissement : garde le regroupement par article à jour
   const [dataVersion, setDataVersion] = useState(0);
   // Alertes de recouvrement par client (affichées sur la colonne Client)
@@ -354,11 +370,49 @@ export default function OrdersView({ user }: { user: User }) {
     apiFetch<{clients:Client[]}>("/api/clients").then(d=>setClients(d.clients)).catch(()=>{}),
     apiFetch<{categories:MaterialCategory[]}>("/api/material-categories").then(d=>setMaterialCategories(d.categories.filter(category=>category.active))).catch(()=>{}),
     apiFetch<{matieres:Material[]}>("/api/matieres").then(d=>setMaterials(d.matieres)).catch(()=>{}),
-    apiFetch<{hiddenColumns:string[];hiddenProductionStates?:string[];hideTotalRow?:boolean}>("/api/orders/column-visibility").then(d=>{setHiddenCols(d.hiddenColumns||[]);setHiddenProdStates(d.hiddenProductionStates||[]);setHideTotalRow(!!d.hideTotalRow)}).catch(()=>{}),
     apiFetch<{assignments:ClientRecouvrementAssignment[]}>("/api/recouvrement/client-states").then(d=>setRecouvByClient(new Map(d.assignments.map(a=>[a.clientId,a])))).catch(()=>{}),
     apiFetch<{itemIds:number[]}>("/api/production-planning/active").then(d=>setPlanningActiveItems(new Set(d.itemIds||[]))).catch(()=>{}),
     apiFetch<{factories:{id:number;code:string;name:string;active:boolean}[]}>("/api/factories").then(d=>setFactoryList(d.factories)).catch(()=>{}),
   ]).finally(()=>setLoading(false))},[fetchOrders]);
+
+  // Les réglages du tableau sont isolés par utilisateur et stockés côté serveur.
+  // Les anciens réglages globaux restent le fallback pour une première connexion.
+  useEffect(() => {
+    let cancelled = false;
+    setTablePreferencesLoaded(false);
+    Promise.all([
+      apiFetch<{ preferences: Partial<OrdersTablePreferences> | null }>("/api/orders/preferences").catch(() => ({ preferences: null })),
+      apiFetch<{ hiddenColumns: string[]; hiddenProductionStates?: string[]; hideTotalRow?: boolean }>("/api/orders/column-visibility").catch(() => ({ hiddenColumns: [], hiddenProductionStates: [], hideTotalRow: false })),
+    ]).then(([personal, global]) => {
+      if (cancelled) return;
+      const saved = personal.preferences;
+      setFs(saved?.fs ?? "");
+      setFa(saved?.fa ?? "");
+      setFf(saved?.ff ?? "");
+      setFp(saved?.fp ?? "");
+      setFtel(saved?.ftel ?? false);
+      setFphoto(saved?.fphoto ?? false);
+      setSearchTerm(saved?.searchTerm ?? "");
+      setSortField(saved?.sortField ?? "date");
+      setSortDir(saved?.sortDir ?? "desc");
+      setHiddenCols(saved?.hiddenCols ?? global.hiddenColumns ?? []);
+      setHiddenProdStates(saved?.hiddenProdStates ?? global.hiddenProductionStates ?? []);
+      setHideTotalRow(saved?.hideTotalRow ?? !!global.hideTotalRow);
+      setTablePreferencesLoaded(true);
+    }).catch(() => { if (!cancelled) setTablePreferencesLoaded(true); });
+    return () => { cancelled = true; };
+  }, [user.id]);
+
+  useEffect(() => {
+    if (!tablePreferencesLoaded) return;
+    const preferences: OrdersTablePreferences = { fs, fa, ff, fp, ftel, fphoto, searchTerm, sortField, sortDir, hiddenCols, hiddenProdStates, hideTotalRow };
+    if (tablePreferencesSaveTimer.current) clearTimeout(tablePreferencesSaveTimer.current);
+    tablePreferencesSaveTimer.current = setTimeout(() => {
+      apiFetch("/api/orders/preferences", { method: "PUT", body: JSON.stringify(preferences) }).catch(() => {});
+    }, 350);
+    return () => { if (tablePreferencesSaveTimer.current) clearTimeout(tablePreferencesSaveTimer.current); };
+  }, [tablePreferencesLoaded, user.id, fs, fa, ff, fp, ftel, fphoto, searchTerm, sortField, sortDir, hiddenCols, hiddenProdStates, hideTotalRow]);
+
   // Planning actif : recalculé à chaque rafraîchissement des commandes (temps réel)
   const refreshPlanningActive=useCallback(async()=>{
     try{const d=await apiFetch<{itemIds:number[]}>("/api/production-planning/active");setPlanningActiveItems(new Set(d.itemIds||[]))}catch{/* non bloquant */}
@@ -1015,7 +1069,7 @@ export default function OrdersView({ user }: { user: User }) {
       </label>
       <button onClick={fetchOrders} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg text-sm hover:bg-gray-300">🔄 Actualiser</button>
       <button onClick={() => setIsTableFullscreen(value => !value)} title={isTableFullscreen ? "Quitter le plein écran" : "Afficher le tableau en plein écran"}
-        className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-sm hover:bg-slate-700">{isTableFullscreen ? "⤢ Quitter plein écran" : "⛶ Plein écran"}</button>
+        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-semibold shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400">{isTableFullscreen ? "⤢ Quitter plein écran" : "⛶ Plein écran"}</button>
       <label className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer flex items-center gap-1 transition-colors ${watchLive?"bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-400":"bg-gray-100 dark:bg-gray-800 text-gray-500 border border-gray-300 dark:border-gray-600"}`}>
         <input type="checkbox" checked={watchLive} onChange={e=>setWatchLive(e.target.checked)} className="sr-only" />
         <span className={`w-2 h-2 rounded-full ${watchLive?"bg-green-500 animate-pulse":""}`}></span>📡 Live
@@ -1065,7 +1119,7 @@ export default function OrdersView({ user }: { user: User }) {
               <input type="checkbox" checked={!hideTotalRow} onChange={toggleTotalRow} className="accent-blue-600" />
               Ligne TOTAL des articles
             </label>
-            <div className="px-2 pt-1.5 pb-1 text-[10px] text-gray-400 border-t border-gray-100 dark:border-gray-700 mt-1">Masquer un état cache uniquement son badge, pas la ligne ni la colonne. Configuration appliquée à tous les utilisateurs.</div>
+            <div className="px-2 pt-1.5 pb-1 text-[10px] text-gray-400 border-t border-gray-100 dark:border-gray-700 mt-1">Masquer un état cache uniquement son badge, pas la ligne ni la colonne. Ces préférences sont enregistrées pour votre utilisateur.</div>
           </div>
         </>}
       </div>}

@@ -85,8 +85,23 @@ export default function HomePage() {
   const [searchResults, setSearchResults] = useState<{orders: unknown[]; items: unknown[]; clients: unknown[]} | null>(null);
   const [showSearch, setShowSearch] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const restoredTabUserId = useRef<number | null>(null);
 
   const availableTabs = useMemo(() => (user ? TABS.filter(t => t.roles.includes(user.role)) : []), [user]);
+
+  useEffect(() => {
+    if (!user || restoredTabUserId.current === user.id) return;
+    restoredTabUserId.current = user.id;
+    try {
+      const storedTab = window.localStorage.getItem(`ordertrack:active-tab:${user.id}`) as Tab | null;
+      if (storedTab && availableTabs.some((tab) => tab.key === storedTab)) setActiveTab(storedTab);
+    } catch { /* stockage local indisponible : on garde l'onglet par défaut */ }
+  }, [user, availableTabs]);
+
+  useEffect(() => {
+    if (!user || restoredTabUserId.current !== user.id || !availableTabs.some((tab) => tab.key === activeTab)) return;
+    try { window.localStorage.setItem(`ordertrack:active-tab:${user.id}`, activeTab); } catch { /* non bloquant */ }
+  }, [user, activeTab, availableTabs]);
 
   useEffect(() => {
     if (user && !availableTabs.some((tab) => tab.key === activeTab)) {
