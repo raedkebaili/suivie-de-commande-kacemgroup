@@ -95,6 +95,7 @@ function computeClientBars(rows: Row[], clientsIdx: number | null): Bar[] {
 
 export default function ArchiveView({ user }: { user: User }) {
   const isAdmin = user.role === "superadmin";
+  const canEditArchive = ["superadmin", "planification", "technique"].includes(user.role);
   const { getColor } = useColors();
 
   const [sheets, setSheets] = useState<Sheet[]>([]);
@@ -122,8 +123,11 @@ export default function ArchiveView({ user }: { user: User }) {
   const [importing, setImporting] = useState(false);
   const [replaceExisting, setReplaceExisting] = useState(false);
 
-  // Éditeur de couleur de cellule (admin)
+  // Éditeurs de la ligne d'archive et de couleur de cellule
+  const [rowEditor, setRowEditor] = useState<{ rowId: number; cells: string[] } | null>(null);
+  const [savingRow, setSavingRow] = useState(false);
   const [cellEditor, setCellEditor] = useState<{ rowId: number; columnIndex: number; current?: string } | null>(null);
+  const [isTableFullscreen, setIsTableFullscreen] = useState(false);
 
   const flash = (m: string) => { setNotice(m); setTimeout(() => setNotice(""), 4000); };
 
@@ -164,6 +168,13 @@ export default function ArchiveView({ user }: { user: User }) {
   }, [sheetId, page, debounced, stateFilter]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
+
+  useEffect(() => {
+    if (!isTableFullscreen) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setIsTableFullscreen(false); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isTableFullscreen]);
 
   const doImport = async () => {
     const file = fileRef.current?.files?.[0];
@@ -224,6 +235,27 @@ export default function ArchiveView({ user }: { user: User }) {
     }
   };
 
+  const saveRowCells = async () => {
+    if (!rowEditor || !canEditArchive) return;
+    const previousRows = rows;
+    setSavingRow(true);
+    setRows(current => current.map(row => row.id === rowEditor.rowId ? { ...row, cells: rowEditor.cells } : row));
+    try {
+      const response = await apiFetch<{ row: { id: number; cells: string[]; stateOverride: string | null; state: string | null; stateSource?: string; updatedByName: string | null } }>(`/api/archive/rows/${rowEditor.rowId}`, {
+        method: "PUT",
+        body: JSON.stringify({ cells: rowEditor.cells }),
+      });
+      setRows(current => current.map(row => row.id === rowEditor.rowId ? { ...row, ...response.row } : row));
+      setRowEditor(null);
+      flash("Ligne d'archive modifiée");
+    } catch (err) {
+      setRows(previousRows);
+      setError(err instanceof Error ? err.message : "Erreur lors de la modification de la ligne");
+    } finally {
+      setSavingRow(false);
+    }
+  };
+
   const setCellColor = async (rowId: number, columnIndex: number, color: string | null) => {
     const prev = rows;
     setRows(rs => rs.map(r => {
@@ -271,13 +303,19 @@ export default function ArchiveView({ user }: { user: User }) {
   };
 
   return (
-    <div className="space-y-4">
+    <div className={`archive-content space-y-4 ${isTableFullscreen ? "fixed inset-0 z-[60] overflow-auto bg-gray-50 dark:bg-gray-950 p-3 sm:p-4" : ""}`}>
       {/* En-tête */}
       <div className="flex justify-between items-center flex-wrap gap-2">
         <div>
           <h3 className="text-lg font-semibold text-gray-800 dark:text-white">📁 Archive commandes</h3>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Anciennes commandes importées depuis Excel — consultation uniquement, séparées du suivi actif.</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Anciennes commandes importées depuis Excel — séparées du suivi actif.</p>
+          {canEditArchive && <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-1">✎ Modification des lignes autorisée pour votre rôle.</p>}
         </div>
+        <button onClick={() => setIsTableFullscreen(value => !value)}
+          className="px-3 py-2 bg-slate-800 text-white rounded-lg text-sm hover:bg-slate-700"
+          title={isTableFullscreen ? "Quitter le plein écran" : "Afficher l'archive en plein écran"}>
+          {isTableFullscreen ? "⤢ Quitter plein écran" : "⛶ Plein écran"}
+        </button>
         {isAdmin && (
           <div className="flex items-center gap-2 flex-wrap">
             <input type="file" accept=".xlsx,.xls" ref={fileRef} className="text-sm text-gray-600 dark:text-gray-300" />
@@ -380,7 +418,7 @@ export default function ArchiveView({ user }: { user: User }) {
 
           {/* Tableau reproduisant la structure Excel */}
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div className="overflow-x-auto max-h-[65vh]">
+            <div className={`overflow-x-auto mobile-scroll-x ${isTableFullscreen ? "max-h-[calc(100vh-210px)]" : "max-h-[65vh]"}`}>
               <table className="w-full text-xs border-collapse">
                 <thead className="sticky top-0 z-10">
                   <tr className="bg-gray-100 dark:bg-gray-800 border-b border-gray-300 dark:border-gray-600 text-left">
@@ -389,13 +427,14 @@ export default function ArchiveView({ user }: { user: User }) {
                       <th key={i} className="px-2 py-2 font-semibold text-gray-600 dark:text-gray-300 whitespace-nowrap border-l border-gray-200 dark:border-gray-700">{c}</th>
                     ))}
                     <th className="px-2 py-2 font-semibold text-gray-700 dark:text-gray-200 whitespace-nowrap border-l-2 border-gray-400 dark:border-gray-500 bg-gray-200 dark:bg-gray-700">État</th>
+                    {canEditArchive && <th className="px-2 py-2 font-semibold text-gray-700 dark:text-gray-200 whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {loadingRows ? (
-                    <tr><td colSpan={columns.length + 2} className="text-center py-10 text-gray-400">Chargement...</td></tr>
+                    <tr><td colSpan={columns.length + (canEditArchive ? 3 : 2)} className="text-center py-10 text-gray-400">Chargement...</td></tr>
                   ) : rows.length === 0 ? (
-                    <tr><td colSpan={columns.length + 2} className="text-center py-10 text-gray-400">Aucune ligne pour ces critères</td></tr>
+                    <tr><td colSpan={columns.length + (canEditArchive ? 3 : 2)} className="text-center py-10 text-gray-400">Aucune ligne pour ces critères</td></tr>
                   ) : rows.map((r, ri) => {
                     const rs = rowStyle(r.state);
                     return (
@@ -452,6 +491,10 @@ export default function ArchiveView({ user }: { user: User }) {
                             </span>
                           )}
                         </td>
+                        {canEditArchive && <td className="px-2 py-1 border-l border-black/10 dark:border-white/10 whitespace-nowrap">
+                          <button onClick={() => setRowEditor({ rowId: r.id, cells: [...r.cells] })}
+                            className="px-2 py-1 text-[10px] bg-blue-600 text-white rounded hover:bg-blue-700">✎ Modifier</button>
+                        </td>}
                       </tr>
                     );
                   })}
@@ -471,6 +514,37 @@ export default function ArchiveView({ user }: { user: User }) {
             </div>
           </div>
         </>
+      )}
+
+      {/* Éditeur des champs de ligne (planification, technique, superadmin) */}
+      {rowEditor && canEditArchive && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
+          <div className="absolute inset-0 bg-black/50" onClick={() => !savingRow && setRowEditor(null)} />
+          <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-6">
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <h4 className="text-base font-semibold text-gray-800 dark:text-white">Modifier la ligne d&apos;archive</h4>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Les données originales de l&apos;archive sont modifiées sans toucher aux commandes actives.</p>
+              </div>
+              <button onClick={() => setRowEditor(null)} disabled={savingRow} className="text-xl text-gray-500 hover:text-gray-800 disabled:opacity-40">×</button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {columns.map((column, columnIndex) => (
+                <label key={columnIndex} className="text-xs text-gray-700 dark:text-gray-300">
+                  <span className="block font-semibold mb-1">{column}</span>
+                  <textarea value={rowEditor.cells[columnIndex] ?? ""}
+                    onChange={event => setRowEditor(current => current ? { ...current, cells: current.cells.map((cell, index) => index === columnIndex ? event.target.value : cell) } : current)}
+                    rows={2}
+                    className="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm resize-y" />
+                </label>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => setRowEditor(null)} disabled={savingRow} className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40">Annuler</button>
+              <button onClick={saveRowCells} disabled={savingRow} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{savingRow ? "Enregistrement…" : "Enregistrer"}</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Éditeur de couleur de cellule (admin) */}

@@ -278,7 +278,7 @@ export default function HomePage() {
             <span className="hidden sm:inline font-medium">{user.fullName}</span>
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6 bg-gray-50 dark:bg-gray-950">
+        <main className="flex-1 min-w-0 overflow-y-auto p-2 sm:p-3 lg:p-6 bg-gray-50 dark:bg-gray-950">
           {activeTab === "dashboard" && <DashboardView user={user} />}
           {activeTab === "orders" && <OrdersView user={user} />}
           {activeTab === "production" && <ProductionView user={user} />}

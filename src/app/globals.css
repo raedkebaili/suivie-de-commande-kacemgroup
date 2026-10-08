@@ -218,6 +218,44 @@ html { transition: background-color 0.3s ease, color 0.3s ease; }
 .dark table { color: #e2e8f0; }
 .dark td, .dark th { color: inherit; }
 .dark .text-gray-500 { color: #94a3b8 !important; }
+
+/* Adaptation mobile : les tableaux restent consultables horizontalement sans
+   casser la largeur du contenu principal. Les contrôles conservent une cible
+   tactile confortable et les modales utilisent toute la largeur disponible. */
+.mobile-scroll-x {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+@media (max-width: 640px) {
+  .operational-content,
+  .archive-content {
+    width: 100%;
+    min-width: 0;
+  }
+  .operational-content table,
+  .archive-content table {
+    min-width: 760px;
+  }
+  .operational-content input,
+  .operational-content select,
+  .operational-content button,
+  .archive-content input,
+  .archive-content select,
+  .archive-content button {
+    min-height: 38px;
+  }
+  .operational-content .text-xs input,
+  .operational-content .text-xs select,
+  .operational-content .text-xs button,
+  .archive-content .text-xs input,
+  .archive-content .text-xs select,
+  .archive-content .text-xs button {
+    min-height: 34px;
+  }
+  .notification-ticker-inline {
+    display: none;
+  }
+}
 .dark .text-gray-600 { color: #cbd5e1 !important; }
 .dark .text-gray-700 { color: #e2e8f0 !important; }
 .dark .text-gray-800 { color: #f1f5f9 !important; }

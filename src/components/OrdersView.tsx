@@ -202,6 +202,7 @@ export default function OrdersView({ user }: { user: User }) {
   const [fs, setFs] = useState(""); const [fa, setFa] = useState(""); const [fp, setFp] = useState(""); const [fphoto, setFphoto] = useState(false);
   const [error, setError] = useState(""); const [saving, setSaving] = useState(false);
   const [expandedOrders, setExpandedOrders] = useState<Set<number>>(new Set());
+  const [isTableFullscreen, setIsTableFullscreen] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [orderImportFile, setOrderImportFile] = useState<File | null>(null);
   const [orderImportPreview, setOrderImportPreview] = useState<OrderImportPreview | null>(null);
@@ -282,6 +283,13 @@ export default function OrdersView({ user }: { user: User }) {
   const { getModifiedCellStyle, getColor } = useColors();
 
   const ce=()=>["superadmin","commercial"].includes(user.role), ct=()=>["superadmin","technique"].includes(user.role), cp=()=>["superadmin","planification"].includes(user.role), cd=user.role==="superadmin", canDeleteOrder=cd||user.role==="commercial";
+
+  useEffect(() => {
+    if (!isTableFullscreen) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setIsTableFullscreen(false); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isTableFullscreen]);
 
   // ── Accès limité du service planification ──
   // Le planificateur peut CRÉER des commandes, mais uniquement à l'état
@@ -963,7 +971,7 @@ export default function OrdersView({ user }: { user: User }) {
   const photometricLensColor = getColor("ETUDE_PHOTOMETRIQUE");
   const photometricLensTextColor = getContrastTextColor(photometricLensColor);
 
-  return (<div className="space-y-3 operational-content">
+  return (<div className={`space-y-3 operational-content ${isTableFullscreen ? "fixed inset-0 z-[60] overflow-auto bg-gray-50 dark:bg-gray-950 p-3 sm:p-4" : ""}`}>
     <div className="flex flex-wrap gap-2 items-center">
       <select value={fs} onChange={e=>setFs(e.target.value)} title="Filtrer par état commercial, état de production ou suivi du planning"
         className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">
@@ -1006,6 +1014,8 @@ export default function OrdersView({ user }: { user: User }) {
         <input type="checkbox" checked={fphoto} onChange={e=>setFphoto(e.target.checked)} className="accent-amber-600" />🔬 Études photométriques
       </label>
       <button onClick={fetchOrders} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg text-sm hover:bg-gray-300">🔄 Actualiser</button>
+      <button onClick={() => setIsTableFullscreen(value => !value)} title={isTableFullscreen ? "Quitter le plein écran" : "Afficher le tableau en plein écran"}
+        className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-sm hover:bg-slate-700">{isTableFullscreen ? "⤢ Quitter plein écran" : "⛶ Plein écran"}</button>
       <label className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer flex items-center gap-1 transition-colors ${watchLive?"bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-400":"bg-gray-100 dark:bg-gray-800 text-gray-500 border border-gray-300 dark:border-gray-600"}`}>
         <input type="checkbox" checked={watchLive} onChange={e=>setWatchLive(e.target.checked)} className="sr-only" />
         <span className={`w-2 h-2 rounded-full ${watchLive?"bg-green-500 animate-pulse":""}`}></span>📡 Live
@@ -1067,7 +1077,7 @@ export default function OrdersView({ user }: { user: User }) {
     </div>
 
     {loading?<div className="flex justify-center py-12"><svg className="animate-spin w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></div>:
-    <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="bg-gray-50 dark:bg-gray-800 border-b text-left">
+    <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden"><div className="overflow-x-auto mobile-scroll-x"><table className="w-full text-xs"><thead><tr className="bg-gray-50 dark:bg-gray-800 border-b text-left">
       <th className="px-2 py-2 w-6"></th><th className="px-2 py-2 font-semibold text-gray-600">N°</th>{isColVisible("date")&&<th className="px-2 py-2 font-semibold text-gray-600">Date</th>}<th className="px-2 py-2 font-semibold text-gray-600">Client</th>{isColVisible("agence")&&<th className="px-2 py-2 font-semibold text-gray-600">Agence</th>}{isColVisible("affaire")&&<th className="px-2 py-2 font-semibold text-gray-600">Affaire</th>}{isColVisible("priorite")&&<th className="px-2 py-2 font-semibold text-gray-600">Priorité</th>}{isColVisible("etatComm")&&<th className="px-2 py-2 font-semibold text-gray-600">État Comm.</th>}<th className="px-2 py-2 font-semibold text-gray-600">État Prod.</th>{isColVisible("creePar")&&<th className="px-2 py-2 font-semibold text-gray-600">Créé par</th>}{isColVisible("modifiePar")&&<th className="px-2 py-2 font-semibold text-gray-600">Modifié par</th>}<th className="px-2 py-2"></th>
     </tr></thead><tbody>
     {sortedOrders.length===0?<tr><td colSpan={visibleColCount} className="text-center py-12 text-black">Aucune commande</td></tr>:
