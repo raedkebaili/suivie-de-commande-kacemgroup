@@ -7,7 +7,7 @@ import { getUserFromHeaders } from "@/lib/auth";
 
 export async function GET(request: NextRequest) {
   const u = await getUserFromHeaders(request);
-  if (!u || u.role !== "superadmin") return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+  if (!u || !["superadmin", "gerant"].includes(u.role)) return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
   
   const { searchParams } = new URL(request.url);
   const limit = parseInt(searchParams.get("limit") || "100");

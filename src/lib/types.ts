@@ -1,4 +1,4 @@
-export type Role = "superadmin" | "commercial" | "technique" | "planification" | "consultant_prod" | "recouvrement" | "acces_agence";
+export type Role = "superadmin" | "commercial" | "technique" | "planification" | "consultant_prod" | "recouvrement" | "acces_agence" | "gerant";
 // Priorités : 10 niveaux ordonnés (P1…P10) + NORMALE.
 // Les valeurs historiques restent acceptées (aucune migration de données).
 export type Priority =
@@ -79,7 +79,7 @@ export const PRIORITY_LABELS: Record<string, string> = {
   P6: "Priorité 6", P7: "Priorité 7", P8: "Priorité 8", P9: "Priorité 9", P10: "Priorité 10",
   PREVISION: "Prévision", NORMALE: "Normale", URGENTE: "Urgente", TRES_URGENTE: "Très Urgente",
 };
-export const ROLE_LABELS: Record<string, string> = { superadmin: "Super Admin", commercial: "Commercial", technique: "Technique", planification: "Planification", consultant_prod: "Consultant Prod", recouvrement: "Recouvrement", acces_agence: "Accès agence" };
+export const ROLE_LABELS: Record<string, string> = { superadmin: "Super Admin", commercial: "Commercial", technique: "Technique", planification: "Planification", consultant_prod: "Consultant Prod", recouvrement: "Recouvrement", acces_agence: "Accès agence", gerant: "Gérant" };
 
 // ── Recouvrement ──
 export type RecouvrementState = { id: number; key: string; label: string; description: string | null; colorKey: string; sortOrder: number; active: boolean };

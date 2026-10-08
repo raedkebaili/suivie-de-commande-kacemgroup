@@ -40,23 +40,25 @@ const StorageView = dynamic(() => import("@/components/StorageView"), { loading:
 import ForcePasswordChange from "@/components/ForcePasswordChange";
 import type { Notification } from "@/lib/types";
 import { startBackupScheduler, stopBackupScheduler } from "@/lib/backup-scheduler";
+import { GERANT_ALLOWED_TABS, GERANT_ROLE } from "@/lib/gerant-access";
 
 function formatNotifDate(d: string) { if (!d) return ""; const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(d); if (m) return `${m[3]}/${m[2]} ${m[4]}:${m[5]}`; return d.substring(0,16); }
 
 type Tab = "dashboard" | "orders" | "production" | "expedition" | "expeditionPlanning" | "matieres" | "agencies" | "clients" | "users" | "watchdog" | "backup" | "colors" | "recouvrement" | "archive" | "planning" | "factories" | "telegestion" | "storage";
+const gerantAccess = (tab: Tab) => GERANT_ALLOWED_TABS.includes(tab as (typeof GERANT_ALLOWED_TABS)[number]) ? [GERANT_ROLE] : [];
 
 // Hoisted outside the component: this list is static and doesn't need to be
 // recreated on every render. Also reused by the Electron shortcut handler to
 // check whether the current user's role is allowed to jump to a given tab.
 const TABS: { key: Tab; label: string; roles: string[] }[] = [
   { key: "dashboard", label: "Tableau de bord", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement"] },
-  { key: "orders", label: "Commandes", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement", "acces_agence"] },
+  { key: "orders", label: "Commandes", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement", "acces_agence", ...gerantAccess("orders")] },
   // Archive : consultation ouverte à tous les rôles authentifiés
   { key: "archive", label: "Archive commandes", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement"] },
   { key: "production", label: "Production", roles: ["superadmin", "planification"] },
-  { key: "expedition", label: "Expédition", roles: ["superadmin", "planification"] },
-  { key: "expeditionPlanning", label: "Planning d'expédition", roles: ["superadmin", "planification"] },
-  { key: "planning", label: "Planning production", roles: ["superadmin", "planification", "consultant_prod"] },
+  { key: "expedition", label: "Expédition", roles: ["superadmin", "planification", ...gerantAccess("expedition")] },
+  { key: "expeditionPlanning", label: "Planning d'expédition", roles: ["superadmin", "planification", ...gerantAccess("expeditionPlanning")] },
+  { key: "planning", label: "Planning production", roles: ["superadmin", "planification", "consultant_prod", ...gerantAccess("planning")] },
   { key: "factories", label: "Usines", roles: ["superadmin", "planification"] },
   { key: "matieres", label: "Matières", roles: ["superadmin", "technique"] },
   { key: "telegestion", label: "Télégestion", roles: ["superadmin", "technique"] },

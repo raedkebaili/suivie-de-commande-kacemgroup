@@ -193,7 +193,7 @@ export default function DocumentsPanel({ entity, entityId, user, canAdd, title, 
   useEffect(() => { load(); }, [load]);
 
   const isAdmin = user.role === "superadmin";
-  const canUnlink = (doc: LinkedDocument) => isAdmin || doc.uploadedById === user.id;
+  const canUnlink = (doc: LinkedDocument) => user.role !== "gerant" && (isAdmin || doc.uploadedById === user.id);
 
   const unlink = async (doc: LinkedDocument) => {
     if (!window.confirm(`Retirer « ${doc.fileName} » de cette ${entity === "order" ? "affaire" : "étude"} ?\nLe fichier restera disponible dans l'onglet Stockage.`)) return;

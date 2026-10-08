@@ -6,6 +6,8 @@ import { and, eq, inArray } from "drizzle-orm";
 import { hashPassword, logActivity, getUserFromHeaders } from "@/lib/auth";
 import { passwordPolicyError } from "@/lib/password-policy";
 
+const ALLOWED_ROLES = ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement", "acces_agence", "gerant"] as const;
+
 async function validateAgencyIds(raw: unknown): Promise<number[] | string> {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) return "La liste des agences est invalide";
@@ -29,7 +31,10 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const body = await request.json();
   const updates: Record<string, unknown> = {};
   if (body.username !== undefined) updates.username = body.username;
-  if (body.role !== undefined) updates.role = body.role;
+  if (body.role !== undefined) {
+    if (!ALLOWED_ROLES.includes(body.role as (typeof ALLOWED_ROLES)[number])) return NextResponse.json({ error: "Rôle invalide" }, { status: 400 });
+    updates.role = body.role;
+  }
   if (body.fullName !== undefined) updates.fullName = body.fullName;
   if (body.active !== undefined) updates.active = body.active;
   if (body.password) {

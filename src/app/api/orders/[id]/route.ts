@@ -51,7 +51,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const a = await auth(request); if (!a.ok) return NextResponse.json({ error: a.error }, { status: a.status });
-  if (a.user.role === "acces_agence") return NextResponse.json({ error: "Le rôle Accès agence est limité à la consultation" }, { status: 403 });
+  if (["acces_agence", "gerant"].includes(a.user.role)) return NextResponse.json({ error: "Ce rôle est limité à la consultation" }, { status: 403 });
   const { id } = await params; const oid = parseInt(id);
   const [existing] = await db.select().from(orders).where(eq(orders.id, oid)).limit(1);
   if (!existing) return NextResponse.json({ error: "Non trouvée" }, { status: 404 });

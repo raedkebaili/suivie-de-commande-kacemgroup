@@ -17,6 +17,7 @@ const ALLOWED_MIME = ["application/pdf"];
 export async function POST(request: NextRequest) {
   const user = await getUserFromHeaders(request);
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  if (user.role === "gerant") return NextResponse.json({ error: "Accès en lecture seule" }, { status: 403 });
 
   try {
     const fd = await request.formData();

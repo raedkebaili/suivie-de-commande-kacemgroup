@@ -10,6 +10,7 @@ import { friendlyDriveError, getDriveClient } from "@/lib/google-drive";
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getUserFromHeaders(request);
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  if (user.role === "gerant") return NextResponse.json({ error: "Accès en lecture seule" }, { status: 403 });
 
   const { id } = await params;
   try {
@@ -59,6 +60,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getUserFromHeaders(request);
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  if (user.role === "gerant") return NextResponse.json({ error: "Accès en lecture seule" }, { status: 403 });
 
   const { id } = await params;
   try {

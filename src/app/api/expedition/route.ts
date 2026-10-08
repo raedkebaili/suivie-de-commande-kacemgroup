@@ -9,7 +9,7 @@ import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
 
 export async function GET(request: NextRequest) {
   const user = await getUserFromHeaders(request);
-  if (!user || !["superadmin", "planification"].includes(user.role))
+  if (!user || !["superadmin", "planification", "gerant"].includes(user.role))
     return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
 
   const items = await db.select({

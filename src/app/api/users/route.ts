@@ -6,6 +6,8 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { hashPassword, logActivity, getUserFromHeaders } from "@/lib/auth";
 import { passwordPolicyError } from "@/lib/password-policy";
 
+const ALLOWED_ROLES = ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement", "acces_agence", "gerant"] as const;
+
 async function validateAgencyIds(raw: unknown): Promise<number[] | string> {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) return "La liste des agences est invalide";
@@ -42,6 +44,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { username, password, role, fullName } = body;
   if (!username || !password || !role || !fullName) return NextResponse.json({ error: "Tous les champs requis" }, { status: 400 });
+  if (!ALLOWED_ROLES.includes(role as (typeof ALLOWED_ROLES)[number])) return NextResponse.json({ error: "Rôle invalide" }, { status: 400 });
   const policyError = passwordPolicyError(String(password));
   if (policyError) return NextResponse.json({ error: `Mot de passe trop faible : ${policyError}` }, { status: 400 });
   const requestedAgencyIds = await validateAgencyIds(body.agencyIds);

@@ -37,7 +37,8 @@ type Plan = {
   status: string;
 };
 
-export default function ExpeditionView({ user: _user }: { user: User }) {
+export default function ExpeditionView({ user }: { user: User }) {
+  const canManage = user.role === "superadmin" || user.role === "planification";
   const [items, setItems] = useState<Item[]>([]);
   const [batches, setBatches] = useState<ExpeditionBatch[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -203,12 +204,12 @@ export default function ExpeditionView({ user: _user }: { user: User }) {
                         <span className="text-black">Prod: <b>{item.producedQty || 0}</b></span>
                         <span className="text-black">Livré: <b>{item.deliveredQty || 0}</b></span>
                         <span className="text-black font-bold">Reste: <b>{remaining}</b></span>
-                        {!cancelled && itemPlans.length > 0 && <select value={defaultPlanId} onChange={(event) => setSelectedPlans(current => ({ ...current, [item.itemId]: event.target.value }))} className="max-w-48 px-1 py-1 border border-blue-400 rounded text-xs bg-white text-black" title="Planning d'expédition à imputer">
+                        {canManage && !cancelled && itemPlans.length > 0 && <select value={defaultPlanId} onChange={(event) => setSelectedPlans(current => ({ ...current, [item.itemId]: event.target.value }))} className="max-w-48 px-1 py-1 border border-blue-400 rounded text-xs bg-white text-black" title="Planning d'expédition à imputer">
                           <option value="">Sans planning</option>
                           {itemPlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.driverName} · {plan.loadedQty}/{plan.plannedQty}</option>)}
                         </select>}
 
-                        {!delivered && !cancelled && (
+                        {canManage && !delivered && !cancelled && (
                           <>
                             <input type="number" min={1} max={availableToDeliver} placeholder="Qté" value={batchQtys[item.itemId] || ""} onChange={event => setBatchQtys(current => ({ ...current, [item.itemId]: event.target.value }))} className="w-14 px-1 py-1 border border-black/30 rounded text-sm bg-white text-black" />
                             <input type="date" value={batchDates[item.itemId] || new Date().toISOString().split("T")[0]} onChange={event => setBatchDates(current => ({ ...current, [item.itemId]: event.target.value }))} className="px-1 py-1 border border-black/30 rounded text-sm bg-white text-black w-28" />

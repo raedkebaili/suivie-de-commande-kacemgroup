@@ -42,6 +42,7 @@ const fmtDate = (d: string | null | undefined) => {
  */
 export default function StorageView({ user }: { user: User }) {
   const isAdmin = user.role === "superadmin";
+  const canManageFiles = user.role !== "gerant";
 
   const [cfg, setCfg] = useState<Cfg | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -250,6 +251,7 @@ export default function StorageView({ user }: { user: User }) {
       <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-4 flex items-start justify-between flex-wrap gap-3">
         <div>
           <h3 className="text-lg font-semibold text-gray-800 dark:text-white">🗄️ Stockage</h3>
+          {user.role === "gerant" && <p className="text-xs font-medium text-amber-700 dark:text-amber-400 mt-1">Consultation, téléchargement et aperçu uniquement</p>}
           <div className="flex items-center gap-3 flex-wrap mt-1 text-xs">
             <span className={`font-bold ${connected ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
               {connected ? "🟢 Connecté" : cfg?.status === "expired" ? "🔴 Connexion expirée" : "🔴 Non connecté"}
@@ -405,9 +407,11 @@ export default function StorageView({ user }: { user: User }) {
             </select>
             <button onClick={() => { loadFiles(); loadStats(); }} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg text-sm text-gray-700 dark:text-gray-200">🔄 Actualiser</button>
             <div className="flex-1" />
-            <button onClick={createFolder} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">📁 Nouveau dossier</button>
-            <input type="file" accept="application/pdf,.pdf" multiple ref={fileRef} className="hidden" onChange={e => e.target.files && doUpload(e.target.files)} />
-            <button onClick={() => fileRef.current?.click()} disabled={busy} className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">+ Ajouter des fichiers</button>
+            {canManageFiles && <>
+              <button onClick={createFolder} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">📁 Nouveau dossier</button>
+              <input type="file" accept="application/pdf,.pdf" multiple ref={fileRef} className="hidden" onChange={e => e.target.files && doUpload(e.target.files)} />
+              <button onClick={() => fileRef.current?.click()} disabled={busy} className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">+ Ajouter des fichiers</button>
+            </>}
           </div>
 
           {/* Fil d'Ariane + sélection */}
@@ -425,7 +429,7 @@ export default function StorageView({ user }: { user: User }) {
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">{selected.size} fichier(s) sélectionné(s)</span>
                 <button onClick={() => files.filter(f => selected.has(f.id) && !f.isFolder).forEach(f => download(f))} className="px-3 py-1 text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-lg">Télécharger</button>
-                <button onClick={deleteSelected} className="px-3 py-1 text-xs bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg">Supprimer</button>
+                {canManageFiles && <button onClick={deleteSelected} className="px-3 py-1 text-xs bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg">Supprimer</button>}
               </div>
             )}
             {isAdmin && selected.size === 0 && (stats?.fileCount ?? 0) > 0 && (
@@ -442,7 +446,7 @@ export default function StorageView({ user }: { user: User }) {
                 {busy && <span className="text-blue-600 dark:text-blue-400">{uploadState.total - uploadState.success - uploadState.errors.length} en cours</span>}
                 {uploadState.errors.length > 0 && <span className="text-red-600 dark:text-red-400">{uploadState.errors.length} erreur(s)</span>}
                 <div className="flex-1" />
-                {uploadState.errors.length > 0 && <button onClick={() => fileRef.current?.click()} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 rounded">Réessayer les échecs</button>}
+                {canManageFiles && uploadState.errors.length > 0 && <button onClick={() => fileRef.current?.click()} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 rounded">Réessayer les échecs</button>}
                 <button onClick={() => setUploadState(null)} className="text-gray-400 hover:text-gray-600">✕</button>
               </div>
               {uploadState.errors.map((e, i) => <div key={i} className="text-[11px] text-red-600 dark:text-red-400 mt-1">✗ {e.name} — {e.reason}</div>)}
@@ -451,9 +455,9 @@ export default function StorageView({ user }: { user: User }) {
 
           {/* Zone de dépôt + table */}
           <div
-            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files?.length) doUpload(e.dataTransfer.files); }}
+            onDragOver={canManageFiles ? (e => { e.preventDefault(); setDragOver(true); }) : undefined}
+            onDragLeave={canManageFiles ? (() => setDragOver(false)) : undefined}
+            onDrop={canManageFiles ? (e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files?.length) doUpload(e.dataTransfer.files); }) : undefined}
             className={`bg-white dark:bg-gray-900 rounded-2xl shadow-sm border-2 overflow-hidden transition-colors ${dragOver ? "border-blue-500 border-dashed bg-blue-50/50 dark:bg-blue-900/10" : "border-gray-200 dark:border-gray-700"}`}
           >
             <div className="overflow-x-auto">
@@ -475,7 +479,7 @@ export default function StorageView({ user }: { user: User }) {
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                   {files.length === 0 ? (
                     <tr><td colSpan={6} className="text-center py-12 text-gray-400 text-sm">
-                      {debounced.length >= 2 ? "Aucun résultat" : "Dossier vide — glissez-déposez vos PDF ici"}
+                      {debounced.length >= 2 ? "Aucun résultat" : canManageFiles ? "Dossier vide — glissez-déposez vos PDF ici" : "Dossier vide"}
                     </td></tr>
                   ) : files.map(f => (
                     <tr key={f.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
@@ -496,9 +500,11 @@ export default function StorageView({ user }: { user: User }) {
                           <button onClick={() => setPreview(f)} title="Visualiser" className="px-2 py-1 text-xs bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 rounded">👁</button>
                           <button onClick={() => download(f)} title="Télécharger" className="ml-1 px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded">⬇</button>
                         </>}
-                        <button onClick={() => rename(f)} title="Renommer" className="ml-1 px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded">✏️</button>
-                        <button onClick={() => move(f)} title="Déplacer" className="ml-1 px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded">↗</button>
-                        <button onClick={() => removeFile(f)} title="Supprimer" className="ml-1 px-2 py-1 text-xs bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded">🗑</button>
+                        {canManageFiles && <>
+                          <button onClick={() => rename(f)} title="Renommer" className="ml-1 px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded">✏️</button>
+                          <button onClick={() => move(f)} title="Déplacer" className="ml-1 px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded">↗</button>
+                          <button onClick={() => removeFile(f)} title="Supprimer" className="ml-1 px-2 py-1 text-xs bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded">🗑</button>
+                        </>}
                       </td>
                     </tr>
                   ))}
