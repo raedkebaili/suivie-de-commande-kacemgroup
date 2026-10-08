@@ -14,7 +14,7 @@ import {
   normalizeImportedPriority,
   suggestOrderImportMapping,
 } from "@/lib/order-import-fields";
-import { inferCommercialStatusFromExcel, inferProductionStatusFromExcel, isExcelDeliveredFill, isExcelReadyFill, normalizeExcelFillColor, selectExcelGroupColor } from "@/lib/order-import-colors";
+import { inferProductionStatusFromExcel, isExcelDeliveredFill, isExcelReadyFill, normalizeExcelFillColor, selectExcelGroupColor } from "@/lib/order-import-colors";
 
 type Merge = { s: { r: number; c: number }; e: { r: number; c: number } };
 type WorksheetLike = { [key: string]: unknown; "!merges"?: Merge[]; "!rows"?: unknown[]; "!ref"?: string };
@@ -470,12 +470,9 @@ export async function POST(request: NextRequest) {
       const clientValue = firstSourceValue(group.rows, "client", mapping);
       const agencyValue = firstSourceValue(group.rows, "agency", mapping);
       const groupColor = selectExcelGroupColor(group.rows.map((row) => row.sheet.rowColors[row.rowIndex]));
-      const commercialValue = firstSourceValue(group.rows, "commercialStatus", mapping) || firstSourceValue(group.rows, "productionStatus", mapping);
-      const inferredStatus = inferCommercialStatusFromExcel(commercialValue, groupColor);
-      // L'ancien suivi utilise PREVISION comme état neutre de saisie. Pour
-      // l'import des commandes historiques, toute prévision détectée devient
-      // directement un bon de commande ; SUR_STOCK reste inchangé.
-      const status = inferredStatus === "PREVISION" ? "BON_COMMANDE" : inferredStatus;
+      // Le modèle historique ne doit pas créer de statut commercial
+      // PREVISION ou SUR_STOCK : toute commande importée est un bon de commande.
+      const status = "BON_COMMANDE";
       if (!clientValue) { skipped.push({ orderNumber: group.orderNumber, reason: "Client vide" }); continue; }
       if (!agencyValue) { skipped.push({ orderNumber: group.orderNumber, reason: "Agence vide" }); continue; }
       const inconsistentReference = group.rows.some((row) =>
