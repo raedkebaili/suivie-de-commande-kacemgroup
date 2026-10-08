@@ -25,4 +25,24 @@ describe("modèle et mappage import commandes", () => {
     expect(mapping.electricalClass).toBe("Classe");
     expect(mapping.productionStatus).toBe("Etat");
   });
+
+  it("reconnaît les intitulés du modèle historique fourni", () => {
+    const mapping = suggestOrderImportMapping([
+      "N° Commande", "Priorité", "Articles", "Date commande", "quantité", "Clients", "Agence",
+      "PCB", "Temp. Coule", "lentilles", "Driver", "classe", "Accesoires", "Nbre Profilet",
+      "Spécifications Techniques", "NOTE", "Unité de production", "Date prévu de chargement",
+      "quantité livré", "date de livraison", "reste a livre",
+    ]);
+    expect(mapping.orderNumber).toBe("N° Commande");
+    expect(mapping.articleName).toBe("Articles");
+    expect(mapping.quantity).toBe("quantité");
+    expect(mapping.colorTemperature).toBe("Temp. Coule");
+    expect(mapping.lens).toBe("lentilles");
+    expect(mapping.accessories).toBe("Accesoires");
+    expect(mapping.otherTechSpecs).toBe("Spécifications Techniques");
+    expect(mapping.plannedLoadingDate).toBe("Date prévu de chargement");
+    expect(mapping.deliveredQty).toBe("quantité livré");
+    expect(mapping.deliveryDate).toBe("date de livraison");
+    expect(mapping.remainingQty).toBe("reste a livre");
+  });
 });
