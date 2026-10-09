@@ -1,9 +1,10 @@
 "use client";
+import { type ShortcutRequest } from "@/lib/keyboard-shortcuts";
 import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import type { Agency, User } from "@/lib/types";
 
-export default function AgenciesView({ user }: { user: User }) {
+export default function AgenciesView({ user, pendingAction, onPendingActionHandled }: { user: User; pendingAction?: ShortcutRequest | null; onPendingActionHandled?: () => void }) {
   const [items, setItems] = useState<Agency[]>([]);
   const [loading, setLoading] = useState(true);
   const [show, setShow] = useState(false);
@@ -22,8 +23,17 @@ export default function AgenciesView({ user }: { user: User }) {
       setShow(false); reset(); fetch(); } catch (err: unknown) { setError(err instanceof Error ? err.message : "Erreur"); }
   };
   const del = async (id: number) => { if (!confirm("Supprimer ?")) return; await apiFetch(`/api/agencies/${id}`, { method: "DELETE" }); fetch(); };
+  // Raccourci clavier demandé par la page — voir src/lib/keyboard-shortcuts.ts
+  useEffect(() => {
+    if (pendingAction?.action !== "new-agency") return;
+    onPendingActionHandled?.();
+    reset(); setShow(true);
+    // Fonctions locales recréées à chaque rendu : seule la demande pilote l'effet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAction]);
+
   return <div className="space-y-4">
-    <div className="flex justify-between"><h3 className="text-lg font-semibold text-gray-800 dark:text-white">Agences</h3><button onClick={() => { reset(); setShow(true); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">+ Nouvelle</button></div>
+    <div className="flex justify-between"><h3 className="text-lg font-semibold text-gray-800 dark:text-white">Agences</h3><button onClick={() => { reset(); setShow(true); }} title="Nouvelle agence (Alt+G)" className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">+ Nouvelle</button></div>
     {loading ? <div className="flex justify-center py-12"><svg className="animate-spin w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg></div> :
       <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden"><table className="w-full text-sm"><thead><tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700"><th className="text-left px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Code</th><th className="text-left px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Nom</th><th className="text-left px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Adresse</th><th className="text-right px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Actions</th></tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-800">
         {items.map(a => <tr key={a.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50"><td className="px-4 py-3 font-mono text-xs font-bold text-blue-600 dark:text-blue-400">{a.code}</td><td className="px-4 py-3 font-medium text-gray-800 dark:text-white">{a.name}</td><td className="px-4 py-3 text-gray-500">{a.address || "-"}</td><td className="px-4 py-3 text-right"><button onClick={() => open(a)} className="px-3 py-1.5 text-xs font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-lg hover:bg-blue-100">Modifier</button>{canDel && <button onClick={() => del(a.id)} className="ml-1 px-3 py-1.5 text-xs font-medium bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-100">Suppr.</button>}</td></tr>)}

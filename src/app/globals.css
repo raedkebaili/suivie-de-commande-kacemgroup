@@ -350,3 +350,11 @@ html { transition: background-color 0.3s ease, color 0.3s ease; }
   .operational-content { color: #000 !important; }
   .operational-content * { color: #000 !important; }
 }
+
+/* Plein écran d'un tableau (Commandes, Archive) : en-tête de colonnes toujours visible */
+.table-fullscreen thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: inherit;
+}

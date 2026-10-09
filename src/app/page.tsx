@@ -41,6 +41,11 @@ import ForcePasswordChange from "@/components/ForcePasswordChange";
 import type { Notification } from "@/lib/types";
 import { startBackupScheduler, stopBackupScheduler } from "@/lib/backup-scheduler";
 import { GERANT_ALLOWED_TABS, GERANT_ROLE } from "@/lib/gerant-access";
+import { isEditableTarget, resolveShortcut, type ShortcutRequest } from "@/lib/keyboard-shortcuts";
+import KeyboardShortcutsHelp from "@/components/KeyboardShortcutsHelp";
+
+/** Onglets où le plein écran d'un tableau a un sens. */
+const FULLSCREEN_TABS = ["orders", "archive"];
 
 function formatNotifDate(d: string) { if (!d) return ""; const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(d); if (m) return `${m[3]}/${m[2]} ${m[4]}:${m[5]}`; return d.substring(0,16); }
 
@@ -88,6 +93,9 @@ export default function HomePage() {
   const [showSearch, setShowSearch] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const restoredTabUserId = useRef<number | null>(null);
+  const [pendingAction, setPendingAction] = useState<ShortcutRequest | null>(null);
+  const shortcutIdRef = useRef(0);
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
 
   const availableTabs = useMemo(() => (user ? TABS.filter(t => t.roles.includes(user.role)) : []), [user]);
 
@@ -104,6 +112,35 @@ export default function HomePage() {
     if (!user || restoredTabUserId.current !== user.id || !availableTabs.some((tab) => tab.key === activeTab)) return;
     try { window.localStorage.setItem(`ordertrack:active-tab:${user.id}`, activeTab); } catch { /* non bloquant */ }
   }, [user, activeTab, availableTabs]);
+
+  // Une demande de raccourci ne doit pas survivre à un changement d'onglet.
+  useEffect(() => {
+    if (pendingAction && pendingAction.tab !== activeTab) setPendingAction(null);
+  }, [activeTab, pendingAction]);
+
+  const consumeShortcut = useCallback(() => setPendingAction(null), []);
+
+  // Raccourcis clavier globaux (Alt+lettre, Alt+chiffre, /, F1) — voir src/lib/keyboard-shortcuts.ts
+  useEffect(() => {
+    if (!user || user.mustChangePassword) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const def = resolveShortcut(event, { editable: isEditableTarget(event.target) });
+      if (!def) return;
+      if (def.tab && !availableTabs.some((tab) => tab.key === def.tab)) return;
+      if (def.action === "toggle-fullscreen" && !FULLSCREEN_TABS.includes(activeTab)) return;
+
+      event.preventDefault();
+      if (def.action === "show-help") { setShowShortcutHelp((open) => !open); return; }
+      if (def.action === "focus-search") { searchInputRef.current?.focus(); searchInputRef.current?.select(); return; }
+      if (def.tab) setActiveTab(def.tab as Tab);
+      if (def.action) {
+        shortcutIdRef.current += 1;
+        setPendingAction({ id: shortcutIdRef.current, action: def.action, tab: def.tab ?? activeTab });
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [user, availableTabs, activeTab]);
 
   useEffect(() => {
     if (user && !availableTabs.some((tab) => tab.key === activeTab)) {
@@ -290,6 +327,8 @@ export default function HomePage() {
               </div>
             )}
           </div>
+          <button type="button" onClick={() => setShowShortcutHelp(true)} title="Raccourcis clavier (F1)" aria-label="Raccourcis clavier"
+            className="hidden sm:flex items-center justify-center w-8 h-8 rounded-lg border border-gray-300 dark:border-gray-600 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">⌨</button>
           <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
             <span className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 flex items-center justify-center font-bold text-sm">{user.fullName.charAt(0)}</span>
             <span className="hidden sm:inline font-medium">{user.fullName}</span>
@@ -297,18 +336,18 @@ export default function HomePage() {
         </header>
         <main className="flex-1 min-w-0 overflow-y-auto p-2 sm:p-3 lg:p-6 bg-gray-50 dark:bg-gray-950">
           {activeTab === "dashboard" && <DashboardView user={user} />}
-          {activeTab === "orders" && <OrdersView user={user} />}
+          {activeTab === "orders" && <OrdersView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} />}
           {activeTab === "production" && <ProductionView user={user} />}
           {activeTab === "expedition" && <ExpeditionView user={user} />}
-          {activeTab === "expeditionPlanning" && <ExpeditionPlanningView user={user} />}
-          {activeTab === "planning" && <PlanningProductionView user={user} />}
-          {activeTab === "factories" && <FactoriesView user={user} />}
+          {activeTab === "expeditionPlanning" && <ExpeditionPlanningView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} />}
+          {activeTab === "planning" && <PlanningProductionView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} />}
+          {activeTab === "factories" && <FactoriesView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} />}
           {activeTab === "matieres" && <MatiereView user={user} />}
           {activeTab === "telegestion" && <TelegestionView user={user} />}
-          {activeTab === "agencies" && <AgenciesView user={user} />}
-          {activeTab === "clients" && <ClientsView user={user} />}
+          {activeTab === "agencies" && <AgenciesView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} />}
+          {activeTab === "clients" && <ClientsView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} />}
           {activeTab === "recouvrement" && <RecouvrementView user={user} />}
-          {activeTab === "archive" && <ArchiveView user={user} />}
+          {activeTab === "archive" && <ArchiveView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} />}
           {activeTab === "storage" && <StorageView user={user} />}
           {activeTab === "users" && <UsersView user={user} />}
           {activeTab === "watchdog" && <WatchdogView user={user} />}
@@ -316,6 +355,7 @@ export default function HomePage() {
           {activeTab === "colors" && <ColorsView user={user} />}
         </main>
       </div>
+      {showShortcutHelp && <KeyboardShortcutsHelp allowedTabs={availableTabs.map((tab) => tab.key)} onClose={() => setShowShortcutHelp(false)} />}
     </div>
   );
 }

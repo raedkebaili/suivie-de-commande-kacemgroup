@@ -66,7 +66,7 @@ Après une déconnexion automatique, se reconnecter. Si le poste est partagé, v
 - Le mode clair/sombre est disponible dans la barre latérale et est mémorisé dans le profil.
 - Le tableau des commandes mémorise par utilisateur les filtres, la recherche, le tri, les colonnes et l’affichage de la ligne TOTAL. Ces préférences ne sont pas une configuration globale.
 - L’onglet actif est mémorisé pour chaque utilisateur dans le navigateur et restauré après actualisation, si l’onglet est encore autorisé par son rôle.
-- Le bouton **Plein écran** du tableau reste visible en thème clair et sombre ; la touche `Échap` permet de quitter le plein écran.
+- Le bouton **Plein écran** (Commandes et Archive) affiche uniquement le tableau sur tout l’écran, en thème clair comme sombre ; `Échap`, le bouton ✕ en haut à droite ou la sortie du plein écran du navigateur reviennent à l’affichage normal. Raccourci : `Alt+M`.
 
 ---
 
@@ -204,6 +204,32 @@ Cliquer sur un résultat ouvre la vue concernée. Pour un rôle Accès agence, l
 ### Notifications
 
 Les notifications sont personnelles. Elles signalent notamment une étude photométrique, une livraison, une annulation ou un changement métier. Utiliser la cloche pour consulter les non-lues et marquer une notification comme lue. Une notification ne remplace pas le contrôle de la commande source.
+
+### Raccourcis clavier
+
+Les raccourcis utilisent `Alt` + une touche. Seuls les raccourcis des onglets auxquels vous avez accès sont actifs. La liste complète s’affiche avec `F1` (ou le bouton ⌨ de l’en-tête).
+
+| Action | Raccourci |
+|---|---|
+| Nouvelle commande | `Alt+N` |
+| Nouvelle étude photométrique | `Alt+I` |
+| Planifier des articles (planning de production) | `Alt+P` |
+| Planifier une expédition | `Alt+X` |
+| Nouveau client | `Alt+C` |
+| Nouvelle agence | `Alt+G` |
+| Nouvelle usine | `Alt+U` |
+| Tableau en plein écran (Commandes, Archive) | `Alt+M` |
+| Tableau de bord / Commandes / Archive / Recouvrement | `Alt+1` / `Alt+O` / `Alt+A` / `Alt+R` |
+| Rechercher (hors champ de saisie) | `/` |
+| Aide des raccourcis | `F1` |
+
+Bon à savoir :
+
+- les raccourcis Alt ne doivent pas être utilisés en même temps que `Ctrl` ou `Maj` ;
+- un raccourci de création ouvre le formulaire de l’onglet concerné, avec les mêmes règles de droits que le bouton ;
+- si votre navigateur réserve déjà une combinaison (par exemple certains `Alt` de menus), utilisez le bouton correspondant à l’écran.
+
+---
 
 ### Préférences du tableau
 

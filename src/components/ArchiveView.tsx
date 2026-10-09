@@ -1,5 +1,7 @@
 "use client";
 
+import TableFullscreen from "@/components/TableFullscreen";
+import { type ShortcutRequest } from "@/lib/keyboard-shortcuts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
@@ -93,7 +95,7 @@ function computeClientBars(rows: Row[], clientsIdx: number | null): Bar[] {
   return bars;
 }
 
-export default function ArchiveView({ user }: { user: User }) {
+export default function ArchiveView({ user, pendingAction, onPendingActionHandled }: { user: User; pendingAction?: ShortcutRequest | null; onPendingActionHandled?: () => void }) {
   const isAdmin = user.role === "superadmin";
   const canEditArchive = ["superadmin", "planification", "technique"].includes(user.role);
   const { getColor } = useColors();
@@ -169,12 +171,12 @@ export default function ArchiveView({ user }: { user: User }) {
 
   useEffect(() => { loadRows(); }, [loadRows]);
 
+  // Raccourci Alt+M demandé par la page : bascule le plein écran du tableau
   useEffect(() => {
-    if (!isTableFullscreen) return;
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setIsTableFullscreen(false); };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isTableFullscreen]);
+    if (pendingAction?.action !== "toggle-fullscreen") return;
+    onPendingActionHandled?.();
+    setIsTableFullscreen(value => !value);
+  }, [pendingAction, onPendingActionHandled]);
 
   const doImport = async () => {
     const file = fileRef.current?.files?.[0];
@@ -302,123 +304,13 @@ export default function ArchiveView({ user }: { user: User }) {
     return null;
   };
 
-  return (
-    <div className={`archive-content space-y-4 ${isTableFullscreen ? "fixed inset-0 z-[60] overflow-auto bg-gray-50 dark:bg-gray-950 p-3 sm:p-4" : ""}`}>
-      {/* En-tête */}
-      <div className="flex justify-between items-center flex-wrap gap-2">
-        <div>
-          <h3 className="text-lg font-semibold text-gray-800 dark:text-white">📁 Archive commandes</h3>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Anciennes commandes importées depuis Excel — séparées du suivi actif.</p>
-          {canEditArchive && <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-1">✎ Modification des lignes autorisée pour votre rôle.</p>}
-        </div>
-        <button onClick={() => setIsTableFullscreen(value => !value)}
-          className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-          title={isTableFullscreen ? "Quitter le plein écran" : "Afficher l'archive en plein écran"}>
-          {isTableFullscreen ? "⤢ Quitter plein écran" : "⛶ Plein écran"}
-        </button>
-        {isAdmin && (
-          <div className="flex items-center gap-2 flex-wrap">
-            <input type="file" accept=".xlsx,.xls" ref={fileRef} className="text-sm text-gray-600 dark:text-gray-300" />
-            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300 cursor-pointer" title="Remplacer une feuille portant le même nom au lieu de créer un doublon">
-              <input type="checkbox" checked={replaceExisting} onChange={e => setReplaceExisting(e.target.checked)} className="accent-blue-600" />
-              Remplacer si existante
-            </label>
-            <button onClick={doImport} disabled={importing}
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 disabled:opacity-50">
-              {importing ? "Import en cours..." : "📥 Importer une archive Excel"}
-            </button>
-            {sheets.length > 0 && (
-              <button onClick={deleteAllSheets}
-                title="Supprimer toutes les feuilles d'archive (les commandes actives ne sont pas concernées)"
-                className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">
-                🗑️ Tout supprimer
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+  // Mode plein écran : seul le tableau (et sa pagination) reste affiché
+  const fullscreenActive = isTableFullscreen && !loading && sheets.length > 0;
 
-      {error && <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">{error}</div>}
-      {notice && <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 text-sm">{notice}</div>}
-
-      {loading ? (
-        <div className="flex justify-center py-12"><svg className="animate-spin w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg></div>
-      ) : sheets.length === 0 ? (
-        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 py-12 text-center">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Aucune archive importée.</p>
-          {isAdmin
-            ? <p className="text-xs text-gray-400 mt-1">Importez le classeur Excel des anciennes commandes pour commencer.</p>
-            : <p className="text-xs text-gray-400 mt-1">L&apos;administrateur doit importer le fichier d&apos;archive.</p>}
-        </div>
-      ) : (
-        <>
-          {/* Sélection de période + filtres */}
-          <div className="bg-white dark:bg-gray-900 rounded-xl p-3 border border-gray-200 dark:border-gray-800 flex items-center gap-2 flex-wrap">
-            <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Période / feuille</label>
-            <select value={sheetId ?? ""} onChange={e => { setSheetId(parseInt(e.target.value)); setPage(1); }}
-              className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200 max-w-xs">
-              {sheets.map(s => <option key={s.id} value={s.id}>{s.name} ({s.rowCount})</option>)}
-            </select>
-
-            <select value={stateFilter} onChange={e => { setStateFilter(e.target.value); setPage(1); }}
-              className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">
-              <option value="">Tous les états</option>
-              {ARCHIVE_STATES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
-              <option value="NONE">Sans état</option>
-            </select>
-
-            <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Rechercher dans la feuille..."
-              className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm w-64 text-gray-700 dark:text-gray-200" />
-
-            <button onClick={loadRows} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg text-sm hover:bg-gray-300">🔄 Actualiser</button>
-            <div className="flex-1" />
-            {currentSheet && (
-              <span className="text-[11px] text-gray-400">
-                {currentSheet.sourceFilename ? `Source : ${currentSheet.sourceFilename}` : ""}
-                {currentSheet.importedByName ? ` • importé par ${currentSheet.importedByName}` : ""}
-              </span>
-            )}
-            {isAdmin && currentSheet && (
-              <button onClick={() => deleteSheet(currentSheet)} className="px-3 py-1.5 text-xs bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-100">🗑️ Supprimer cette feuille</button>
-            )}
-          </div>
-
-          {/* Légende des états (couleurs ARCHIVE isolées) */}
-          <div className="flex items-center gap-3 flex-wrap text-[11px] text-gray-600 dark:text-gray-300">
-            <span className="font-semibold">Légende :</span>
-            {ARCHIVE_STATES.map(s => {
-              const bg = getColor(s.colorKey);
-              return <span key={s.key} className="px-2 py-0.5 rounded border border-black/10" style={{ backgroundColor: bg, color: getContrastTextColor(bg) }}>{s.label}</span>;
-            })}
-            <span className="text-gray-400 italic">
-              États : 📄 lu dans le fichier · ⚙ auto (Reste à livrer = 0) · ✎ modifié manuellement — tous modifiables
-            </span>
-            {isAdmin && <span className="text-gray-400 italic">• Clic droit sur une cellule = couleur personnalisée</span>}
-            {stateColumnIndex !== null && (
-              <span className="px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300">
-                Colonne « {columns[stateColumnIndex]} » du fichier utilisée comme état
-              </span>
-            )}
-            {(clientsColumnIndex !== null || affaireColumnIndex !== null) && (
-              <span className="px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
-                Fusion verticale : {[clientsColumnIndex !== null ? columns[clientsColumnIndex] : null, affaireColumnIndex !== null ? columns[affaireColumnIndex] : null].filter(Boolean).join(" + ")}
-              </span>
-            )}
-          </div>
-
-          {/* Lignes complémentaires de la feuille d'origine */}
-          {preamble.length > 0 && (
-            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2 text-[11px] text-amber-900 dark:text-amber-200">
-              <div className="font-semibold mb-1">Informations d&apos;origine de la feuille</div>
-              {preamble.map((line, i) => (
-                <div key={i} className="truncate">{line.filter(c => c.trim() !== "").join(" · ")}</div>
-              ))}
-            </div>
-          )}
-
+  const archiveTableCard = (<>
           {/* Tableau reproduisant la structure Excel */}
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div className={`overflow-x-auto mobile-scroll-x ${isTableFullscreen ? "max-h-[calc(100vh-210px)]" : "max-h-[65vh]"}`}>
+            <div className={`overflow-x-auto mobile-scroll-x ${fullscreenActive ? "max-h-[calc(100vh-6rem)]" : "max-h-[65vh]"}`}>
               <table className="w-full text-xs border-collapse">
                 <thead className="sticky top-0 z-10">
                   <tr className="bg-gray-100 dark:bg-gray-800 border-b border-gray-300 dark:border-gray-600 text-left">
@@ -503,6 +395,9 @@ export default function ArchiveView({ user }: { user: User }) {
             </div>
           </div>
 
+  </>);
+
+  const archivePagination = (<>
           {/* Pagination */}
           <div className="flex items-center justify-between gap-2 flex-wrap text-xs text-gray-600 dark:text-gray-300">
             <span>{pagination.total} ligne(s) — page {pagination.page} / {pagination.pages}</span>
@@ -513,6 +408,140 @@ export default function ArchiveView({ user }: { user: User }) {
                 className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-40">Suivant →</button>
             </div>
           </div>
+  </>);
+
+  return (
+    <div className="archive-content space-y-4">
+      {!fullscreenActive && (<>
+      {/* En-tête */}
+      <div className="flex justify-between items-center flex-wrap gap-2">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-800 dark:text-white">📁 Archive commandes</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Anciennes commandes importées depuis Excel — séparées du suivi actif.</p>
+          {canEditArchive && <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-1">✎ Modification des lignes autorisée pour votre rôle.</p>}
+        </div>
+        <button onClick={() => setIsTableFullscreen(value => !value)}
+          className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+          title={isTableFullscreen ? "Quitter le plein écran (Échap)" : "Afficher uniquement le tableau en plein écran (Alt+M)"}>
+          {isTableFullscreen ? "⤢ Quitter plein écran" : "⛶ Plein écran"}
+        </button>
+        {isAdmin && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <input type="file" accept=".xlsx,.xls" ref={fileRef} className="text-sm text-gray-600 dark:text-gray-300" />
+            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300 cursor-pointer" title="Remplacer une feuille portant le même nom au lieu de créer un doublon">
+              <input type="checkbox" checked={replaceExisting} onChange={e => setReplaceExisting(e.target.checked)} className="accent-blue-600" />
+              Remplacer si existante
+            </label>
+            <button onClick={doImport} disabled={importing}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 disabled:opacity-50">
+              {importing ? "Import en cours..." : "📥 Importer une archive Excel"}
+            </button>
+            {sheets.length > 0 && (
+              <button onClick={deleteAllSheets}
+                title="Supprimer toutes les feuilles d'archive (les commandes actives ne sont pas concernées)"
+                className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">
+                🗑️ Tout supprimer
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      </>)}
+      {!fullscreenActive && error && <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">{error}</div>}
+      {!fullscreenActive && notice && <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 text-sm">{notice}</div>}
+
+      {loading ? (
+        <div className="flex justify-center py-12"><svg className="animate-spin w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg></div>
+      ) : sheets.length === 0 ? (
+        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 py-12 text-center">
+          <p className="text-sm text-gray-500 dark:text-gray-400">Aucune archive importée.</p>
+          {isAdmin
+            ? <p className="text-xs text-gray-400 mt-1">Importez le classeur Excel des anciennes commandes pour commencer.</p>
+            : <p className="text-xs text-gray-400 mt-1">L&apos;administrateur doit importer le fichier d&apos;archive.</p>}
+        </div>
+      ) : (
+        <>
+          {!fullscreenActive && (<>
+          {/* Sélection de période + filtres */}
+          <div className="bg-white dark:bg-gray-900 rounded-xl p-3 border border-gray-200 dark:border-gray-800 flex items-center gap-2 flex-wrap">
+            <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Période / feuille</label>
+            <select value={sheetId ?? ""} onChange={e => { setSheetId(parseInt(e.target.value)); setPage(1); }}
+              className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200 max-w-xs">
+              {sheets.map(s => <option key={s.id} value={s.id}>{s.name} ({s.rowCount})</option>)}
+            </select>
+
+            <select value={stateFilter} onChange={e => { setStateFilter(e.target.value); setPage(1); }}
+              className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">
+              <option value="">Tous les états</option>
+              {ARCHIVE_STATES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+              <option value="NONE">Sans état</option>
+            </select>
+
+            <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Rechercher dans la feuille..."
+              className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm w-64 text-gray-700 dark:text-gray-200" />
+
+            <button onClick={loadRows} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg text-sm hover:bg-gray-300">🔄 Actualiser</button>
+            <div className="flex-1" />
+            {currentSheet && (
+              <span className="text-[11px] text-gray-400">
+                {currentSheet.sourceFilename ? `Source : ${currentSheet.sourceFilename}` : ""}
+                {currentSheet.importedByName ? ` • importé par ${currentSheet.importedByName}` : ""}
+              </span>
+            )}
+            {isAdmin && currentSheet && (
+              <button onClick={() => deleteSheet(currentSheet)} className="px-3 py-1.5 text-xs bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-100">🗑️ Supprimer cette feuille</button>
+            )}
+          </div>
+
+          {/* Légende des états (couleurs ARCHIVE isolées) */}
+          <div className="flex items-center gap-3 flex-wrap text-[11px] text-gray-600 dark:text-gray-300">
+            <span className="font-semibold">Légende :</span>
+            {ARCHIVE_STATES.map(s => {
+              const bg = getColor(s.colorKey);
+              return <span key={s.key} className="px-2 py-0.5 rounded border border-black/10" style={{ backgroundColor: bg, color: getContrastTextColor(bg) }}>{s.label}</span>;
+            })}
+            <span className="text-gray-400 italic">
+              États : 📄 lu dans le fichier · ⚙ auto (Reste à livrer = 0) · ✎ modifié manuellement — tous modifiables
+            </span>
+            {isAdmin && <span className="text-gray-400 italic">• Clic droit sur une cellule = couleur personnalisée</span>}
+            {stateColumnIndex !== null && (
+              <span className="px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300">
+                Colonne « {columns[stateColumnIndex]} » du fichier utilisée comme état
+              </span>
+            )}
+            {(clientsColumnIndex !== null || affaireColumnIndex !== null) && (
+              <span className="px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                Fusion verticale : {[clientsColumnIndex !== null ? columns[clientsColumnIndex] : null, affaireColumnIndex !== null ? columns[affaireColumnIndex] : null].filter(Boolean).join(" + ")}
+              </span>
+            )}
+          </div>
+
+          {/* Lignes complémentaires de la feuille d'origine */}
+          {preamble.length > 0 && (
+            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2 text-[11px] text-amber-900 dark:text-amber-200">
+              <div className="font-semibold mb-1">Informations d&apos;origine de la feuille</div>
+              {preamble.map((line, i) => (
+                <div key={i} className="truncate">{line.filter(c => c.trim() !== "").join(" · ")}</div>
+              ))}
+            </div>
+          )}
+
+          </>)}
+          {fullscreenActive ? (
+            <TableFullscreen title="Archive — tableau" onExit={() => setIsTableFullscreen(false)}>
+              <div className="archive-content space-y-2">
+                {error && <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">{error}</div>}
+                {archiveTableCard}
+                {archivePagination}
+              </div>
+            </TableFullscreen>
+          ) : (
+            <>
+              {archiveTableCard}
+              {archivePagination}
+            </>
+          )}
         </>
       )}
 

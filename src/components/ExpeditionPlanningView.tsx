@@ -1,5 +1,6 @@
 "use client";
 
+import { type ShortcutRequest } from "@/lib/keyboard-shortcuts";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
@@ -32,7 +33,7 @@ const STATUS_LABELS: Record<string, string> = {
 const STATUS_OPTIONS = Object.entries(STATUS_LABELS);
 const availableQty = (item: Pick<ProdItem, "producedQty" | "deliveredQty">) => Math.max(0, (item.producedQty || 0) - (item.deliveredQty || 0));
 
-export default function ExpeditionPlanningView({ user }: { user: User }) {
+export default function ExpeditionPlanningView({ user, pendingAction, onPendingActionHandled }: { user: User; pendingAction?: ShortcutRequest | null; onPendingActionHandled?: () => void }) {
   const canManage = user.role === "superadmin" || user.role === "planification";
   const { getColor } = useColors();
   const [date, setDate] = useState(todayISO());
@@ -153,6 +154,15 @@ export default function ExpeditionPlanningView({ user }: { user: User }) {
   };
   const stats = useMemo(() => ({ count: plans.length, quantity: plans.reduce((sum, plan) => sum + plan.plannedQty, 0), loaded: plans.reduce((sum, plan) => sum + plan.loadedQty, 0) }), [plans]);
 
+  // Raccourci clavier demandé par la page — voir src/lib/keyboard-shortcuts.ts
+  useEffect(() => {
+    if (pendingAction?.action !== "plan-expedition") return;
+    onPendingActionHandled?.();
+    if (canManage) void openPicker();
+    // Fonctions locales recréées à chaque rendu : seule la demande pilote l'effet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAction]);
+
   return (
     <div className="space-y-4 operational-content">
       <div className="flex flex-wrap items-center gap-2">
@@ -162,7 +172,7 @@ export default function ExpeditionPlanningView({ user }: { user: User }) {
         <input type="date" value={date} onChange={(event) => setDate(event.target.value)} className="px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-sm" />
         <button onClick={() => shiftDay(1)} className="px-2.5 py-1.5 bg-gray-200 rounded-lg text-sm">→</button>
         <button onClick={() => setDate(todayISO())} className="px-3 py-1.5 bg-gray-100 border border-gray-300 rounded-lg text-sm">Aujourd&apos;hui</button>
-        {canManage && <button onClick={openPicker} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-semibold">+ Planifier une expédition</button>}
+        {canManage && <button onClick={openPicker} title="Planifier une expédition (Alt+X)" className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-semibold">+ Planifier une expédition</button>}
         <button onClick={() => void loadPlans()} className="px-3 py-1.5 bg-gray-200 border border-gray-400 rounded-lg text-sm">🔄</button>
       </div>
 

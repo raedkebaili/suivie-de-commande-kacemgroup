@@ -1,5 +1,6 @@
 "use client";
 
+import { type ShortcutRequest } from "@/lib/keyboard-shortcuts";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
@@ -39,7 +40,7 @@ type ProdItem = {
  * l'onglet Production, d'en suivre l'état en temps réel et d'appliquer
  * automatiquement la quantité produite lorsque la ligne passe à « Terminé ».
  */
-export default function PlanningProductionView({ user }: { user: User }) {
+export default function PlanningProductionView({ user, pendingAction, onPendingActionHandled }: { user: User; pendingAction?: ShortcutRequest | null; onPendingActionHandled?: () => void }) {
   const canManage = user.role === "superadmin" || user.role === "planification";
   const { getColor } = useColors();
 
@@ -227,6 +228,15 @@ export default function PlanningProductionView({ user }: { user: User }) {
     setDate(d.toISOString().slice(0, 10));
   };
 
+  // Raccourci clavier demandé par la page — voir src/lib/keyboard-shortcuts.ts
+  useEffect(() => {
+    if (pendingAction?.action !== "plan-production") return;
+    onPendingActionHandled?.();
+    if (canManage) void openPicker();
+    // Fonctions locales recréées à chaque rendu : seule la demande pilote l'effet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAction]);
+
   return (
     <div className="space-y-4">
       {/* En-tête */}
@@ -239,7 +249,7 @@ export default function PlanningProductionView({ user }: { user: User }) {
           {!canManage && <span className="mt-1 inline-block rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">Consultation seule</span>}
         </div>
         {canManage && (
-          <button onClick={openPicker} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+          <button onClick={openPicker} title="Planifier des articles (Alt+P)" className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
             + Planifier des articles
           </button>
         )}

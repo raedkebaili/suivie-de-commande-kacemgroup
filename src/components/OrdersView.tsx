@@ -15,6 +15,8 @@ import { getOrderVisualState, ORDER_STATE_LABELS, ORDER_STATE_PANEL_CLASSES, ORD
 import { useColors } from "@/lib/color-context";
 import { darkenColor, getContrastTextColor } from "@/lib/color-utils";
 import OrderItemRow from "@/components/OrderItemRow";
+import TableFullscreen from "@/components/TableFullscreen";
+import { type ShortcutRequest } from "@/lib/keyboard-shortcuts";
 import DocumentsPanel, { PendingDocumentsZone, uploadPendingDocuments, documentDownloadUrl, type PendingDocument } from "@/components/DocumentsPanel";
 
 type FullOrder = Order & { totalQty?: number; totalDelivered?: number; totalProduced?: number; totalRemaining?: number; documentCount?: number; hasCahierDesCharges?: boolean; hasPhotometricStudy?: boolean };
@@ -206,7 +208,7 @@ function groupArticleModifications(logs: ModificationLog[]): Map<string, Set<str
   return articleModifications;
 }
 
-export default function OrdersView({ user }: { user: User }) {
+export default function OrdersView({ user, pendingAction, onPendingActionHandled }: { user: User; pendingAction?: ShortcutRequest | null; onPendingActionHandled?: () => void }) {
   const [orders, setOrders] = useState<FullOrder[]>([]);
   const [agencies, setAgencies] = useState<Agency[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -300,12 +302,6 @@ export default function OrdersView({ user }: { user: User }) {
 
   const ce=()=>["superadmin","commercial"].includes(user.role), ct=()=>["superadmin","technique"].includes(user.role), cp=()=>["superadmin","planification"].includes(user.role), cd=user.role==="superadmin", canDeleteOrder=cd||user.role==="commercial";
 
-  useEffect(() => {
-    if (!isTableFullscreen) return;
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setIsTableFullscreen(false); };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isTableFullscreen]);
 
   // ── Accès limité du service planification ──
   // Le planificateur peut CRÉER des commandes, mais uniquement à l'état
@@ -1009,113 +1005,27 @@ export default function OrdersView({ user }: { user: User }) {
   const photometricLensColor = getColor("ETUDE_PHOTOMETRIQUE");
   const photometricLensTextColor = getContrastTextColor(photometricLensColor);
 
-  return (<div className={`space-y-3 operational-content ${isTableFullscreen ? "fixed inset-0 z-[60] overflow-auto bg-gray-50 dark:bg-gray-950 p-3 sm:p-4" : ""}`}>
-    <div className="flex flex-wrap gap-2 items-center">
-      <select value={fs} onChange={e=>setFs(e.target.value)} title="Filtrer par état commercial, état de production ou suivi du planning"
-        className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">
-        <option value="">Tous les états</option>
-        <optgroup label="État commercial">
-          <option value="comm:SUR_STOCK">📦 Sur Stock / Besoin interne</option>
-          <option value="comm:BON_COMMANDE">📋 Bon de commande</option>
-          <option value="comm:PREVISION">🟠 Prévision</option>
-        </optgroup>
-        <optgroup label="État de production">
-          <option value="prod:EN_INSTANCE">🟣 En instance</option>
-          <option value="prod:EN_PRODUCTION">🟡 En production</option>
-          <option value="prod:LIVREE">🟢 Livrée</option>
-          <option value="prod:ANNULEE">🔴 Annulée</option>
-        </optgroup>
-        <optgroup label="Planning de production">
-          <option value="planning:EN_COURS">🏭 En cours de production (planning)</option>
-          <option value="planning:NONE">⚪ Hors planning</option>
-        </optgroup>
-      </select>
-      <select value={fa} onChange={e=>setFa(e.target.value)} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"><option value="">Agences</option>{accessibleAgencies().map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select>
-      <select value={ff} onChange={e=>setFf(e.target.value)} title="Filtrer par usine (unité de production)"
-        className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">
-        <option value="">🏭 Usines</option>
-        {factoryList.map(f=><option key={f.id} value={f.name}>{f.name} ({f.code})</option>)}
-      </select>
-      <select value={fp} onChange={e=>setFp(e.target.value)} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm">
-        <option value="">Priorités</option>
-        {PRIORITY_OPTIONS.map(p=><option key={p.value} value={p.value}>{p.label}</option>)}
-        {/* Valeurs historiques encore présentes dans les données */}
-        <option value="URGENTE">Urgente (ancien)</option>
-        <option value="TRES_URGENTE">Très Urgente (ancien)</option>
-      </select>
-      <label className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer flex items-center gap-1.5 border transition-colors ${ftel?"bg-sky-100 border-sky-500 text-sky-800 font-semibold":"bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200"}`}
-        title="N’afficher que les commandes contenant des articles de la famille Télégestion">
-        <input type="checkbox" checked={ftel} onChange={e=>setFtel(e.target.checked)} className="accent-sky-600" />📡 Télégestion
-      </label>
-      <label className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer flex items-center gap-1.5 border transition-colors ${fphoto?"bg-amber-100 border-amber-500 text-amber-900 font-semibold":"bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200"}`}
-        title="N’afficher que les commandes contenant une étude photométrique">
-        <input type="checkbox" checked={fphoto} onChange={e=>setFphoto(e.target.checked)} className="accent-amber-600" />🔬 Études photométriques
-      </label>
-      <button onClick={fetchOrders} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg text-sm hover:bg-gray-300">🔄 Actualiser</button>
-      <button onClick={() => setIsTableFullscreen(value => !value)} title={isTableFullscreen ? "Quitter le plein écran" : "Afficher le tableau en plein écran"}
-        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-semibold shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400">{isTableFullscreen ? "⤢ Quitter plein écran" : "⛶ Plein écran"}</button>
-      <label className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer flex items-center gap-1 transition-colors ${watchLive?"bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-400":"bg-gray-100 dark:bg-gray-800 text-gray-500 border border-gray-300 dark:border-gray-600"}`}>
-        <input type="checkbox" checked={watchLive} onChange={e=>setWatchLive(e.target.checked)} className="sr-only" />
-        <span className={`w-2 h-2 rounded-full ${watchLive?"bg-green-500 animate-pulse":""}`}></span>📡 Live
-      </label>
-      <DebouncedSearchInput value={searchTerm} onChange={setSearchTerm} />
-      <div className="flex items-center gap-1 ml-1">
-        <span className="text-xs text-gray-500 dark:text-gray-400">Trier par</span>
-        <select value={sortField} onChange={e=>setSortField(e.target.value as SortField)}
-          className="px-2 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">
-          <option value="date">Date</option>
-          <option value="alpha">Alphabétique (A-Z)</option>
-          <option value="number">N° Commande</option>
-        </select>
-        <button onClick={()=>setSortDir(d=>d==="asc"?"desc":"asc")} title={sortDir==="asc"?"Ordre croissant":"Ordre décroissant"}
-          className="px-2.5 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">
-          {sortDir==="asc"?"↑ Croissant":"↓ Décroissant"}
-        </button>
-      </div>
-      <button onClick={toggleExpandAll} className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-700 rounded-lg text-sm hover:bg-indigo-100 dark:hover:bg-indigo-900/50">
-        {allExpanded?"▾ Tout replier":"▸ Tout déplier"}
-      </button>
-      {cd&&<div className="relative">
-        <button onClick={()=>setShowColMenu(v=>!v)} title="Afficher / masquer des colonnes (admin)"
-          className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-1.5">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-          Colonnes
-        </button>
-        {showColMenu&&<>
-          <div className="fixed inset-0 z-40" onClick={()=>setShowColMenu(false)} />
-          <div className="absolute right-0 z-50 mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl p-2 max-h-[70vh] overflow-y-auto">
-            <div className="px-2 py-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Colonnes visibles</div>
-            {ORDER_TABLE_COLUMNS.map(c=>(
-              <label key={c.key} className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200">
-                <input type="checkbox" checked={!hiddenCols.includes(c.key)} onChange={()=>toggleColumn(c.key)} className="accent-blue-600" />
-                {c.label}
-              </label>
-            ))}
-            <div className="px-2 py-1.5 mt-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide border-t border-gray-100 dark:border-gray-700 pt-2">États de production affichés</div>
-            {PRODUCTION_STATE_OPTIONS.map(s=>(
-              <label key={s.key} className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200">
-                <input type="checkbox" checked={isProdStateVisible(s.key)} onChange={()=>toggleProdState(s.key)} className="accent-blue-600" />
-                {s.label}
-              </label>
-            ))}
-            <div className="px-2 py-1.5 mt-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide border-t border-gray-100 dark:border-gray-700 pt-2">Affichage du détail</div>
-            <label className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200">
-              <input type="checkbox" checked={!hideTotalRow} onChange={toggleTotalRow} className="accent-blue-600" />
-              Ligne TOTAL des articles
-            </label>
-            <div className="px-2 pt-1.5 pb-1 text-[10px] text-gray-400 border-t border-gray-100 dark:border-gray-700 mt-1">Masquer un état cache uniquement son badge, pas la ligne ni la colonne. Ces préférences sont enregistrées pour votre utilisateur.</div>
-          </div>
-        </>}
-      </div>}
-      <div className="flex-1"/>
-      {ce()&&<button onClick={()=>{resetOrderImport();setShowImport(true)}} className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700" title="Importer des commandes depuis le modèle Excel archive">📥 Importer commandes</button>}
-      <button onClick={ee} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">📤 Export</button>
-      {ct()&&<button onClick={()=>openPhotoStudyModal()} className="px-4 py-1.5 bg-sky-600 text-white rounded-lg text-sm hover:bg-sky-700">🔬 Nouvelle Étude Photométrique</button>}
-      {canCreateOrder()&&<button onClick={()=>{rf();aiInit();setShowModal(true)}} title={planifStockOnly?"Créer une commande Sur Stock / Besoin interne":"Créer une commande"} className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">+ Nouvelle{planifStockOnly?" (Sur Stock)":""}</button>}
-    </div>
+  // Raccourcis Alt+N / Alt+I / Alt+M demandés par la page (voir keyboard-shortcuts.ts)
+  useEffect(() => {
+    if (!pendingAction) return;
+    const { action } = pendingAction;
+    if (action === "new-order") {
+      onPendingActionHandled?.();
+      if (canCreateOrder()) { rf(); aiInit(); setShowModal(true); }
+    } else if (action === "new-photo-study") {
+      onPendingActionHandled?.();
+      if (ct()) openPhotoStudyModal();
+    } else if (action === "toggle-fullscreen") {
+      onPendingActionHandled?.();
+      setIsTableFullscreen(value => !value);
+    }
+    // Les fonctions ci-dessus sont des fermetures recréées à chaque rendu : seule la demande pilote l'effet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAction]);
 
-    {loading?<div className="flex justify-center py-12"><svg className="animate-spin w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></div>:
-    <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden"><div className="overflow-x-auto mobile-scroll-x"><table className="w-full text-xs"><thead><tr className="bg-gray-50 dark:bg-gray-800 border-b text-left">
+  const ordersTable = (
+    loading?<div className="flex justify-center py-12"><svg className="animate-spin w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></div>:
+    <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden"><div className={isTableFullscreen ? "overflow-auto max-h-[calc(100vh-1.5rem)]" : "overflow-x-auto mobile-scroll-x"}><table className="w-full text-xs"><thead><tr className="bg-gray-50 dark:bg-gray-800 border-b text-left">
       <th className="px-2 py-2 w-6"></th><th className="px-2 py-2 font-semibold text-gray-600">N°</th>{isColVisible("date")&&<th className="px-2 py-2 font-semibold text-gray-600">Date</th>}<th className="px-2 py-2 font-semibold text-gray-600">Client</th>{isColVisible("agence")&&<th className="px-2 py-2 font-semibold text-gray-600">Agence</th>}{isColVisible("affaire")&&<th className="px-2 py-2 font-semibold text-gray-600">Affaire</th>}{isColVisible("priorite")&&<th className="px-2 py-2 font-semibold text-gray-600">Priorité</th>}{isColVisible("etatComm")&&<th className="px-2 py-2 font-semibold text-gray-600">État Comm.</th>}<th className="px-2 py-2 font-semibold text-gray-600">État Prod.</th>{isColVisible("creePar")&&<th className="px-2 py-2 font-semibold text-gray-600">Créé par</th>}{isColVisible("modifiePar")&&<th className="px-2 py-2 font-semibold text-gray-600">Modifié par</th>}<th className="px-2 py-2"></th>
     </tr></thead><tbody>
     {sortedOrders.length===0?<tr><td colSpan={visibleColCount} className="text-center py-12 text-black">Aucune commande</td></tr>:
@@ -1196,7 +1106,121 @@ export default function OrdersView({ user }: { user: User }) {
         </DeferredOrderDetails>
       </td></tr>}
       </React.Fragment>)})}
-    </tbody></table></div></div>}
+    </tbody></table></div></div>
+  );
+
+  return (<div className="space-y-3 operational-content">
+    {!isTableFullscreen && (
+    <div className="flex flex-wrap gap-2 items-center">
+      <select value={fs} onChange={e=>setFs(e.target.value)} title="Filtrer par état commercial, état de production ou suivi du planning"
+        className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">
+        <option value="">Tous les états</option>
+        <optgroup label="État commercial">
+          <option value="comm:SUR_STOCK">📦 Sur Stock / Besoin interne</option>
+          <option value="comm:BON_COMMANDE">📋 Bon de commande</option>
+          <option value="comm:PREVISION">🟠 Prévision</option>
+        </optgroup>
+        <optgroup label="État de production">
+          <option value="prod:EN_INSTANCE">🟣 En instance</option>
+          <option value="prod:EN_PRODUCTION">🟡 En production</option>
+          <option value="prod:LIVREE">🟢 Livrée</option>
+          <option value="prod:ANNULEE">🔴 Annulée</option>
+        </optgroup>
+        <optgroup label="Planning de production">
+          <option value="planning:EN_COURS">🏭 En cours de production (planning)</option>
+          <option value="planning:NONE">⚪ Hors planning</option>
+        </optgroup>
+      </select>
+      <select value={fa} onChange={e=>setFa(e.target.value)} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"><option value="">Agences</option>{accessibleAgencies().map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select>
+      <select value={ff} onChange={e=>setFf(e.target.value)} title="Filtrer par usine (unité de production)"
+        className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">
+        <option value="">🏭 Usines</option>
+        {factoryList.map(f=><option key={f.id} value={f.name}>{f.name} ({f.code})</option>)}
+      </select>
+      <select value={fp} onChange={e=>setFp(e.target.value)} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm">
+        <option value="">Priorités</option>
+        {PRIORITY_OPTIONS.map(p=><option key={p.value} value={p.value}>{p.label}</option>)}
+        {/* Valeurs historiques encore présentes dans les données */}
+        <option value="URGENTE">Urgente (ancien)</option>
+        <option value="TRES_URGENTE">Très Urgente (ancien)</option>
+      </select>
+      <label className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer flex items-center gap-1.5 border transition-colors ${ftel?"bg-sky-100 border-sky-500 text-sky-800 font-semibold":"bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200"}`}
+        title="N’afficher que les commandes contenant des articles de la famille Télégestion">
+        <input type="checkbox" checked={ftel} onChange={e=>setFtel(e.target.checked)} className="accent-sky-600" />📡 Télégestion
+      </label>
+      <label className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer flex items-center gap-1.5 border transition-colors ${fphoto?"bg-amber-100 border-amber-500 text-amber-900 font-semibold":"bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200"}`}
+        title="N’afficher que les commandes contenant une étude photométrique">
+        <input type="checkbox" checked={fphoto} onChange={e=>setFphoto(e.target.checked)} className="accent-amber-600" />🔬 Études photométriques
+      </label>
+      <button onClick={fetchOrders} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg text-sm hover:bg-gray-300">🔄 Actualiser</button>
+      <button onClick={() => setIsTableFullscreen(value => !value)} title={isTableFullscreen ? "Quitter le plein écran (Échap)" : "Afficher uniquement le tableau en plein écran (Alt+M)"}
+        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-semibold shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400">{isTableFullscreen ? "⤢ Quitter plein écran" : "⛶ Plein écran"}</button>
+      <label className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer flex items-center gap-1 transition-colors ${watchLive?"bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-400":"bg-gray-100 dark:bg-gray-800 text-gray-500 border border-gray-300 dark:border-gray-600"}`}>
+        <input type="checkbox" checked={watchLive} onChange={e=>setWatchLive(e.target.checked)} className="sr-only" />
+        <span className={`w-2 h-2 rounded-full ${watchLive?"bg-green-500 animate-pulse":""}`}></span>📡 Live
+      </label>
+      <DebouncedSearchInput value={searchTerm} onChange={setSearchTerm} />
+      <div className="flex items-center gap-1 ml-1">
+        <span className="text-xs text-gray-500 dark:text-gray-400">Trier par</span>
+        <select value={sortField} onChange={e=>setSortField(e.target.value as SortField)}
+          className="px-2 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">
+          <option value="date">Date</option>
+          <option value="alpha">Alphabétique (A-Z)</option>
+          <option value="number">N° Commande</option>
+        </select>
+        <button onClick={()=>setSortDir(d=>d==="asc"?"desc":"asc")} title={sortDir==="asc"?"Ordre croissant":"Ordre décroissant"}
+          className="px-2.5 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">
+          {sortDir==="asc"?"↑ Croissant":"↓ Décroissant"}
+        </button>
+      </div>
+      <button onClick={toggleExpandAll} className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-700 rounded-lg text-sm hover:bg-indigo-100 dark:hover:bg-indigo-900/50">
+        {allExpanded?"▾ Tout replier":"▸ Tout déplier"}
+      </button>
+      {cd&&<div className="relative">
+        <button onClick={()=>setShowColMenu(v=>!v)} title="Afficher / masquer des colonnes (admin)"
+          className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-1.5">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+          Colonnes
+        </button>
+        {showColMenu&&<>
+          <div className="fixed inset-0 z-40" onClick={()=>setShowColMenu(false)} />
+          <div className="absolute right-0 z-50 mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl p-2 max-h-[70vh] overflow-y-auto">
+            <div className="px-2 py-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Colonnes visibles</div>
+            {ORDER_TABLE_COLUMNS.map(c=>(
+              <label key={c.key} className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200">
+                <input type="checkbox" checked={!hiddenCols.includes(c.key)} onChange={()=>toggleColumn(c.key)} className="accent-blue-600" />
+                {c.label}
+              </label>
+            ))}
+            <div className="px-2 py-1.5 mt-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide border-t border-gray-100 dark:border-gray-700 pt-2">États de production affichés</div>
+            {PRODUCTION_STATE_OPTIONS.map(s=>(
+              <label key={s.key} className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200">
+                <input type="checkbox" checked={isProdStateVisible(s.key)} onChange={()=>toggleProdState(s.key)} className="accent-blue-600" />
+                {s.label}
+              </label>
+            ))}
+            <div className="px-2 py-1.5 mt-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide border-t border-gray-100 dark:border-gray-700 pt-2">Affichage du détail</div>
+            <label className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200">
+              <input type="checkbox" checked={!hideTotalRow} onChange={toggleTotalRow} className="accent-blue-600" />
+              Ligne TOTAL des articles
+            </label>
+            <div className="px-2 pt-1.5 pb-1 text-[10px] text-gray-400 border-t border-gray-100 dark:border-gray-700 mt-1">Masquer un état cache uniquement son badge, pas la ligne ni la colonne. Ces préférences sont enregistrées pour votre utilisateur.</div>
+          </div>
+        </>}
+      </div>}
+      <div className="flex-1"/>
+      {ce()&&<button onClick={()=>{resetOrderImport();setShowImport(true)}} className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700" title="Importer des commandes depuis le modèle Excel archive">📥 Importer commandes</button>}
+      <button onClick={ee} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">📤 Export</button>
+      {ct()&&<button onClick={()=>openPhotoStudyModal()} title="Nouvelle étude photométrique (Alt+I)" className="px-4 py-1.5 bg-sky-600 text-white rounded-lg text-sm hover:bg-sky-700">🔬 Nouvelle Étude Photométrique</button>}
+      {canCreateOrder()&&<button onClick={()=>{rf();aiInit();setShowModal(true)}} title={(planifStockOnly?"Créer une commande Sur Stock / Besoin interne":"Créer une commande")+" (Alt+N)"} className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">+ Nouvelle{planifStockOnly?" (Sur Stock)":""}</button>}
+    </div>
+    )}
+
+    {isTableFullscreen ? (
+      <TableFullscreen title="Commandes — tableau" onExit={() => setIsTableFullscreen(false)}>
+        <div className="operational-content">{ordersTable}</div>
+      </TableFullscreen>
+    ) : ordersTable}
 
     {showModal&&(<div className="fixed inset-0 z-50 flex items-start justify-center pt-4 pb-4 overflow-y-auto"><div className="absolute inset-0 bg-black/50" onClick={()=>setShowModal(false)}/><div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-6xl mx-2 max-h-[94vh] overflow-y-auto">
       <div className="sticky top-0 bg-white dark:bg-gray-900 border-b px-5 py-3 rounded-t-2xl flex justify-between z-10"><div><h3 className="text-lg font-semibold text-gray-800 dark:text-white">{editingOrder?`N°${editingOrder.orderNumber}`:"Nouvelle Commande"}</h3>{editingOrder?.createdByName&&<span className="text-xs text-gray-500">Créée par {editingOrder.createdByName}</span>}{editingOrder?.updatedBy&&<span className="text-xs text-gray-500 ml-3">Modifié par {editingOrder.updatedBy}</span>}</div><button onClick={()=>setShowModal(false)} className="p-1.5 hover:bg-gray-100 rounded-lg"><svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg></button></div>
