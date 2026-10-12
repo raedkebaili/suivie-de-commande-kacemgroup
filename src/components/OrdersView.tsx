@@ -18,6 +18,7 @@ import OrderItemRow from "@/components/OrderItemRow";
 import TableFullscreen from "@/components/TableFullscreen";
 import { type ShortcutRequest } from "@/lib/keyboard-shortcuts";
 import { orderModalSaveRights } from "@/lib/order-modal-permissions";
+import { canManageOrderColumnVisibility, toggleListItem } from "@/lib/order-column-visibility";
 import DocumentsPanel, { PendingDocumentsZone, uploadPendingDocuments, documentDownloadUrl, type PendingDocument } from "@/components/DocumentsPanel";
 
 type FullOrder = Order & { totalQty?: number; totalDelivered?: number; totalProduced?: number; totalRemaining?: number; documentCount?: number; hasCahierDesCharges?: boolean; hasPhotometricStudy?: boolean };
@@ -133,9 +134,6 @@ type OrdersTablePreferences = {
   searchTerm: string;
   sortField: SortField;
   sortDir: SortDir;
-  hiddenCols: string[];
-  hiddenProdStates: string[];
-  hideTotalRow: boolean;
 };
 
 // Colonnes masquables du tableau principal (config administrée par le superadmin,
@@ -321,17 +319,49 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
   // ── Visibilité et filtres du tableau : préférences privées par utilisateur ──
   const isColVisible = (k:string):boolean => !hiddenCols.includes(k);
   const visibleColCount = ORDER_TABLE_TOTAL_COLS - ORDER_TABLE_COLUMNS.filter(c=>hiddenCols.includes(c.key)).length;
-  const toggleColumn = (key:string) => {
-    setHiddenCols(current => current.includes(key) ? current.filter(k=>k!==key) : [...current, key]);
+  // Lecture de la configuration globale (tous les rôles) : appelée à chaque rafraîchissement,
+  // donc les changements du superadmin apparaissent aussi en mode Live.
+  const fetchColumnVisibility = useCallback(async () => {
+    try {
+      const d = await apiFetch<{ hiddenColumns: string[]; hiddenProductionStates: string[]; hideTotalRow: boolean }>("/api/orders/column-visibility");
+      setHiddenCols(d.hiddenColumns);
+      setHiddenProdStates(d.hiddenProductionStates);
+      setHideTotalRow(d.hideTotalRow);
+    } catch { /* non bloquant : on conserve la dernière configuration connue */ }
+  }, []);
+
+  // Visibilité GLOBALE : seul le superadmin modifie ; le réglage s'applique à tous les utilisateurs.
+  const saveColumnVisibility = async (patch: { hiddenColumns?: string[]; hiddenProductionStates?: string[]; hideTotalRow?: boolean }) => {
+    try {
+      await apiFetch("/api/orders/column-visibility", { method: "PUT", body: JSON.stringify(patch) });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Enregistrement de l'affichage impossible");
+      void fetchColumnVisibility();
+    }
   };
-  const toggleTotalRow = () => setHideTotalRow(current => !current);
+  const toggleColumn = (key:string) => {
+    if (!canManageOrderColumnVisibility(user.role)) return;
+    const next = toggleListItem(hiddenCols, key);
+    setHiddenCols(next);
+    void saveColumnVisibility({ hiddenColumns: next });
+  };
+  const toggleTotalRow = () => {
+    if (!canManageOrderColumnVisibility(user.role)) return;
+    const next = !hideTotalRow;
+    setHideTotalRow(next);
+    void saveColumnVisibility({ hideTotalRow: next });
+  };
   // Masquage d'un état de production précis (le badge seulement, pas la colonne)
   const isProdStateVisible = (k:string):boolean => !hiddenProdStates.includes(k);
   const toggleProdState = (key:string) => {
-    setHiddenProdStates(current => current.includes(key) ? current.filter(k=>k!==key) : [...current, key]);
+    if (!canManageOrderColumnVisibility(user.role)) return;
+    const next = toggleListItem(hiddenProdStates, key);
+    setHiddenProdStates(next);
+    void saveColumnVisibility({ hiddenProductionStates: next });
   };
 
   const fetchOrders = useCallback(async()=>{
+    void fetchColumnVisibility();
     const p=new URLSearchParams();
     // Le filtre d'états est préfixé pour viser la bonne colonne :
     //   comm:*     → état commercial (orders.status)
@@ -346,7 +376,7 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
     if(fphoto)p.set("photometric","1");
     setOrders((await apiFetch<{orders:FullOrder[]}>(`/api/orders?${p}`)).orders);
     setDataVersion(v=>v+1)
-  },[fs,fa,fp,ff,ftel,fphoto]);
+  },[fs,fa,fp,ff,ftel,fphoto,fetchColumnVisibility]);
   useEffect(()=>{setLoading(true);Promise.all([
     fetchOrders(),
     apiFetch<{agencies:Agency[]}>("/api/agencies").then(d=>setAgencies(d.agencies)).catch(()=>{}),
@@ -376,9 +406,6 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
         setSearchTerm(saved?.searchTerm ?? "");
         setSortField(saved?.sortField ?? "date");
         setSortDir(saved?.sortDir ?? "desc");
-        setHiddenCols(saved?.hiddenCols ?? []);
-        setHiddenProdStates(saved?.hiddenProdStates ?? []);
-        setHideTotalRow(saved?.hideTotalRow ?? false);
         setTablePreferencesLoaded(true);
       });
     return () => { cancelled = true; };
@@ -386,13 +413,13 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
 
   useEffect(() => {
     if (!tablePreferencesLoaded) return;
-    const preferences: OrdersTablePreferences = { fs, fa, ff, fp, ftel, fphoto, searchTerm, sortField, sortDir, hiddenCols, hiddenProdStates, hideTotalRow };
+    const preferences: OrdersTablePreferences = { fs, fa, ff, fp, ftel, fphoto, searchTerm, sortField, sortDir };
     if (tablePreferencesSaveTimer.current) clearTimeout(tablePreferencesSaveTimer.current);
     tablePreferencesSaveTimer.current = setTimeout(() => {
       apiFetch("/api/orders/preferences", { method: "PUT", body: JSON.stringify(preferences) }).catch(() => {});
     }, 350);
     return () => { if (tablePreferencesSaveTimer.current) clearTimeout(tablePreferencesSaveTimer.current); };
-  }, [tablePreferencesLoaded, user.id, fs, fa, ff, fp, ftel, fphoto, searchTerm, sortField, sortDir, hiddenCols, hiddenProdStates, hideTotalRow]);
+  }, [tablePreferencesLoaded, user.id, fs, fa, ff, fp, ftel, fphoto, searchTerm, sortField, sortDir]);
 
   // Planning actif : recalculé à chaque rafraîchissement des commandes (temps réel)
   const refreshPlanningActive=useCallback(async()=>{
@@ -1205,7 +1232,7 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
               <input type="checkbox" checked={!hideTotalRow} onChange={toggleTotalRow} className="accent-blue-600" />
               Ligne TOTAL des articles
             </label>
-            <div className="px-2 pt-1.5 pb-1 text-[10px] text-gray-400 border-t border-gray-100 dark:border-gray-700 mt-1">Masquer un état cache uniquement son badge, pas la ligne ni la colonne. Ces préférences sont enregistrées pour votre utilisateur.</div>
+            <div className="px-2 pt-1.5 pb-1 text-[10px] text-gray-400 border-t border-gray-100 dark:border-gray-700 mt-1">Masquer un état cache uniquement son badge, pas la ligne ni la colonne. Ces réglages sont globaux : ils s’appliquent à tous les utilisateurs.</div>
           </div>
         </>}
       </div>}

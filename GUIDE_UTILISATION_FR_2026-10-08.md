@@ -64,7 +64,8 @@ Après une déconnexion automatique, se reconnecter. Si le poste est partagé, v
 ### 2.4 Apparence et persistance personnelle
 
 - Le mode clair/sombre est disponible dans la barre latérale et est mémorisé dans le profil.
-- Le tableau des commandes mémorise par utilisateur les filtres, la recherche, le tri, les colonnes et l’affichage de la ligne TOTAL. Ces préférences ne sont pas une configuration globale.
+- Le tableau des commandes mémorise par utilisateur les filtres, la recherche et le tri. Ces préférences ne sont pas partagées.
+- Les colonnes masquées, les états de production masqués et la ligne TOTAL sont une **configuration globale** : seul le Super Admin les modifie (menu « Colonnes »), et le réglage s’applique à tous les utilisateurs, y compris en mode Live.
 - L’onglet actif est mémorisé pour chaque utilisateur dans le navigateur et restauré après actualisation, si l’onglet est encore autorisé par son rôle.
 - Le bouton **Plein écran** (Commandes et Archive) affiche uniquement le tableau sur tout l’écran, en thème clair comme sombre ; `Échap`, le bouton ✕ en haut à droite ou la sortie du plein écran du navigateur reviennent à l’affichage normal. Raccourci : `Alt+M`.
 
