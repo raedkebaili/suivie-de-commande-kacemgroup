@@ -541,6 +541,18 @@ export const archiveCellColors = pgTable("archive_cell_colors", {
   updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
 }, (table) => [uniqueIndex("archive_cell_colors_row_col_uq").on(table.rowId, table.columnIndex)]);
 
+// Marquage « modifié par un commercial » : une ligne par cellule modifiée.
+// Distinct de archive_cell_colors (couleurs personnalisées du superadmin).
+export const archiveCellModifications = pgTable("archive_cell_modifications", {
+  id: serial("id").primaryKey(),
+  sheetId: integer("sheet_id").notNull().references(() => archiveSheets.id, { onDelete: "cascade" }),
+  rowId: integer("row_id").notNull().references(() => archiveRows.id, { onDelete: "cascade" }),
+  columnIndex: integer("column_index").notNull(),
+  modifiedById: integer("modified_by_id").references(() => users.id, { onDelete: "set null" }),
+  modifiedByName: text("modified_by_name"),
+  modifiedAt: timestamp("modified_at", { mode: "string" }).notNull().defaultNow(),
+}, (table) => [uniqueIndex("archive_cell_modifications_row_col_uq").on(table.rowId, table.columnIndex)]);
+
 // Historique des changements d'état de recouvrement (traçabilité, style activity_logs)
 export const clientRecouvrementLogs = pgTable("client_recouvrement_logs", {
   id: serial("id").primaryKey(),

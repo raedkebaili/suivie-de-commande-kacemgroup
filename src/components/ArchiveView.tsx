@@ -7,6 +7,7 @@ import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
 import { useColors } from "@/lib/color-context";
 import { getContrastTextColor } from "@/lib/color-utils";
+import { archiveRightsFor } from "@/lib/archive-rights";
 import {
   ARCHIVE_CELL_PALETTE,
   ARCHIVE_STATES,
@@ -15,7 +16,7 @@ import {
 } from "@/lib/archive-constants";
 
 type Sheet = { id: number; name: string; sourceFilename: string | null; rowCount: number; importedByName: string | null; createdAt: string };
-type Row = { id: number; rowIndex: number; cells: string[]; stateOverride: string | null; stateDetected?: string | null; state: string | null; stateSource?: string; updatedByName: string | null; cellColors: Record<number, string> };
+type Row = { id: number; rowIndex: number; cells: string[]; stateOverride: string | null; stateDetected?: string | null; state: string | null; stateSource?: string; updatedByName: string | null; cellColors: Record<number, string>; modifiedColumns?: number[] };
 type Pagination = { page: number; pageSize: number; total: number; pages: number };
 
 /**
@@ -97,7 +98,9 @@ function computeClientBars(rows: Row[], clientsIdx: number | null): Bar[] {
 
 export default function ArchiveView({ user, pendingAction, onPendingActionHandled }: { user: User; pendingAction?: ShortcutRequest | null; onPendingActionHandled?: () => void }) {
   const isAdmin = user.role === "superadmin";
-  const canEditArchive = ["superadmin", "planification", "technique"].includes(user.role);
+  const archiveRights = archiveRightsFor(user.role);
+  const canChangeState = archiveRights.canChangeState;
+  const canEditArchive = archiveRights.canEditCells;
   const { getColor } = useColors();
 
   const [sheets, setSheets] = useState<Sheet[]>([]);
@@ -243,7 +246,7 @@ export default function ArchiveView({ user, pendingAction, onPendingActionHandle
     setSavingRow(true);
     setRows(current => current.map(row => row.id === rowEditor.rowId ? { ...row, cells: rowEditor.cells } : row));
     try {
-      const response = await apiFetch<{ row: { id: number; cells: string[]; stateOverride: string | null; state: string | null; stateSource?: string; updatedByName: string | null } }>(`/api/archive/rows/${rowEditor.rowId}`, {
+      const response = await apiFetch<{ row: { id: number; cells: string[]; stateOverride: string | null; state: string | null; stateSource?: string; updatedByName: string | null; modifiedColumns?: number[] } }>(`/api/archive/rows/${rowEditor.rowId}`, {
         method: "PUT",
         body: JSON.stringify({ cells: rowEditor.cells }),
       });
@@ -284,8 +287,13 @@ export default function ArchiveView({ user, pendingAction, onPendingActionHandle
     return { backgroundColor: bg, color: getContrastTextColor(bg) };
   };
 
-  /** Priorité : couleur personnalisée de la cellule > couleur de l'état de la ligne */
+  /** Priorité : modification commerciale (violet) > couleur personnalisée > couleur de l'état de la ligne */
   const cellStyle = (row: Row, columnIndex: number) => {
+    // Modification faite par un commercial : couleur « Champs Modifiés » du gestionnaire
+    if (row.modifiedColumns?.includes(columnIndex)) {
+      const modifiedBg = getColor("FIELD_MODIFIED");
+      return { backgroundColor: modifiedBg, color: getContrastTextColor(modifiedBg) };
+    }
     const custom = row.cellColors[columnIndex];
     if (custom) return { backgroundColor: custom, color: getContrastTextColor(custom) };
     return undefined; // hérite du style de la ligne
@@ -361,7 +369,7 @@ export default function ArchiveView({ user, pendingAction, onPendingActionHandle
                           );
                         })}
                         <td className="px-2 py-1 border-l-2 border-black/20 dark:border-white/20 whitespace-nowrap">
-                          {isAdmin ? (
+                          {canChangeState ? (
                             <span className="inline-flex items-center gap-1">
                               <select value={r.stateOverride ?? ""} onChange={e => setRowState(r, e.target.value || null)}
                                 title={STATE_SOURCE_HINT[r.stateSource || "aucun"]}
@@ -501,6 +509,7 @@ export default function ArchiveView({ user, pendingAction, onPendingActionHandle
               const bg = getColor(s.colorKey);
               return <span key={s.key} className="px-2 py-0.5 rounded border border-black/10" style={{ backgroundColor: bg, color: getContrastTextColor(bg) }}>{s.label}</span>;
             })}
+            <span className="px-2 py-0.5 rounded border border-black/10" style={{ backgroundColor: getColor("FIELD_MODIFIED"), color: getContrastTextColor(getColor("FIELD_MODIFIED")) }}>Modifié par un commercial</span>
             <span className="text-gray-400 italic">
               États : 📄 lu dans le fichier · ⚙ auto (Reste à livrer = 0) · ✎ modifié manuellement — tous modifiables
             </span>

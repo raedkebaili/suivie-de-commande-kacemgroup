@@ -1,15 +1,19 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { archiveRows, archiveSheets } from "@/db/schema";
+import { archiveCellModifications, archiveRows, archiveSheets } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 import { ARCHIVE_STATE_BY_KEY, resolveArchiveRowState, resolveArchiveStateSource } from "@/lib/archive-constants";
+import { archiveRightsFor, changedCellIndexes } from "@/lib/archive-rights";
 
 /**
  * PUT /api/archive/rows/[id]
- * Modifie les cellules d'une ligne d'archive pour planification/technique.
- * L'état reste réservé au superadmin, comme avant.
+ * Droits (voir src/lib/archive-rights.ts) :
+ * - état : superadmin et planification ;
+ * - cellules : superadmin, planification, technique et commercial.
+ * Une cellule modifiée par un commercial est marquée (archive_cell_modifications)
+ * pour être affichée dans la couleur « Champs Modifiés » du gestionnaire.
  * Body: { state?: "LIVRE" | "PREVISION" | "PRET_A_LIVRE" | "ANNULE" | null, cells?: string[] }
  *
  * IMPORTANT : changer l'état ne touche JAMAIS aux couleurs personnalisées
@@ -18,7 +22,8 @@ import { ARCHIVE_STATE_BY_KEY, resolveArchiveRowState, resolveArchiveStateSource
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getUserFromHeaders(request);
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  if (!["superadmin", "planification", "technique"].includes(user.role)) return NextResponse.json({ error: "Accès réservé au responsable planification, au responsable technique et au superadmin" }, { status: 403 });
+  const rights = archiveRightsFor(user.role);
+  if (!rights.canEditCells && !rights.canChangeState) return NextResponse.json({ error: "Accès réservé au superadmin, au responsable planification, au responsable technique et au commercial" }, { status: 403 });
 
   const { id } = await params;
   const rowId = parseInt(id);
@@ -32,8 +37,11 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     const hasState = Object.prototype.hasOwnProperty.call(body, "state");
     const hasCells = Object.prototype.hasOwnProperty.call(body, "cells");
     if (!hasState && !hasCells) return NextResponse.json({ error: "Aucune modification fournie" }, { status: 400 });
-    if (hasState && user.role !== "superadmin") {
-      return NextResponse.json({ error: "Seul le superadmin peut modifier l'état d'une archive" }, { status: 403 });
+    if (hasState && !rights.canChangeState) {
+      return NextResponse.json({ error: "Seuls le superadmin et le responsable planification peuvent modifier l'état d'une archive" }, { status: 403 });
+    }
+    if (hasCells && !rights.canEditCells) {
+      return NextResponse.json({ error: "Votre rôle ne peut pas modifier les champs de l'archive" }, { status: 403 });
     }
 
     const rawState = hasState ? body.state : row.stateOverride;
@@ -51,6 +59,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     } catch {
       cells = [];
     }
+    const previousCells = [...cells];
     if (hasCells) {
       if (!Array.isArray(body.cells) || !body.cells.every((value) => typeof value === "string")) {
         return NextResponse.json({ error: "Cellules invalides" }, { status: 400 });
@@ -78,6 +87,28 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       .where(eq(archiveRows.id, rowId))
       .returning();
 
+    // Marquage des cellules modifiées par un commercial (couleur « Champs Modifiés »)
+    const changedIndexes = hasCells ? changedCellIndexes(previousCells, cells) : [];
+    if (rights.marksCommercialEdits && changedIndexes.length > 0) {
+      const modifiedAt = new Date().toISOString();
+      await db.insert(archiveCellModifications)
+        .values(changedIndexes.map((columnIndex) => ({
+          sheetId: row.sheetId,
+          rowId,
+          columnIndex,
+          modifiedById: user.id,
+          modifiedByName: user.fullName,
+          modifiedAt,
+        })))
+        .onConflictDoUpdate({
+          target: [archiveCellModifications.rowId, archiveCellModifications.columnIndex],
+          set: { modifiedById: user.id, modifiedByName: user.fullName, modifiedAt },
+        });
+    }
+    const modifiedRows = await db.select({ columnIndex: archiveCellModifications.columnIndex })
+      .from(archiveCellModifications)
+      .where(eq(archiveCellModifications.rowId, rowId));
+
     // Recalcul de l'état effectif (retour à l'automatique si state = null)
     const resteIdx = sheet.resteColumnIndex;
     const resteRaw = resteIdx !== null && resteIdx !== undefined ? cells[resteIdx] : null;
@@ -97,6 +128,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         state: resolveArchiveRowState(updated.stateOverride, resteRaw, updated.stateDetected),
         stateSource: resolveArchiveStateSource(updated.stateOverride, resteRaw, updated.stateDetected),
         updatedByName: updated.updatedByName,
+        modifiedColumns: modifiedRows.map((m) => m.columnIndex).sort((a, b) => a - b),
       },
     });
   } catch (error) {

@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { archiveCellColors, archiveRows, archiveSheets } from "@/db/schema";
+import { archiveCellColors, archiveCellModifications, archiveRows, archiveSheets } from "@/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { getUserFromHeaders } from "@/lib/auth";
 import { resolveArchiveRowState, resolveArchiveStateSource } from "@/lib/archive-constants";
@@ -44,6 +44,14 @@ export async function GET(request: NextRequest) {
       colorsByRow.set(c.rowId, entry);
     }
 
+    const modifications = await db.select().from(archiveCellModifications).where(eq(archiveCellModifications.sheetId, sheetId));
+    const modifiedByRow = new Map<number, number[]>();
+    for (const m of modifications) {
+      const list = modifiedByRow.get(m.rowId) || [];
+      list.push(m.columnIndex);
+      modifiedByRow.set(m.rowId, list);
+    }
+
     const resteIdx = sheet.resteColumnIndex;
 
     let mapped = rows.map((r) => {
@@ -61,6 +69,8 @@ export async function GET(request: NextRequest) {
         stateSource: resolveArchiveStateSource(r.stateOverride, resteRaw, r.stateDetected),
         updatedByName: r.updatedByName,
         cellColors: colorsByRow.get(r.id) || {},
+        // Colonnes modifiées par un commercial (affichées en violet)
+        modifiedColumns: (modifiedByRow.get(r.id) || []).sort((a, b) => a - b),
       };
     });
 
