@@ -31,6 +31,7 @@ const ExpeditionPlanningView = dynamic(() => import("@/components/ExpeditionPlan
 const MatiereView = dynamic(() => import("@/components/MatiereView"), { loading: TabLoader });
 const BackupView = dynamic(() => import("@/components/BackupView"), { loading: TabLoader });
 const ColorsView = dynamic(() => import("@/components/ColorsView"), { loading: TabLoader });
+const ArticleFamiliesView = dynamic(() => import("@/components/ArticleFamiliesView"), { loading: TabLoader });
 const RecouvrementView = dynamic(() => import("@/components/RecouvrementView"), { loading: TabLoader });
 const ArchiveView = dynamic(() => import("@/components/ArchiveView"), { loading: TabLoader });
 const PlanningProductionView = dynamic(() => import("@/components/PlanningProductionView"), { loading: TabLoader });
@@ -49,7 +50,7 @@ const FULLSCREEN_TABS = ["orders", "archive"];
 
 function formatNotifDate(d: string) { if (!d) return ""; const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(d); if (m) return `${m[3]}/${m[2]} ${m[4]}:${m[5]}`; return d.substring(0,16); }
 
-type Tab = "dashboard" | "orders" | "production" | "expedition" | "expeditionPlanning" | "matieres" | "agencies" | "clients" | "users" | "watchdog" | "backup" | "colors" | "recouvrement" | "archive" | "planning" | "factories" | "telegestion" | "storage";
+type Tab = "familles" | "dashboard" | "orders" | "production" | "expedition" | "expeditionPlanning" | "matieres" | "agencies" | "clients" | "users" | "watchdog" | "backup" | "colors" | "recouvrement" | "archive" | "planning" | "factories" | "telegestion" | "storage";
 const gerantAccess = (tab: Tab) => GERANT_ALLOWED_TABS.includes(tab as (typeof GERANT_ALLOWED_TABS)[number]) ? [GERANT_ROLE] : [];
 
 // Hoisted outside the component: this list is static and doesn't need to be
@@ -75,6 +76,8 @@ const TABS: { key: Tab; label: string; roles: string[] }[] = [
   { key: "watchdog", label: "Watchdog", roles: ["superadmin", ...gerantAccess("watchdog")] },
   { key: "backup", label: "Sauvegarde", roles: ["superadmin"] },
   { key: "colors", label: "Couleurs", roles: ["superadmin"] },
+  // Référentiel automatique des familles d'articles (lecture seule, superadmin)
+  { key: "familles", label: "Familles d'articles", roles: ["superadmin"] },
 ];
 
 export default function HomePage() {
@@ -353,6 +356,7 @@ export default function HomePage() {
           {activeTab === "watchdog" && <WatchdogView user={user} />}
           {activeTab === "backup" && <BackupView user={user} />}
           {activeTab === "colors" && <ColorsView user={user} />}
+          {activeTab === "familles" && <ArticleFamiliesView user={user} />}
         </main>
       </div>
       {showShortcutHelp && <KeyboardShortcutsHelp allowedTabs={availableTabs.map((tab) => tab.key)} onClose={() => setShowShortcutHelp(false)} />}

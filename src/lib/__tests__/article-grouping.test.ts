@@ -1,22 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { articleGroupKey, groupArticles, normalizeArticleName } from "../article-grouping";
 
-describe("article-grouping — règle des 4 premiers caractères normalisés", () => {
+describe("article-grouping — regroupement par famille identifiée", () => {
   it("normalise majuscules, accents, espaces", () => {
     expect(normalizeArticleName("  néo lux  ")).toContain("NEO");
     expect(normalizeArticleName("éclairé")).toContain("ECLAIRE");
   });
 
-  it("regroupe par clé de 4 caractères", () => {
-    expect(articleGroupKey("NETLUX 150 W")).toBe("NETL");
+  it("regroupe par famille, pas par préfixe de caractères", () => {
+    expect(articleGroupKey("NETLUX 150 W")).toBe("NETLUX");
     expect(articleGroupKey("NETLUX 150 W")).toBe(articleGroupKey("NETLUX 200 W"));
-    expect(articleGroupKey("NETLUX 150 W")).not.toBe(articleGroupKey("OMEGA 10 W"));
+    expect(articleGroupKey("NETLUX 150 W")).not.toBe(articleGroupKey("NETLUXE 150 W"));
+    expect(articleGroupKey("NETLUX 2.0 150 W")).not.toBe(articleGroupKey("NETLUX 150 W"));
   });
 
-  it("les noms courts forment un groupe sur leur nom complet", () => {
-    expect(articleGroupKey("AB")).toBeTruthy();
-    expect(articleGroupKey("AB")).not.toBe(articleGroupKey("ABC"));
-    expect(articleGroupKey("ABCD")).toBe("ABCD");
+  it("les désignations non reconnues forment le groupe « À classifier »", () => {
+    expect(articleGroupKey("NETLUX 2 100 W")).toBe("À classifier");
   });
 
   it("totalise quantités, produit, livré et reste", () => {
@@ -26,7 +25,7 @@ describe("article-grouping — règle des 4 premiers caractères normalisés", (
       { articleName: "OMEGA 10 W", quantity: 3, deliveredQty: 0 },
     ]);
     expect(groups.length).toBe(2);
-    const net = groups.find(g => g.key === articleGroupKey("NETLUX 150 W"))!;
+    const net = groups.find(g => g.key === "NETLUX")!;
     // reste = quantité − livré (borné à 0) : (10−2) + (5−5) = 8
     expect(net.totalQuantity).toBe(15);
     expect(net.totalProduced).toBe(11);

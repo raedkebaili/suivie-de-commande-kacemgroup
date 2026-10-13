@@ -23,6 +23,7 @@ const tabIcons: Record<string, React.ReactNode> = {
   planning: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 3v4m10-4v4M4 10h16M5 5h14a1 1 0 011 1v13a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1zm3 9h2m2 0h2m2 0h2m-8 4h2m2 0h2" /></svg>,
   factories: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 21h18M5 21V9l6 3V9l6 3V5h2v16M7 17h2m2 0h2m2 0h2" /></svg>,
   telegestion: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18v3m-3 0h6M9 14a4 4 0 016 0m-9-3a8 8 0 0112 0M5 8a12 12 0 0114 0M12 5h.01" /></svg>,
+  familles: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h8m-8 6h16" /><circle cx="18" cy="12" r="2" strokeWidth={2} /></svg>,
   storage: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7a2 2 0 012-2h12l2 3v10a2 2 0 01-2 2H6a2 2 0 01-2-2V7zm0 1h16M9 13h6" /></svg>,
 };
 

@@ -9,7 +9,7 @@ import { groupArticles, type GroupableItem } from "@/lib/article-grouping";
 
 /**
  * GET /api/orders/grouped-articles
- * Regroupement des articles de toutes les commandes par préfixe de 4 caractères.
+ * Regroupement des articles de toutes les commandes par famille identifiée (src/lib/article-family.ts).
  * Toujours à jour : la donnée est recalculée à chaque appel depuis les commandes.
  *
  * Query : status, agencyId, priority (mêmes filtres que /api/orders)
@@ -92,7 +92,7 @@ export async function GET(request: NextRequest) {
 
       // Feuille synthèse : un total par groupe
       const summary = groups.map(g => ({
-        "Groupe (4 car.)": g.key,
+        "Famille": g.key,
         "Articles du groupe": g.variants.join(" | "),
         "Nb variantes": g.variants.length,
         "Nb lignes": g.lines.length,

@@ -1,20 +1,21 @@
 /**
  * Regroupement des articles de commande.
  *
- * Règle métier : deux articles appartiennent au même groupe si leurs
- * 4 PREMIERS CARACTÈRES significatifs sont identiques.
- * Ex. « NETLUX 150 W » et « NETLUX 200 W » → même groupe (clé « NETL »).
- *
- * Normalisation appliquée avant extraction de la clé :
- *   - suppression des accents
- *   - passage en majuscules
- *   - suppression des espaces / ponctuation de début
- * Les articles de moins de 4 caractères forment un groupe sur leur nom complet.
+ * Règle métier : deux articles appartiennent au même groupe s'ils ont la même
+ * FAMILLE identifiée (famille commerciale + génération), indépendamment de la
+ * puissance. Ex. « NETLUX 100 W » et « NETLUX 150 W » → groupe « NETLUX » ;
+ * « NETLUX 2.0 100 W » → groupe « NETLUX 2.0 » (famille distincte).
+ * Les désignations non reconnues forment le groupe « À classifier », affiché
+ * en dernier et jamais rattaché arbitrairement à une famille.
+ * La règle des 4 premiers caractères a été supprimée.
+ * La classification elle-même est dans src/lib/article-family.ts.
  *
  * Ce module est PUR (aucun import DB) : il est utilisé côté serveur pour
  * l'export Excel et côté client pour l'affichage, garantissant un résultat
  * strictement identique entre les deux.
  */
+
+import { familyGroupKey, UNCLASSIFIED_GROUP_KEY } from "./article-family";
 
 export type GroupableItem = {
   articleName: string;
@@ -36,7 +37,7 @@ export type GroupedLine = GroupableItem & {
 };
 
 export type ArticleGroup = {
-  /** Clé technique du groupe (4 premiers caractères normalisés) */
+  /** Clé du groupe : famille identifiée (ex. « NETLUX 2.0 ») ou « À classifier » */
   key: string;
   /** Libellé lisible du groupe (préfixe + nombre de variantes) */
   label: string;
@@ -59,16 +60,15 @@ export function normalizeArticleName(name: string): string {
     .trim();
 }
 
-/** Clé de regroupement : 4 premiers caractères significatifs */
+/** Clé de regroupement : famille identifiée, ou « À classifier » */
 export function articleGroupKey(name: string): string {
-  const normalized = normalizeArticleName(name);
-  if (!normalized) return "(SANS NOM)";
-  return normalized.slice(0, 4);
+  return familyGroupKey(name);
 }
 
 /**
- * Regroupe une liste d'articles par préfixe de 4 caractères.
- * Les groupes sont triés alphabétiquement, les lignes par article puis affaire.
+ * Regroupe une liste d'articles par famille identifiée.
+ * Les familles sont triées alphabétiquement, « À classifier » est placé en dernier.
+ * Les lignes sont triées par article puis affaire.
  */
 export function groupArticles(items: GroupableItem[]): ArticleGroup[] {
   const map = new Map<string, ArticleGroup>();
@@ -116,6 +116,10 @@ export function groupArticles(items: GroupableItem[]): ArticleGroup[] {
     });
     g.label = g.variants.length > 0 ? `${g.key} — ${g.variants[0]}${g.variants.length > 1 ? ` (+${g.variants.length - 1})` : ""}` : g.key;
   }
-  groups.sort((a, b) => a.key.localeCompare(b.key, "fr"));
+  groups.sort((a, b) => {
+    if (a.key === UNCLASSIFIED_GROUP_KEY) return 1;
+    if (b.key === UNCLASSIFIED_GROUP_KEY) return -1;
+    return a.key.localeCompare(b.key, "fr");
+  });
   return groups;
 }

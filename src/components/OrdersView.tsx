@@ -1700,7 +1700,7 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
     )}
 
     {/* ═══════════════════════════════════════════════════════════════════ */}
-    {/* SECTION 3 : Regroupement par Article (4 premiers caractères)       */}
+    {/* SECTION 3 : Regroupement par famille d'article                        */}
     {/* Placé sous les études photométriques, toujours à jour via          */}
     {/* dataVersion (incrémenté à chaque rafraîchissement des commandes).  */}
     {/* ═══════════════════════════════════════════════════════════════════ */}
