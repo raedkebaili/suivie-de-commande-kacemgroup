@@ -1,11 +1,27 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { orders, orderItems, clients, agencies } from "@/db/schema";
+import { orders, orderItems, clients, agencies, articleFamilyAssignments, articleFamilyCatalog } from "@/db/schema";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getUserFromHeaders } from "@/lib/auth";
 import { agencyScopeForUser } from "@/lib/agency-access";
 import { groupArticles, type GroupableItem } from "@/lib/article-grouping";
+import { catalogLabel } from "@/lib/article-family-catalog";
+
+/** Affectations manuelles désignation → libellé de famille (vide si la table n'existe pas encore) */
+async function loadManualFamilies(): Promise<Map<string, string>> {
+  try {
+    const rows = await db
+      .select({ designation: articleFamilyAssignments.designation, subFamily: articleFamilyCatalog.subFamily, variant: articleFamilyCatalog.variant })
+      .from(articleFamilyAssignments)
+      .innerJoin(articleFamilyCatalog, eq(articleFamilyAssignments.catalogId, articleFamilyCatalog.id));
+    return new Map(rows.map((r) => [r.designation, catalogLabel(r)]));
+  } catch (error) {
+    // Repli : classification automatique seule (le tableau reste disponible)
+    console.error("Affectations familles indisponibles:", error);
+    return new Map();
+  }
+}
 
 /**
  * GET /api/orders/grouped-articles
@@ -56,7 +72,8 @@ export async function GET(request: NextRequest) {
       .where(where)
       .orderBy(desc(orders.createdAt));
 
-    const groups = groupArticles(rows as GroupableItem[]);
+    const manualFamilies = await loadManualFamilies();
+    const groups = groupArticles(rows as GroupableItem[], manualFamilies);
 
     if (format === "xlsx") {
       const XLSX = await import("xlsx");

@@ -22,7 +22,7 @@ import {
   recouvrementStates, clientRecouvrementStates, clientRecouvrementLogs,
   systemSettings, appColors, orderCounters,
   archiveSheets, archiveRows, archiveCellColors,
-  productionPlanEntries, factories, storageConfig,
+  productionPlanEntries, factories, storageConfig, articleFamilyCatalog, articleFamilyAssignments,
 } from "@/db/schema";
 
 export async function collectBackupData() {
@@ -57,6 +57,9 @@ export async function collectBackupData() {
     recouvrementStates: await db.select().from(recouvrementStates),
     clientRecouvrementStates: await db.select().from(clientRecouvrementStates),
     clientRecouvrementLogs: await db.select().from(clientRecouvrementLogs),
+    // Catalogue des familles d'articles et affectations manuelles
+    articleFamilyCatalog: await db.select().from(articleFamilyCatalog),
+    articleFamilyAssignments: await db.select().from(articleFamilyAssignments),
     // Configuration (couleurs, réglages d'affichage, compteurs de numérotation)
     systemSettings: await db.select().from(systemSettings),
     appColors: await db.select().from(appColors),

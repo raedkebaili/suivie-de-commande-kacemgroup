@@ -553,6 +553,28 @@ export const archiveCellModifications = pgTable("archive_cell_modifications", {
   modifiedAt: timestamp("modified_at", { mode: "string" }).notNull().defaultNow(),
 }, (table) => [uniqueIndex("archive_cell_modifications_row_col_uq").on(table.rowId, table.columnIndex)]);
 
+// Catalogue des familles d'articles (géré par le superadmin).
+// Hiérarchie : FAMILLE (catégorie) > SOUS FAMILLE (famille commerciale) > VARIANTE.
+// variant vaut "" lorsqu'il n'y a pas de variante.
+export const articleFamilyCatalog = pgTable("article_family_catalog", {
+  id: serial("id").primaryKey(),
+  category: text("category").notNull(),
+  subFamily: text("sub_family").notNull(),
+  variant: text("variant").notNull().default(""),
+  createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
+}, (table) => [uniqueIndex("article_family_catalog_uq").on(table.category, table.subFamily, table.variant)]);
+
+// Affectation MANUELLE d'une désignation originale à une famille du catalogue.
+// Clé = désignation exacte : aucune donnée de commande n'est modifiée.
+export const articleFamilyAssignments = pgTable("article_family_assignments", {
+  id: serial("id").primaryKey(),
+  designation: text("designation").notNull(),
+  catalogId: integer("catalog_id").notNull().references(() => articleFamilyCatalog.id, { onDelete: "cascade" }),
+  assignedByName: text("assigned_by_name"),
+  assignedAt: timestamp("assigned_at", { mode: "string" }).notNull().defaultNow(),
+}, (table) => [uniqueIndex("article_family_assignments_designation_uq").on(table.designation)]);
+
 // Historique des changements d'état de recouvrement (traçabilité, style activity_logs)
 export const clientRecouvrementLogs = pgTable("client_recouvrement_logs", {
   id: serial("id").primaryKey(),

@@ -1,17 +1,18 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { orderItems } from "@/db/schema";
-import { sql } from "drizzle-orm";
+import { orderItems, articleFamilyCatalog, articleFamilyAssignments } from "@/db/schema";
+import { eq, sql } from "drizzle-orm";
 import { getUserFromHeaders } from "@/lib/auth";
-import { classifyArticleDesignation, ARTICLE_FAMILY_STATUS, UNCLASSIFIED_GROUP_KEY } from "@/lib/article-family";
+import { classifyArticleDesignation, resolveDesignationFamily, ARTICLE_FAMILY_STATUS, UNCLASSIFIED_GROUP_KEY } from "@/lib/article-family";
+import { catalogLabel } from "@/lib/article-family-catalog";
 
 /**
  * GET /api/admin/article-families
- * Référentiel automatique des familles d'articles (lecture seule).
- * Une ligne par désignation originale présente dans les commandes.
- * Les désignations ne sont jamais modifiées ; aucune écriture n'est possible ici.
- * Réservé au superadmin (même règle que les autres outils d'administration).
+ * Référentiel des familles d'articles (lecture seule).
+ * Une ligne par désignation originale présente dans les commandes, avec sa famille
+ * effective (affectation manuelle > classification automatique) et le catalogue.
+ * Les désignations ne sont jamais modifiées. Réservé au superadmin.
  */
 export async function GET(request: NextRequest) {
   const user = await getUserFromHeaders(request);
@@ -30,15 +31,30 @@ export async function GET(request: NextRequest) {
       .from(orderItems)
       .groupBy(orderItems.articleName);
 
+    const catalog = await db.select().from(articleFamilyCatalog);
+    const assignments = await db
+      .select({ designation: articleFamilyAssignments.designation, catalogId: articleFamilyAssignments.catalogId })
+      .from(articleFamilyAssignments);
+
+    const catalogById = new Map(catalog.map((c) => [c.id, c]));
+    const assignmentByDesignation = new Map(assignments.map((a) => [a.designation, a.catalogId]));
+    const usage = new Map<number, number>();
+    for (const a of assignments) usage.set(a.catalogId, (usage.get(a.catalogId) || 0) + 1);
+
     const items = rows.map((r) => {
-      const info = classifyArticleDesignation(r.designation);
+      const manualId = assignmentByDesignation.get(r.designation) ?? null;
+      const manual = manualId !== null ? catalogById.get(manualId) : undefined;
+      const manualLabel = manual ? catalogLabel(manual) : null;
+      const resolved = resolveDesignationFamily(r.designation, manualLabel);
+      const auto = classifyArticleDesignation(r.designation);
       return {
         designation: r.designation,
-        status: info.status,
-        family: info.family,
-        generation: info.generation,
-        power: info.power,
-        familyKey: info.familyKey,
+        status: resolved.status,
+        familyKey: resolved.familyKey,
+        source: resolved.source,
+        category: manual ? manual.category : null,
+        catalogId: manual ? manual.id : null,
+        power: auto.power,
         occurrences: Number(r.occurrences),
         orderCount: Number(r.orderCount),
         totalQuantity: Number(r.totalQuantity),
@@ -51,7 +67,7 @@ export async function GET(request: NextRequest) {
         if (kb === UNCLASSIFIED_GROUP_KEY) return -1;
         return ka.localeCompare(kb, "fr");
       }
-      return (a.power ?? Infinity) - (b.power ?? Infinity) || a.designation.localeCompare(b.designation, "fr");
+      return a.designation.localeCompare(b.designation, "fr");
     });
 
     const families = [...new Set(items.filter(i => i.familyKey).map(i => i.familyKey as string))]
@@ -60,10 +76,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       items,
       families,
+      catalog: catalog
+        .map((c) => ({ id: c.id, category: c.category, subFamily: c.subFamily, variant: c.variant, label: catalogLabel(c), designationCount: usage.get(c.id) || 0 }))
+        .sort((a, b) => a.category.localeCompare(b.category, "fr") || a.label.localeCompare(b.label, "fr")),
       summary: {
         designations: items.length,
         recognized: items.filter(i => i.status === ARTICLE_FAMILY_STATUS.RECONNU).length,
         toClassify: items.filter(i => i.status === ARTICLE_FAMILY_STATUS.A_CLASSIFIER).length,
+        manual: items.filter(i => i.source === "MANUEL").length,
         families: families.length,
         occurrences: items.reduce((s, i) => s + i.occurrences, 0),
       },

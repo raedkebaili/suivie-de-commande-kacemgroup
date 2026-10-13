@@ -8,7 +8,7 @@ import {
   recouvrementStates, clientRecouvrementStates, clientRecouvrementLogs,
   systemSettings, appColors, orderCounters,
   archiveSheets, archiveRows, archiveCellColors,
-  productionPlanEntries, factories, storageConfig,
+  productionPlanEntries, factories, storageConfig, articleFamilyCatalog, articleFamilyAssignments,
 } from "@/db/schema";
 import { getUserFromHeaders, logActivity, hashPassword } from "@/lib/auth";
 import { collectBackupData } from "@/lib/backup-data";
@@ -154,6 +154,11 @@ export async function POST(request: NextRequest) {
   const restoreFactories = factoriesRows.length > 0;
   const storageConfigRows = arr<typeof storageConfig.$inferInsert>("storageConfig");
   const restoreStorage = storageConfigRows.length > 0;
+  // Catalogue des familles d'articles : même garde de rétrocompatibilité (une sauvegarde
+  // antérieure à ce module ne doit pas effacer un catalogue existant).
+  const articleFamilyCatalogRows = arr<typeof articleFamilyCatalog.$inferInsert>("articleFamilyCatalog");
+  const articleFamilyAssignmentsRows = arr<typeof articleFamilyAssignments.$inferInsert>("articleFamilyAssignments");
+  const restoreArticleFamilies = articleFamilyCatalogRows.length > 0;
   // Catalogue des états de recouvrement : même garde. Une sauvegarde antérieure
   // à ce module ne doit pas effacer un catalogue enrichi par l'utilisateur.
   // (Les affectations clients partent de toute façon en cascade avec clients.)
@@ -175,6 +180,10 @@ export async function POST(request: NextRequest) {
     await db.transaction(async (tx) => {
       // Delete in reverse FK-dependency order
       if (restorePlanning) await tx.delete(productionPlanEntries);
+      if (restoreArticleFamilies) {
+        await tx.delete(articleFamilyAssignments);
+        await tx.delete(articleFamilyCatalog);
+      }
       if (restoreFactories) await tx.delete(factories);
       if (restoreStorage) await tx.delete(storageConfig);
       if (restoreArchive) {
@@ -241,6 +250,10 @@ export async function POST(request: NextRequest) {
       if (restoreFactories) await insertChunked(tx, factories, factoriesRows);
       if (restoreStorage) await insertChunked(tx, storageConfig, storageConfigRows);
       if (restorePlanning) await insertChunked(tx, productionPlanEntries, productionPlanEntriesRows);
+      if (restoreArticleFamilies) {
+        await insertChunked(tx, articleFamilyCatalog, articleFamilyCatalogRows);
+        await insertChunked(tx, articleFamilyAssignments, articleFamilyAssignmentsRows);
+      }
       if (restoreArchive) {
         await insertChunked(tx, archiveSheets, archiveSheetsRows);
         await insertChunked(tx, archiveRows, archiveRowsRows);
@@ -261,6 +274,7 @@ export async function POST(request: NextRequest) {
         ...(restorePlanning ? ["production_plan_entries"] : []),
         ...(restoreFactories ? ["factories"] : []),
         ...(restoreStorage ? ["storage_config"] : []),
+        ...(restoreArticleFamilies ? ["article_family_catalog"] : []),
       ];
       for (const t of tableNames) {
         await tx.execute(
@@ -282,7 +296,8 @@ export async function POST(request: NextRequest) {
     recouvrementStatesRows.length + clientRecouvrementStatesRows.length + clientRecouvrementLogsRows.length +
     systemSettingsRows.length + appColorsRows.length + orderCountersRows.length +
     archiveSheetsRows.length + archiveRowsRows.length + archiveCellColorsRows.length +
-    productionPlanEntriesRows.length + factoriesRows.length + storageConfigRows.length;
+    productionPlanEntriesRows.length + factoriesRows.length + storageConfigRows.length +
+    articleFamilyCatalogRows.length + articleFamilyAssignmentsRows.length;
 
   await logActivity(user.id, user.username, "BACKUP_RESTORE", `Restauration effectuée: ${totalRestored} enregistrements`);
 

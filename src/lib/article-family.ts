@@ -84,3 +84,29 @@ export function classifyArticleDesignation(designation: string): ArticleFamilyIn
 export function familyGroupKey(designation: string): string {
   return classifyArticleDesignation(designation).familyKey ?? UNCLASSIFIED_GROUP_KEY;
 }
+
+export type FamilySource = "MANUEL" | "AUTOMATIQUE";
+
+export type ResolvedDesignationFamily = {
+  status: ArticleFamilyStatus;
+  /** Libellé de regroupement effectif (manuel si affecté, sinon automatique) ; null si À classifier */
+  familyKey: string | null;
+  /** Origine de la famille effective ; null si À classifier */
+  source: FamilySource | null;
+};
+
+/**
+ * Famille effective d'une désignation. Priorité : affectation MANUELLE
+ * (catalogue administrateur) > classification AUTOMATIQUE > « À classifier ».
+ * Une désignation sans affectation et non reconnue n'est jamais rattachée arbitrairement.
+ */
+export function resolveDesignationFamily(designation: string, manualLabel?: string | null): ResolvedDesignationFamily {
+  if (manualLabel) {
+    return { status: ARTICLE_FAMILY_STATUS.RECONNU, familyKey: manualLabel, source: "MANUEL" };
+  }
+  const info = classifyArticleDesignation(designation);
+  if (info.familyKey) {
+    return { status: ARTICLE_FAMILY_STATUS.RECONNU, familyKey: info.familyKey, source: "AUTOMATIQUE" };
+  }
+  return { status: ARTICLE_FAMILY_STATUS.A_CLASSIFIER, familyKey: null, source: null };
+}

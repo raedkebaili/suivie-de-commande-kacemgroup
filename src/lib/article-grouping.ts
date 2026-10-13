@@ -15,7 +15,7 @@
  * strictement identique entre les deux.
  */
 
-import { familyGroupKey, UNCLASSIFIED_GROUP_KEY } from "./article-family";
+import { familyGroupKey, resolveDesignationFamily, UNCLASSIFIED_GROUP_KEY } from "./article-family";
 
 export type GroupableItem = {
   articleName: string;
@@ -67,14 +67,17 @@ export function articleGroupKey(name: string): string {
 
 /**
  * Regroupe une liste d'articles par famille identifiée.
+ * `manualFamilies` : désignation exacte → libellé de famille affecté manuellement.
  * Les familles sont triées alphabétiquement, « À classifier » est placé en dernier.
  * Les lignes sont triées par article puis affaire.
  */
-export function groupArticles(items: GroupableItem[]): ArticleGroup[] {
+export function groupArticles(items: GroupableItem[], manualFamilies?: ReadonlyMap<string, string>): ArticleGroup[] {
   const map = new Map<string, ArticleGroup>();
 
   for (const item of items) {
-    const key = articleGroupKey(item.articleName);
+    // Affectation manuelle (catalogue admin) prioritaire ; sinon classification automatique
+    const key = resolveDesignationFamily(item.articleName, manualFamilies?.get(item.articleName) ?? null).familyKey
+      ?? UNCLASSIFIED_GROUP_KEY;
     let group = map.get(key);
     if (!group) {
       group = {
