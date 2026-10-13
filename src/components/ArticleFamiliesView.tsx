@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
 import { ARTICLE_FAMILY_STATUS, type ArticleFamilyStatus } from "@/lib/article-family";
@@ -20,6 +20,14 @@ type FamilyItem = {
 
 type CatalogItem = { id: number; category: string; subFamily: string; variant: string; label: string; designationCount: number };
 type Summary = { designations: number; recognized: number; toClassify: number; manual: number; families: number; occurrences: number };
+type ImportSummary = {
+  mode: "preview" | "apply";
+  familiesToCreate: string[];
+  familiesReused: number;
+  assignmentsToApply: number;
+  unknownDesignations: string[];
+};
+
 type CatalogDraft = { category: string; subFamily: string; variant: string };
 
 const EMPTY_DRAFT: CatalogDraft = { category: "", subFamily: "", variant: "" };
@@ -47,6 +55,47 @@ export default function ArticleFamiliesView({ user }: { user: User }) {
   const [draft, setDraft] = useState<CatalogDraft>(EMPTY_DRAFT);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<CatalogDraft>(EMPTY_DRAFT);
+  const importRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  /** Fichier pour lequel l'aperçu a été obtenu : l'import n'est possible qu'après aperçu du même fichier */
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<ImportSummary | null>(null);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+
+  /** Envoie le fichier : mode "preview" (aucune écriture) ou "apply" (après aperçu validé). */
+  const runImport = async (mode: "preview" | "apply") => {
+    const file = importFile;
+    if (!file) { setImportErrors(["Sélectionnez un fichier Excel."]); return; }
+    setImporting(true); setImportErrors([]);
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("mode", mode);
+    try {
+      const res = await fetch("/api/admin/article-families/import", { method: "POST", body: formData, credentials: "same-origin", cache: "no-store" });
+      const data = await res.json().catch(() => ({})) as { summary?: ImportSummary; error?: string; details?: string[] };
+      if (!res.ok || !data.summary) {
+        setImportPreview(null);
+        setImportErrors(data.details?.length ? data.details : [data.error || `Erreur HTTP ${res.status}`]);
+        return;
+      }
+      if (mode === "preview") {
+        setImportPreview(data.summary);
+        setPreviewFile(file);
+      } else {
+        setImportPreview(null);
+        setPreviewFile(null);
+        setImportFile(null);
+        if (importRef.current) importRef.current.value = "";
+        flash(`Import terminé : ${data.summary.familiesToCreate.length} famille(s) créée(s), ${data.summary.familiesReused} réutilisée(s), ${data.summary.assignmentsToApply} affectation(s).`);
+        await load();
+      }
+    } catch (err: unknown) {
+      setImportErrors([err instanceof Error ? err.message : "Erreur lors de l'import."]);
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const flash = (message: string) => { setNotice(message); setTimeout(() => setNotice(""), 4000); };
 
@@ -212,6 +261,48 @@ export default function ArticleFamiliesView({ user }: { user: User }) {
       )}
 
       {error && <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">{error}</div>}
+      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h4 className="text-sm font-semibold text-gray-800 dark:text-white">Import Excel du catalogue</h4>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Colonnes : <b>FAMILLE</b>, <b>SOUS FAMILLE</b>, <b>VARIANTE</b> (facultative) et, pour affecter un article, <b>DESIGNATION</b> (désignation exacte des commandes).
+              Vérifiez d&apos;abord le fichier : un seul défaut bloque tout l&apos;import. Les désignations et les commandes ne sont jamais modifiées.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input ref={importRef} type="file" accept=".xlsx,.xls" className="hidden"
+              onChange={(e) => { setImportFile(e.target.files?.[0] ?? null); setImportPreview(null); setPreviewFile(null); setImportErrors([]); }} />
+            <button onClick={() => importRef.current?.click()} disabled={importing}
+              className="px-3 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 disabled:opacity-60">📥 Choisir Excel</button>
+            <button onClick={() => runImport("preview")} disabled={importing}
+              className="px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-60">{importing ? "Analyse…" : "Vérifier le fichier"}</button>
+            <button onClick={() => runImport("apply")}
+              disabled={importing || !importPreview || previewFile !== importFile}
+              className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-40">Importer</button>
+          </div>
+        </div>
+        {importErrors.length > 0 && (
+          <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm space-y-1">
+            <div className="font-semibold">Import refusé : aucune donnée n&apos;a été modifiée.</div>
+            <ul className="list-disc pl-5 max-h-40 overflow-auto">{importErrors.map((e) => <li key={e}>{e}</li>)}</ul>
+          </div>
+        )}
+        {importPreview && (
+          <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-sm text-blue-800 dark:text-blue-200 space-y-1">
+            <div className="font-semibold">Aperçu (rien n&apos;est encore enregistré)</div>
+            <div>Familles à créer : {importPreview.familiesToCreate.length}{importPreview.familiesToCreate.length > 0 && <span className="text-xs"> — {importPreview.familiesToCreate.join(", ")}</span>}</div>
+            <div>Familles déjà existantes (réutilisées) : {importPreview.familiesReused}</div>
+            <div>Affectations de désignations : {importPreview.assignmentsToApply}</div>
+            {importPreview.unknownDesignations.length > 0 && (
+              <div className="text-amber-700 dark:text-amber-400">
+                Désignations absentes des commandes, ignorées : {importPreview.unknownDesignations.join(", ")}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {notice && <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 text-sm">{notice}</div>}
 
       {/* ── Catalogue des familles ── */}

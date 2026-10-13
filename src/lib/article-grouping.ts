@@ -15,7 +15,7 @@
  * strictement identique entre les deux.
  */
 
-import { familyGroupKey, resolveDesignationFamily, UNCLASSIFIED_GROUP_KEY } from "./article-family";
+import { classifyArticleDesignation, familyGroupKey, resolveDesignationFamily, UNCLASSIFIED_GROUP_KEY, type FamilySource } from "./article-family";
 
 export type GroupableItem = {
   articleName: string;
@@ -34,6 +34,20 @@ export type GroupedLine = GroupableItem & {
   producedQty: number;
   deliveredQty: number;
   remaining: number;
+  /** Puissance (W) lue dans la désignation ; null si absente */
+  power: number | null;
+  /** Origine de la famille de cette ligne ; null si À classifier */
+  familySource: FamilySource | null;
+};
+
+/** Sous-total d'un groupe pour une puissance donnée (null = puissance non précisée) */
+export type PowerBreakdown = {
+  power: number | null;
+  lines: number;
+  quantity: number;
+  producedQty: number;
+  deliveredQty: number;
+  remaining: number;
 };
 
 export type ArticleGroup = {
@@ -48,6 +62,8 @@ export type ArticleGroup = {
   totalRemaining: number;
   /** Noms d'articles distincts présents dans le groupe */
   variants: string[];
+  /** Répartition par puissance (triée croissante, puissance inconnue en dernier) */
+  powerBreakdown: PowerBreakdown[];
 };
 
 /** Normalise un nom d'article (accents, casse, espaces) */
@@ -78,6 +94,8 @@ export function groupArticles(items: GroupableItem[], manualFamilies?: ReadonlyM
     // Affectation manuelle (catalogue admin) prioritaire ; sinon classification automatique
     const key = resolveDesignationFamily(item.articleName, manualFamilies?.get(item.articleName) ?? null).familyKey
       ?? UNCLASSIFIED_GROUP_KEY;
+    const resolved = resolveDesignationFamily(item.articleName, manualFamilies?.get(item.articleName) ?? null);
+    const power = classifyArticleDesignation(item.articleName).power;
     let group = map.get(key);
     if (!group) {
       group = {
@@ -89,6 +107,7 @@ export function groupArticles(items: GroupableItem[], manualFamilies?: ReadonlyM
         totalDelivered: 0,
         totalRemaining: 0,
         variants: [],
+        powerBreakdown: [],
       };
       map.set(key, group);
     }
@@ -98,7 +117,18 @@ export function groupArticles(items: GroupableItem[], manualFamilies?: ReadonlyM
     const deliveredQty = Number(item.deliveredQty) || 0;
     const remaining = Math.max(0, quantity - deliveredQty);
 
-    group.lines.push({ ...item, quantity, producedQty, deliveredQty, remaining });
+    group.lines.push({ ...item, quantity, producedQty, deliveredQty, remaining, power, familySource: resolved.source });
+
+    let bucket = group.powerBreakdown.find(b => b.power === power);
+    if (!bucket) {
+      bucket = { power, lines: 0, quantity: 0, producedQty: 0, deliveredQty: 0, remaining: 0 };
+      group.powerBreakdown.push(bucket);
+    }
+    bucket.lines += 1;
+    bucket.quantity += quantity;
+    bucket.producedQty += producedQty;
+    bucket.deliveredQty += deliveredQty;
+    bucket.remaining += remaining;
     group.totalQuantity += quantity;
     group.totalProduced += producedQty;
     group.totalDelivered += deliveredQty;
@@ -111,6 +141,11 @@ export function groupArticles(items: GroupableItem[], manualFamilies?: ReadonlyM
   const groups = [...map.values()];
   for (const g of groups) {
     g.variants.sort((a, b) => a.localeCompare(b, "fr"));
+    g.powerBreakdown.sort((a, b) => {
+      if (a.power === null) return 1;
+      if (b.power === null) return -1;
+      return a.power - b.power;
+    });
     // Tri : article puis affaire (regroupement lisible « article → affaires »)
     g.lines.sort((a, b) => {
       const byArticle = (a.articleName || "").localeCompare(b.articleName || "", "fr");
