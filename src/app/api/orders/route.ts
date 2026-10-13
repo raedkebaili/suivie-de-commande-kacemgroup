@@ -1,12 +1,13 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { orders, orderItems, clients, agencies, itemTechnicalComponents, driveDocuments, photometricStudies, expeditionPlanEntries } from "@/db/schema";
+import { orders, orderItems, clients, agencies, itemTechnicalComponents, driveDocuments, photometricStudies, expeditionPlanEntries, productionPlanEntries } from "@/db/schema";
 import { eq, desc, and, inArray, sql } from "drizzle-orm";
 import { logActivity, getUserFromHeaders } from "@/lib/auth";
 import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
 import { generateOrderNumber } from "@/lib/order-number";
 import { agencyScopeForUser } from "@/lib/agency-access";
+import { planningCancelCauses } from "@/lib/planning-cancellation";
 
 async function auth(r: Request, roles?: string[]) {
   const u = await getUserFromHeaders(r);
@@ -119,6 +120,22 @@ export async function GET(request: NextRequest) {
     : [];
   const docByOrder = new Map(docStats.map(d => [d.orderId, d]));
 
+  // Causes d'annulation saisies dans le planning (affichées en alternance sur la ligne)
+  const planningCancelRows = oids.length > 0
+    ? await db.select({
+        orderId: productionPlanEntries.orderId,
+        articleName: productionPlanEntries.articleName,
+        status: productionPlanEntries.status,
+        reason: productionPlanEntries.reason,
+        appliedAt: productionPlanEntries.appliedAt,
+      }).from(productionPlanEntries)
+        .where(and(inArray(productionPlanEntries.orderId, oids), eq(productionPlanEntries.status, "ANNULE")))
+    : [];
+  const causesByOrder = new Map<number, string[]>();
+  for (const orderId of new Set(planningCancelRows.map(r => r.orderId))) {
+    causesByOrder.set(orderId, planningCancelCauses(planningCancelRows.filter(r => r.orderId === orderId)));
+  }
+
   return NextResponse.json({
     orders: data.map(o => {
       const items = allItems.filter(i => i.orderId === o.id).map(item => {
@@ -145,6 +162,7 @@ export async function GET(request: NextRequest) {
         documentCount: docStat ? Number(docStat.totalCount) : 0,
         hasCahierDesCharges: docStat ? Number(docStat.cahierCount) > 0 : false,
         hasPhotometricStudy: studyOrderIds.has(o.id),
+        planningCancelCauses: causesByOrder.get(o.id) || [],
       };
     })
   });

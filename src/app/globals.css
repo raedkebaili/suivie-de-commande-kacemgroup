@@ -358,3 +358,38 @@ html { transition: background-color 0.3s ease, color 0.3s ease; }
   z-index: 1;
   background-color: inherit;
 }
+
+/* Cause d'annulation du planning : alternance lente avec le contenu de la ligne.
+   Les deux couches occupent la même case de grille ; cycle de 9 s. */
+.planning-cause-grid {
+  display: inline-grid;
+  vertical-align: middle;
+  max-width: 240px;
+}
+.planning-cause-grid > * {
+  grid-area: 1 / 1;
+}
+.planning-cause-normal {
+  animation: planningCauseNormal 9s ease-in-out infinite;
+}
+.planning-cause-msg {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: planningCauseMsg 9s ease-in-out infinite;
+}
+@keyframes planningCauseNormal {
+  0%, 40% { opacity: 1; }
+  55%, 95% { opacity: 0; }
+  100% { opacity: 1; }
+}
+@keyframes planningCauseMsg {
+  0%, 40% { opacity: 0; }
+  55%, 95% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .planning-cause-normal { animation: none !important; opacity: 0 !important; }
+  .planning-cause-msg { animation: none !important; opacity: 1 !important; }
+}

@@ -1,11 +1,12 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { productionPlanEntries } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { orderItems, orders, productionPlanEntries } from "@/db/schema";
+import { eq, inArray } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
 import { applyProductionQuantity } from "@/lib/production-apply";
+import { orderCancelledFromPlanning, PLANNING_ORDER_CANCEL_REASON } from "@/lib/planning-cancellation";
 import {
   PLANNING_MANAGER_ROLES,
   PLANNING_STATUS_BY_KEY,
@@ -116,6 +117,42 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         (applied && applied.ok ? ` | +${applied.actualQty} produit` : ""));
     }
 
+    // ── Annulation de la commande entière depuis le planning ──
+    // Si TOUS les articles de la commande sont annulés dans le planning, la
+    // commande passe au statut commande « Annulée » (même effet que le formulaire
+    // Détails > Planification). Une commande livrée n'est jamais modifiée.
+    let orderCancelled = false;
+    if (body.status === "ANNULE" && entry.status !== "ANNULE") {
+      const itemRows = await db.select({ id: orderItems.id }).from(orderItems).where(eq(orderItems.orderId, entry.orderId));
+      const itemIds = itemRows.map((r) => r.id);
+      const planLines = itemIds.length > 0
+        ? await db.select({ itemId: productionPlanEntries.itemId, status: productionPlanEntries.status })
+            .from(productionPlanEntries).where(inArray(productionPlanEntries.itemId, itemIds))
+        : [];
+      if (orderCancelledFromPlanning(itemIds, planLines)) {
+        const [order] = await db.select().from(orders).where(eq(orders.id, entry.orderId)).limit(1);
+        if (order && order.productionStatus !== "ANNULEE" && order.productionStatus !== "LIVREE") {
+          await db.update(orders).set({
+            productionStatus: "ANNULEE",
+            cancelReason: PLANNING_ORDER_CANCEL_REASON,
+            cancelledBy: user.fullName,
+            cancelledAt: now,
+          }).where(eq(orders.id, entry.orderId));
+          orderCancelled = true;
+          await logActivity(user.id, user.username, "PLANNING_ORDER_CANCELLED",
+            `Commande ${order.orderNumber}: tous les articles annulés dans le planning`);
+          await notifyRoles(["commercial"], {
+            eventKey: NOTIFICATION_EVENTS.ORDER_CANCELLED,
+            type: "error",
+            title: `Commande annulée #${order.orderNumber}`,
+            message: `La commande ${order.orderNumber} a été annulée : tous ses articles ont été annulés dans le planning`,
+            orderId: entry.orderId,
+            targetTab: "orders",
+          });
+        }
+      }
+    }
+
     if (meaningfulChange) {
       await notifyRoles(["consultant_prod"], {
         eventKey: NOTIFICATION_EVENTS.PLANNING_UPDATED,
@@ -128,6 +165,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
     return NextResponse.json({
       entry: updated,
+      orderCancelled,
       applied: applied && applied.ok
         ? { actualQty: applied.actualQty, cumulative: applied.cumulative, remaining: applied.remaining,
             priorityPromotion: applied.priorityPromotion }

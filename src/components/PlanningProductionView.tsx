@@ -389,6 +389,29 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
         Les couleurs sont personnalisables dans l&apos;onglet Couleurs (section « Planning de Production »).
       </p>
 
+      {/* Mode d'emploi des annulations (encart visible en permanence) */}
+      <section aria-label="Comment annuler une commande ou un article" className="rounded-xl border-2 border-red-500 bg-red-50 dark:bg-red-950/40 dark:border-red-500 p-4 space-y-2 shadow-sm">
+        <h4 className="text-sm font-bold text-red-800 dark:text-red-300">⚠️ Annuler une commande ou un article</h4>
+        <ul className="list-disc pl-5 space-y-1 text-xs text-gray-800 dark:text-gray-100">
+          <li>
+            <b>Annuler toute la commande</b> : ouvrez la commande dans l&apos;onglet <b>Commandes</b> (bouton <b>Détails</b>),
+            allez dans le formulaire <b>Détails</b>, rubrique <b>Planification</b>, et choisissez l&apos;état <b>Annulée</b>.
+          </li>
+          <li>
+            <b>Annuler un article de la commande</b> : le planning de production s&apos;en occupe. Passez sa ligne à <b>Annulé</b> et
+            saisissez la cause dans la colonne <b>Raison</b> (obligatoire).
+          </li>
+          <li>
+            <b>Annuler toute la commande depuis le planning</b> : annulez <b>un par un tous ses articles</b> dans le planning.
+            Quand tous les articles de la commande sont annulés, la commande passe automatiquement en <b>Annulée</b>.
+          </li>
+        </ul>
+        <p className="text-[11px] text-red-700 dark:text-red-300">
+          Les causes saisies apparaissent dans le tableau des commandes, en alternance avec la couleur de la ligne.
+          Une commande annulée reste annulée : pour la rouvrir, modifiez son état dans le formulaire Détails.
+        </p>
+      </section>
+
       {/* Sélecteur d'articles */}
       {showPicker && canManage && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
