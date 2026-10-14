@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 /**
  * Cause d'annulation saisie dans le planning de production.
- * Affichée en alternance LENTE avec le contenu normal de la cellule d'état
+ * Affichée en alternance rapide avec le contenu normal de la cellule d'état
  * (la couleur de la ligne reste visible). Animation CSS « planning-cause-*»,
  * désactivée automatiquement si l'utilisateur préfère moins d'animations.
  */

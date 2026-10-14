@@ -18,7 +18,8 @@ type DriveFile = {
 };
 type Stats = {
   account: string | null; rootFolderName: string; fileCount: number; folderCount: number;
-  managedSize: number; lastFile: { name: string; modifiedTime: string } | null; lastSync: string;
+  managedSize: number; lastFile: { name: string; modifiedTime: string } | null; lastSync: string | null;
+  partial?: boolean; scannedAt?: string;
   quota: { limit: number | null; usage: number | null; available: number | null; percent: number | null; unlimited: boolean };
 };
 
@@ -46,6 +47,8 @@ export default function StorageView({ user }: { user: User }) {
 
   const [cfg, setCfg] = useState<Cfg | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState("");
   const [files, setFiles] = useState<DriveFile[]>([]);
   const [breadcrumb, setBreadcrumb] = useState<{ id: string; name: string }[]>([]);
   const [folderId, setFolderId] = useState<string>("");
@@ -94,12 +97,21 @@ export default function StorageView({ user }: { user: User }) {
     } catch (e) { setError(e instanceof Error ? e.message : "Erreur de chargement"); }
   }, [folderId, debounced, pageSize, sort, typeFilter]);
 
-  const loadStats = useCallback(async () => {
-    try { setStats(await apiFetch<Stats>("/api/storage/stats")); } catch { /* non bloquant */ }
+  /** refresh=true : recalcul côté serveur (après une action ou « Actualiser ») ; sinon réutilise le cache serveur */
+  const loadStats = useCallback(async (refresh = true) => {
+    setStatsLoading(true);
+    try {
+      setStats(await apiFetch<Stats>(`/api/storage/stats${refresh ? "?refresh=1" : ""}`));
+      setStatsError("");
+    } catch (err) {
+      setStatsError(err instanceof Error ? err.message : "Statistiques indisponibles");
+    } finally {
+      setStatsLoading(false);
+    }
   }, []);
 
   useEffect(() => { loadConfig().finally(() => setLoading(false)); }, [loadConfig]);
-  useEffect(() => { if (cfg?.connected) { loadFiles(); loadStats(); } }, [cfg?.connected, loadFiles, loadStats]);
+  useEffect(() => { if (cfg?.connected) { loadFiles(); loadStats(false); } }, [cfg?.connected, loadFiles, loadStats]);
 
   // Retour depuis la fenêtre OAuth
   useEffect(() => {
@@ -354,10 +366,10 @@ export default function StorageView({ user }: { user: User }) {
           {/* Tableau de bord */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
-              { label: "Fichiers", value: stats ? String(stats.fileCount) : "…", sub: stats ? `${stats.folderCount} dossier(s)` : "" },
-              { label: "Volume géré", value: stats ? fmtSize(stats.managedSize) : "…", sub: "fichiers de la plateforme" },
-              { label: "Dernier fichier", value: stats?.lastFile?.name || "—", sub: stats?.lastFile ? fmtDate(stats.lastFile.modifiedTime) : "" },
-              { label: "Dernière synchro.", value: stats ? fmtDate(stats.lastSync) : "…", sub: stats?.account || "" },
+              { label: "Fichiers", value: stats ? String(stats.fileCount) : statsError ? "—" : "Calcul…", sub: stats ? `${stats.folderCount} dossier(s)${stats.partial ? " · décompte partiel" : ""}` : "" },
+              { label: "Volume géré", value: stats ? fmtSize(stats.managedSize) : statsError ? "—" : "Calcul…", sub: "fichiers de la plateforme" },
+              { label: "Dernier fichier", value: stats?.lastFile?.name || (statsLoading && !stats ? "Calcul…" : "—"), sub: stats?.lastFile ? fmtDate(stats.lastFile.modifiedTime) : "" },
+              { label: "Dernière synchro.", value: fmtDate(cfg?.lastSyncAt ?? stats?.lastSync), sub: stats?.account || "" },
             ].map((c, i) => (
               <div key={i} className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-4">
                 <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">{c.label}</div>
@@ -366,6 +378,13 @@ export default function StorageView({ user }: { user: User }) {
               </div>
             ))}
           </div>
+
+          {statsError && (
+            <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-300 flex items-center justify-between gap-3">
+              <span>Statistiques indisponibles : {statsError}</span>
+              <button onClick={() => loadStats(true)} disabled={statsLoading} className="px-2 py-1 rounded bg-white dark:bg-gray-800 border border-amber-300 dark:border-amber-700 disabled:opacity-60">Réessayer</button>
+            </div>
+          )}
 
           {/* Espace disponible — valeurs réelles Google */}
           {stats && (
@@ -405,7 +424,7 @@ export default function StorageView({ user }: { user: User }) {
             <select value={pageSize} onChange={e => setPageSize(parseInt(e.target.value))} className="px-2 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">
               <option value={25}>25/page</option><option value={50}>50/page</option><option value={100}>100/page</option>
             </select>
-            <button onClick={() => { loadFiles(); loadStats(); }} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg text-sm text-gray-700 dark:text-gray-200">🔄 Actualiser</button>
+            <button onClick={() => { loadFiles(); loadStats(true); }} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg text-sm text-gray-700 dark:text-gray-200">🔄 Actualiser</button>
             <div className="flex-1" />
             {canManageFiles && <>
               <button onClick={createFolder} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">📁 Nouveau dossier</button>

@@ -153,7 +153,7 @@ html { transition: background-color 0.3s ease, color 0.3s ease; }
   display: inline-flex;
   align-items: center;
   min-width: max-content;
-  animation: notificationTicker 30s linear infinite;
+  animation: notificationTicker 12s linear infinite;
 }
 @keyframes notificationTicker {
   from { transform: translateX(100vw); }
@@ -359,8 +359,8 @@ html { transition: background-color 0.3s ease, color 0.3s ease; }
   background-color: inherit;
 }
 
-/* Cause d'annulation du planning : alternance lente avec le contenu de la ligne.
-   Les deux couches occupent la même case de grille ; cycle de 9 s. */
+/* Cause d'annulation du planning : alternance avec le contenu de la ligne.
+   Les deux couches occupent la même case de grille ; cycle de 6 s. */
 .planning-cause-grid {
   display: inline-grid;
   vertical-align: middle;
@@ -370,14 +370,14 @@ html { transition: background-color 0.3s ease, color 0.3s ease; }
   grid-area: 1 / 1;
 }
 .planning-cause-normal {
-  animation: planningCauseNormal 9s ease-in-out infinite;
+  animation: planningCauseNormal 6s ease-in-out infinite;
 }
 .planning-cause-msg {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  animation: planningCauseMsg 9s ease-in-out infinite;
+  animation: planningCauseMsg 6s ease-in-out infinite;
 }
 @keyframes planningCauseNormal {
   0%, 40% { opacity: 1; }
