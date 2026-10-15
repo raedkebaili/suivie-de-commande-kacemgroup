@@ -7,14 +7,15 @@ import ForcePasswordChange from "@/components/ForcePasswordChange";
 import MobileHome from "@/components/mobile/MobileHome";
 import MobileOrders from "@/components/mobile/MobileOrders";
 import MobileOrderDetail from "@/components/mobile/MobileOrderDetail";
+import MobileMore from "@/components/mobile/MobileMore";
 import MobileAccount from "@/components/mobile/MobileAccount";
 
-type MobileTab = "home" | "orders" | "account";
+type MobileTab = "home" | "orders" | "more" | "account";
 
 const TABS: { key: MobileTab; label: string; icon: string }[] = [
   { key: "home", label: "Accueil", icon: "🏠" },
   { key: "orders", label: "Commandes", icon: "📦" },
-  { key: "account", label: "Compte", icon: "👤" },
+  { key: "more", label: "Plus", icon: "•••" },
 ];
 
 const LOGIN_URL = "/login?next=%2Fmobile";
@@ -69,15 +70,20 @@ export default function MobileApp() {
           <MobileHome user={user} onSeeOrders={() => selectTab("orders")} onSessionExpired={onSessionExpired} />
         ) : tab === "orders" ? (
           <MobileOrders user={user} onOpen={openOrder} onSessionExpired={onSessionExpired} />
+        ) : tab === "more" ? (
+          <MobileMore onOpenAccount={() => selectTab("account")} />
         ) : (
-          <MobileAccount user={user} onLogout={onSessionExpired} />
+          <>
+            <button type="button" onClick={() => selectTab("more")} className="min-h-[44px] text-sm font-medium text-blue-700 dark:text-blue-300">← Retour à Plus</button>
+            <MobileAccount user={user} onLogout={onSessionExpired} />
+          </>
         )}
       </main>
 
       <nav aria-label="Navigation principale" className="fixed bottom-0 inset-x-0 z-20 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 pb-[env(safe-area-inset-bottom)]">
         <div className="grid grid-cols-3 max-w-xl mx-auto">
           {TABS.map((t) => {
-            const active = orderId === null && tab === t.key;
+            const active = orderId === null && (tab === t.key || (t.key === "more" && tab === "account"));
             return (
               <button
                 key={t.key}

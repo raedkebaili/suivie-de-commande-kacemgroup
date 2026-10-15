@@ -31,7 +31,8 @@ Elle utilise le même site, la même base de données et les mêmes API que la v
 - **Fiche commande** : sections Informations, Priorité et état, Articles, Planification.
 - **Formulaire de planification** (responsable planification et superadmin) : priorité, état, motif, cause d'annulation.
   - Le responsable planification choisit « En instance » ou « Annulée ». « En production » et « Livrée » se soldent dans le planning (version ordinateur).
-- **Compte** : profil, aide à l'installation, lien vers la version ordinateur, déconnexion.
+- **Plus** : accès à « Mon compte », aide à l’installation Android/iPhone et lien vers la version ordinateur. Les autres modules restent accessibles dans cette dernière selon les droits existants.
+- **Mon compte** (depuis Plus) : profil et déconnexion, avec un bouton « Retour à Plus ». L’onglet Plus reste actif pendant la consultation du compte.
 
 Les règles d'accès et de statut sont celles du serveur. L'interface ne fait qu'afficher ce qui est permis.
 
@@ -69,3 +70,14 @@ Chaque nouveau déploiement est pris en compte automatiquement : le service work
 - Pas de publication dans les boutiques, pas d'application native : c'est volontaire.
 - Les modifications complètes de commande (articles, spécifications techniques, création) restent sur la version ordinateur.
 - Le rendu n'a pas été vérifié sur de vrais appareils dans cet environnement : la checklist ci-dessus doit être faite sur un Android et un iPhone réels.
+
+## Vérification du menu Plus
+
+Sur un écran étroit, connecté avec chaque rôle :
+
+1. Vérifier les trois onglets Accueil, Commandes et Plus (zones tactiles ≥ 44 px).
+2. Ouvrir Plus puis Mon compte : vérifier le profil, le retour à Plus et l’onglet actif.
+3. Depuis une fiche commande, toucher Plus : la fiche se ferme et le menu apparaît.
+4. Vérifier l’aide Android/iPhone et le lien Version ordinateur (`/?bureau=1`).
+5. Vérifier le mode sombre et la navigation clavier (focus visible des raccourcis).
+6. Se déconnecter depuis Mon compte : retour à la connexion mobile.
