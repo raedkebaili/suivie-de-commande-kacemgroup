@@ -6,6 +6,7 @@ import { eq, count, desc } from "drizzle-orm";
 import { logActivity, logModification, getUserFromHeaders } from "@/lib/auth";
 import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
 import { agencyScopeForUser } from "@/lib/agency-access";
+import { planningStateRedirect } from "@/lib/order-state-redirect";
 
 async function auth(r: Request, roles?: string[]) {
   const u = await getUserFromHeaders(r);
@@ -294,6 +295,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   // ── PLANIFICATION: priority + productionStatus (independent from commercial status) ──
+  // Le planificateur ne peut pas forcer « En production » ni « Livrée » : ces états se soldent
+  // dans le planning (refus avant toute écriture ; l'interface redirige l'utilisateur).
+  if (body.productionStatus !== undefined) {
+    const redirect = planningStateRedirect(a.user.role, existing.productionStatus, body.productionStatus);
+    if (redirect) return NextResponse.json({ error: redirect.notice, redirectTab: redirect.tab }, { status: 409 });
+  }
   if (["superadmin", "planification"].includes(a.user.role)) {
     if (body.priority !== undefined) updates.priority = body.priority;
     if (body.productionStatus !== undefined) {

@@ -18,6 +18,7 @@ import OrderItemRow from "@/components/OrderItemRow";
 import TableFullscreen from "@/components/TableFullscreen";
 import { type ShortcutRequest } from "@/lib/keyboard-shortcuts";
 import { orderModalSaveRights } from "@/lib/order-modal-permissions";
+import { planningStateRedirect, setPlanningNotice } from "@/lib/order-state-redirect";
 import { canManageOrderColumnVisibility, toggleListItem } from "@/lib/order-column-visibility";
 import PlanningCancelCause from "@/components/PlanningCancelCause";
 import DocumentsPanel, { PendingDocumentsZone, uploadPendingDocuments, documentDownloadUrl, type PendingDocument } from "@/components/DocumentsPanel";
@@ -208,7 +209,7 @@ function groupArticleModifications(logs: ModificationLog[]): Map<string, Set<str
   return articleModifications;
 }
 
-export default function OrdersView({ user, pendingAction, onPendingActionHandled }: { user: User; pendingAction?: ShortcutRequest | null; onPendingActionHandled?: () => void }) {
+export default function OrdersView({ user, pendingAction, onPendingActionHandled, onNavigateTab }: { user: User; pendingAction?: ShortcutRequest | null; onPendingActionHandled?: () => void; onNavigateTab?: (tab: string) => void }) {
   const [orders, setOrders] = useState<FullOrder[]>([]);
   const [agencies, setAgencies] = useState<Agency[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -615,7 +616,11 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
           return update;
         })
         .filter(update => update.productionUnit !== undefined || update.plannedLoadingDate !== undefined);
-      await apiFetch(`/api/orders/${editingOrder.id}`,{method:"PUT",body:JSON.stringify({priority:form.priority,productionStatus:form.productionStatus,statusReason:form.statusReason,cancelReason:form.cancelReason,itemUpdates})});
+      // Planification : « En production » et « Livrée » ne se forcent pas ici. Les autres
+      // modifications sont enregistrées, puis l'utilisateur est renvoyé vers le planning qui solde l'état.
+      const redirect = planningStateRedirect(user.role, editingOrder.productionStatus, form.productionStatus);
+      await apiFetch(`/api/orders/${editingOrder.id}`,{method:"PUT",body:JSON.stringify({priority:form.priority,productionStatus:redirect?undefined:form.productionStatus,statusReason:form.statusReason,cancelReason:form.cancelReason,itemUpdates})});
+      if(redirect){setPlanningNotice(redirect.notice);setShowModal(false);setSaving(false);onNavigateTab?.(redirect.tab);return}
     }
     setShowModal(false);rf();fetchOrders()}catch(err:unknown){setError(err instanceof Error?err.message:"Erreur");setSaving(false)}};
 
@@ -1391,7 +1396,7 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
           </select>
           <p className="text-[10px] text-gray-500 mt-1">Priorité 1 = la plus urgente. À la fin de production d&apos;une commande, les suivantes remontent automatiquement d&apos;un niveau.</p>
         </div>
-        <div><label className="block text-[11px] font-medium text-gray-600 mb-1">État</label><select value={form.productionStatus} onChange={e=>setForm({...form,productionStatus:e.target.value})} className="w-full px-2 py-2 bg-white border rounded-lg text-sm"><option value="EN_INSTANCE">🟣 En instance</option><option value="EN_PRODUCTION">🟡 En production</option><option value="LIVREE">🟢 Livrée</option><option value="ANNULEE">🔴 Annulée</option></select></div>
+        <div><label className="block text-[11px] font-medium text-gray-600 mb-1">État</label><select value={form.productionStatus} onChange={e=>setForm({...form,productionStatus:e.target.value})} className="w-full px-2 py-2 bg-white border rounded-lg text-sm"><option value="EN_INSTANCE">🟣 En instance</option><option value="EN_PRODUCTION">🟡 En production</option><option value="LIVREE">🟢 Livrée</option><option value="ANNULEE">🔴 Annulée</option></select>{user.role==="planification"&&<p className="text-[10px] text-gray-500 mt-1">« En production » et « Livrée » se soldent dans le planning (production ou expédition).</p>}</div>
         <div><F l="Motif changement" v={form.statusReason} onChange={v=>setForm({...form,statusReason:v})}/></div>
         {form.productionStatus==="ANNULEE"&&<div className="md:col-span-2"><F l="Cause annulation" v={form.cancelReason} onChange={v=>setForm({...form,cancelReason:v})}/></div>}
       </div>

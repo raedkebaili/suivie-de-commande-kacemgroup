@@ -14,6 +14,7 @@ import {
   todayISO,
 } from "@/lib/production-planning-constants";
 import { priorityColorKey, priorityLabel, prioritySortRank } from "@/lib/priority";
+import { takePlanningNotice } from "@/lib/order-state-redirect";
 
 type Factory = { id: number; code: string; name: string; responsableName: string | null; active: boolean };
 
@@ -46,7 +47,10 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
 
   const [date, setDate] = useState(todayISO());
   const [factories, setFactories] = useState<Factory[]>([]);
+  // Par défaut « Toutes les usines » à chaque ouverture de l'onglet (le composant est remonté à chaque fois)
   const [factoryId, setFactoryId] = useState<string>("");
+  const [planningNotice, setPlanningNotice] = useState("");
+  useEffect(() => { const n = takePlanningNotice(); if (n) setPlanningNotice(n); }, []);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -83,7 +87,7 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
   // Liste des usines (chaque usine a son propre planning)
   useEffect(() => {
     apiFetch<{ factories: Factory[] }>("/api/factories")
-      .then(d => { setFactories(d.factories); setFactoryId(prev => prev || (d.factories.find(f => f.active)?.id ? String(d.factories.find(f => f.active)!.id) : "")); })
+      .then(d => { setFactories(d.factories); })
       .catch(() => {});
   }, []);
 
@@ -239,6 +243,12 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
 
   return (
     <div className="space-y-4">
+      {planningNotice && (
+        <div role="status" className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 text-sm text-amber-900 dark:text-amber-200 flex items-start justify-between gap-3">
+          <span>📌 {planningNotice}</span>
+          <button onClick={() => setPlanningNotice("")} className="text-xs underline whitespace-nowrap">Fermer</button>
+        </div>
+      )}
       {/* En-tête */}
       <div className="flex justify-between items-center flex-wrap gap-2">
         <div>

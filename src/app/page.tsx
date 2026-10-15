@@ -339,7 +339,7 @@ export default function HomePage() {
         </header>
         <main className="flex-1 min-w-0 overflow-y-auto p-2 sm:p-3 lg:p-6 bg-gray-50 dark:bg-gray-950">
           {activeTab === "dashboard" && <DashboardView user={user} />}
-          {activeTab === "orders" && <OrdersView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} />}
+          {activeTab === "orders" && <OrdersView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} onNavigateTab={(tab) => setActiveTab(tab as Tab)} />}
           {activeTab === "production" && <ProductionView user={user} />}
           {activeTab === "expedition" && <ExpeditionView user={user} />}
           {activeTab === "expeditionPlanning" && <ExpeditionPlanningView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} />}

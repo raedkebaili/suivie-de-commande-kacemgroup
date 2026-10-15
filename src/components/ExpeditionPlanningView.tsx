@@ -8,6 +8,7 @@ import { todayISO } from "@/lib/production-planning-constants";
 import { priorityColorKey, priorityLabel, prioritySortRank } from "@/lib/priority";
 import { useColors } from "@/lib/color-context";
 import { getContrastTextColor } from "@/lib/color-utils";
+import { takePlanningNotice } from "@/lib/order-state-redirect";
 
 type Plan = {
   id: number; planDate: string; itemId: number; orderId: number;
@@ -44,6 +45,8 @@ export default function ExpeditionPlanningView({ user, pendingAction, onPendingA
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [planningNotice, setPlanningNotice] = useState("");
+  useEffect(() => { const n = takePlanningNotice(); if (n) setPlanningNotice(n); }, []);
   const [showPicker, setShowPicker] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
   const [prodItems, setProdItems] = useState<ProdItem[]>([]);
@@ -165,6 +168,12 @@ export default function ExpeditionPlanningView({ user, pendingAction, onPendingA
 
   return (
     <div className="space-y-4 operational-content">
+      {planningNotice && (
+        <div role="status" className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 text-sm text-amber-900 dark:text-amber-200 flex items-start justify-between gap-3">
+          <span>📌 {planningNotice}</span>
+          <button onClick={() => setPlanningNotice("")} className="text-xs underline whitespace-nowrap">Fermer</button>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <div><h3 className="text-lg font-semibold">🚚 Planning d&apos;expédition</h3><p className="text-xs text-gray-500">Les articles proposés proviennent uniquement de la production disponible.</p></div>
         <div className="flex-1" />
