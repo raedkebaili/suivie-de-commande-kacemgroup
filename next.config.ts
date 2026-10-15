@@ -44,6 +44,21 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,  // Ne pas révéler le framework en production
   compress: true,          // Compression gzip
 
+  // ── PWA : téléphones redirigés de l'accueil vers la version mobile ──
+  // Uniquement pour les navigateurs de téléphone (Android « Mobile », iPhone, iPod).
+  // Le bureau n'est pas concerné. « ?bureau=1 » permet d'ouvrir l'interface ordinateur.
+  async redirects() {
+    return [
+      {
+        source: "/",
+        has: [{ type: "header", key: "user-agent", value: ".*(Mobi|iPhone|iPod).*" }],
+        missing: [{ type: "query", key: "bureau" }],
+        destination: "/mobile",
+        permanent: false,
+      },
+    ];
+  },
+
   // ── En-têtes de sécurité (CORRECTIF R6) ──
   // La CSP est appliquée partout SAUF à la page de rappel OAuth Google Drive,
   // qui embarque volontairement un petit HTML inline auto-fermant.

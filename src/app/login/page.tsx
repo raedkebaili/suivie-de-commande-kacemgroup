@@ -17,7 +17,9 @@ export default function LoginPage() {
     if (!loading && user && !didRedirect.current) {
       didRedirect.current = true;
       // Retour vers la page demandée (ex. /mobile) : chemin interne uniquement
-      const next = safeNextPath(new URLSearchParams(window.location.search).get("next"));
+      // Téléphone : retour par défaut vers la version mobile (sinon l'accueil bureau)
+      const isPhone = /Mobi|iPhone|iPod/i.test(navigator.userAgent);
+      const next = safeNextPath(new URLSearchParams(window.location.search).get("next"), isPhone ? "/mobile" : "/");
       router.replace(next);
     }
   }, [loading, user, router]);

@@ -26,7 +26,7 @@ export default function MobileAccount({ user, onLogout }: { user: User; onLogout
         </div>
       </Section>
 
-      <Link href="/" className={`${btnGhost} flex items-center justify-center w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl`}>
+      <Link href="/?bureau=1" className={`${btnGhost} flex items-center justify-center w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl`}>
         Ouvrir la version ordinateur
       </Link>
 
