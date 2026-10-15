@@ -5,6 +5,10 @@ import { apiFetch } from "@/lib/api";
 import { useColors } from "@/lib/color-context";
 import { priorityLabel, PRIORITY_OPTIONS } from "@/lib/priority";
 import { canEditPlanningOnMobile, mobilePlanningStateOptions, MOBILE_PRODUCTION_STATES } from "@/lib/mobile-orders";
+import MobileDocuments from "./MobileDocuments";
+import MobilePlanCreate from "./MobilePlanCreate";
+import MobileCommercial, { type CommercialOrder } from "./MobileCommercial";
+import { canManageMobilePlanning } from "@/lib/mobile-planning";
 import MobileTechnicalItem from "./MobileTechnicalItem";
 import type { OrderItem, User } from "@/lib/types";
 import { Notice, Row, Section, StatePill, btnGhost, btnPrimary, fieldClass, fmtDay } from "@/components/mobile/ui";
@@ -25,6 +29,8 @@ type OrderDetail = {
   affaire: string | null;
   clientName: string | null;
   agencyName: string | null;
+  clientId: number;
+  agencyId: number;
   items: DetailItem[];
 };
 
@@ -40,6 +46,7 @@ export default function MobileOrderDetail({ orderId, user, onBack, onSessionExpi
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
+  const [editingCommercial, setEditingCommercial] = useState(false);
   const [saving, setSaving] = useState(false);
   // Brouillon du formulaire de planification
   const [draft, setDraft] = useState({ priority: "NORMALE", productionStatus: "EN_INSTANCE", statusReason: "", cancelReason: "" });
@@ -95,6 +102,10 @@ export default function MobileOrderDetail({ orderId, user, onBack, onSessionExpi
     }
   };
 
+  if (editingCommercial && order && ["superadmin", "commercial"].includes(user.role)) {
+    return <MobileCommercial user={user} order={order as CommercialOrder} onCancel={() => setEditingCommercial(false)} onSaved={() => { setEditingCommercial(false); void load(); }} onSessionExpired={onSessionExpired} />;
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -117,6 +128,7 @@ export default function MobileOrderDetail({ orderId, user, onBack, onSessionExpi
             </div>
           </div>
 
+          {["superadmin", "commercial"].includes(user.role) && <button type="button" className={btnPrimary} onClick={() => setEditingCommercial(true)}>Modifier les données commerciales</button>}
           <Section title="Informations">
             <Row label="Date" value={fmtDay(order.orderDate)} />
             <Row label="Client" value={order.clientName} />
@@ -156,10 +168,13 @@ export default function MobileOrderDetail({ orderId, user, onBack, onSessionExpi
                   )}
                   {it.note && <div className="mt-1 text-xs italic text-slate-500">{it.note}</div>}
                   <MobileTechnicalItem item={it} orderId={order.id} user={user} onSaved={load} onSessionExpired={onSessionExpired} />
+                  {canManageMobilePlanning(user.role) && currentState !== "ANNULEE" && <MobilePlanCreate item={it} onSessionExpired={onSessionExpired} />}
                 </li>
               ))}
             </ul>
           </Section>
+
+          <MobileDocuments orderId={order.id} user={user} onSessionExpired={onSessionExpired} />
 
           {canPlan ? (
             <Section title="Planification">
@@ -180,7 +195,7 @@ export default function MobileOrderDetail({ orderId, user, onBack, onSessionExpi
                 </label>
                 {showCurrentLocked && (
                   <p className="text-xs text-amber-700 dark:text-amber-300">
-                    « En production » et « Livrée » se soldent dans le planning de production ou d&apos;expédition (version ordinateur).
+                    « En production » et « Livrée » se soldent dans le planning de production ou d&apos;expédition, accessibles depuis Plus.
                   </p>
                 )}
 
@@ -200,7 +215,7 @@ export default function MobileOrderDetail({ orderId, user, onBack, onSessionExpi
               </div>
             </Section>
           ) : (
-            <Notice tone="info">Les données commerciales se modifient depuis la version ordinateur. Les composants techniques sont modifiables ci-dessus pour les rôles autorisés.</Notice>
+            <Notice tone="info">Les actions disponibles sur cette fiche dépendent de votre rôle. Les plannings sont accessibles depuis le menu Plus.</Notice>
           )}
         </>
       )}

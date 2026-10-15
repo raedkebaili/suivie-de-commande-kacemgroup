@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import ForcePasswordChange from "@/components/ForcePasswordChange";
@@ -10,6 +10,9 @@ import MobileOrderDetail from "@/components/mobile/MobileOrderDetail";
 import MobileMore from "@/components/mobile/MobileMore";
 import MobileAccount from "@/components/mobile/MobileAccount";
 
+import { MobileDraftContext } from "@/lib/mobile-draft-context";
+import MobileCommercial from "@/components/mobile/MobileCommercial";
+import MobilePlanning from "@/components/mobile/MobilePlanning";
 import MobileDirectory from "@/components/mobile/MobileDirectory";
 import MobileNotifications from "@/components/mobile/MobileNotifications";
 import { canOpenMobileSection, type MobileSection } from "@/lib/mobile-navigation";
@@ -33,6 +36,8 @@ export default function MobileApp() {
   const { user, loading, logout } = useAuth();
   const [tab, setTab] = useState<MobileTab>("home");
   const [orderId, setOrderId] = useState<number | null>(null);
+  const draft = useRef({ dirty: false, busy: false });
+  const reportDraft = useCallback((dirty: boolean, busy: boolean) => { draft.current = { dirty, busy }; }, []);
 
   useEffect(() => {
     if (!loading && !user) router.replace(LOGIN_URL);
@@ -56,9 +61,14 @@ export default function MobileApp() {
 
   const openOrder = (id: number) => setOrderId(id);
   const closeOrder = () => setOrderId(null);
-  const selectTab = (key: MobileTab) => { setTab(key); setOrderId(null); };
+  const selectTab = (key: MobileTab) => {
+    if (draft.current.busy) return;
+    if (draft.current.dirty && !window.confirm("Quitter la saisie sans enregistrer ?")) return;
+    setTab(key); setOrderId(null);
+  };
 
   return (
+    <MobileDraftContext.Provider value={reportDraft}>
     <div className={`${user.darkMode ? "dark" : ""} min-h-[100dvh] flex flex-col bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100`}>
       <header className="sticky top-0 z-20 bg-slate-900 text-white pt-[env(safe-area-inset-top)]">
         <div className="flex items-center justify-between px-4 h-14">
@@ -73,7 +83,7 @@ export default function MobileApp() {
         ) : tab === "home" ? (
           <MobileHome user={user} onSeeOrders={() => selectTab("orders")} onSessionExpired={onSessionExpired} />
         ) : tab === "orders" ? (
-          <MobileOrders user={user} onOpen={openOrder} onSessionExpired={onSessionExpired} />
+          <MobileOrders user={user} onCreate={() => selectTab("newOrder")} onOpen={openOrder} onSessionExpired={onSessionExpired} />
         ) : tab === "more" ? (
           <MobileMore user={user} onOpen={selectTab} />
         ) : (
@@ -81,6 +91,10 @@ export default function MobileApp() {
             <button type="button" onClick={() => selectTab("more")} className="min-h-[44px] text-sm font-medium text-blue-700 dark:text-blue-300">← Retour à Plus</button>
             {!canOpenMobileSection(user.role, tab) ? (
               <p role="alert">Accès refusé.</p>
+            ) : tab === "newOrder" ? (
+              <MobileCommercial user={user} onSaved={(id) => { setTab("orders"); openOrder(id); }} onCancel={() => { setTab("more"); setOrderId(null); }} onSessionExpired={onSessionExpired} />
+            ) : tab === "productionPlanning" || tab === "expeditionPlanning" ? (
+              <MobilePlanning key={tab} kind={tab === "productionPlanning" ? "production" : "expedition"} user={user} onOpenOrder={openOrder} onSessionExpired={onSessionExpired} />
             ) : tab === "notifications" ? (
               <MobileNotifications onOpenOrder={openOrder} onSessionExpired={onSessionExpired} />
             ) : tab === "clients" || tab === "agencies" ? (
@@ -111,5 +125,6 @@ export default function MobileApp() {
         </div>
       </nav>
     </div>
+    </MobileDraftContext.Provider>
   );
 }

@@ -31,7 +31,11 @@ Elle utilise le même site, la même base de données et les mêmes API que la v
 - **Fiche commande** : sections Informations, Priorité et état, Articles, Planification. Chaque article affiche ses anciennes spécifications textuelles et ses composants, avec auteur et date.
 - **Composants techniques** (Technique et Super Admin) : édition par article, recherche référence/libellé, filtre catégorie, sélection multiple, retrait, annulation et sauvegarde via l’API existante. Les matières déjà associées mais absentes du catalogue actif sont conservées tant qu’elles ne sont pas retirées explicitement.
 - **Formulaire de planification** (responsable planification et superadmin) : priorité, état, motif, cause d'annulation.
-  - Le responsable planification choisit « En instance » ou « Annulée ». « En production » et « Livrée » se soldent dans le planning (version ordinateur).
+  - Le responsable planification choisit « En instance » ou « Annulée ». « En production » et « Livrée » se soldent dans les plannings accessibles depuis Plus.
+- **Saisie commerciale** : nouvelle commande depuis Commandes ou Plus ; modification depuis la fiche (Commercial et Super Admin). Date, client, agence, affaire, état commercial, désignation, quantités, prix unitaires, besoin client, notes, télégestion et ajout d’articles. Le rôle Planification peut créer uniquement « Sur Stock / Besoin interne ». Le numéro est attribué par le serveur. Les champs techniques et les champs de planification existants sont conservés.
+- **Documents** : liste dans la fiche commande, ouverture/téléchargement, envoi de fichiers (formats et limite de 50 Mo partagés avec le serveur), association de fichiers du stockage via recherche paginée, dissociation avec confirmation. Ajout pour Super Admin, Commercial et Technique ; retrait pour l’auteur ou Super Admin, hors rôles en consultation. Le fichier reste dans le stockage après dissociation. Google Drive doit être configuré ; les erreurs de configuration ou d’envoi sont affichées.
+- **Planning production** : depuis Plus, consultation par journée, recherche (article, commande, client, usine), accès aux commandes ; gestion pour Super Admin/Planification, consultation aussi pour Consultant Prod et Gérant. Ajout par article depuis la fiche commande avec date, usine et quantité. Modification de la quantité, du statut et du motif ; motif obligatoire pour Suspendu/Annulé. Confirmation avant Terminé (application de la production réelle) et Annulé.
+- **Planning d’expédition** : depuis Plus, consultation par journée et recherche, accès aux commandes ; gestion pour Super Admin/Planification, consultation aussi pour Gérant. Ajout depuis la fiche avec date, quantité, chauffeur et note. Modification de la date, du chauffeur, de la quantité, du statut et de la note. Le stock disponible est produit moins livré ; le serveur vérifie à nouveau lors de la validation. Confirmation avant Livré (application au cumul réel). Les lignes appliquées ne sont plus éditables sur mobile.
 - **Plus** : accès à « Mon compte », aide à l’installation Android/iPhone et lien vers la version ordinateur. Les autres modules restent accessibles dans cette dernière selon les droits existants.
 - **Notifications** (depuis Plus, tous les rôles) : liste personnelle, compteur non lu, marquage lu/non lu, ouverture de la fiche commande et chargement progressif (jusqu’aux 500 dernières notifications). Les erreurs de lecture/écriture sont affichées, sans modification optimiste des données.
 - **Clients** (depuis Plus, superadmin/commercial/recouvrement) : annuaire en cartes, recherche insensible aux accents, coordonnées avec liens téléphone/e-mail, statut et adresse.
@@ -72,7 +76,7 @@ Chaque nouveau déploiement est pris en compte automatiquement : le service work
 ## Limites connues
 
 - Pas de publication dans les boutiques, pas d'application native : c'est volontaire.
-- Les modifications complètes de commande (articles, spécifications techniques, création) restent sur la version ordinateur.
+- La suppression des articles existants, la suppression de commandes et les imports/exports de masse restent sur ordinateur. Les lignes de planning dont les quantités sont déjà appliquées sont en consultation sur mobile.
 - Le rendu n'a pas été vérifié sur de vrais appareils dans cet environnement : la checklist ci-dessus doit être faite sur un Android et un iPhone réels.
 
 ## Vérification du menu Plus
@@ -95,7 +99,7 @@ Sur un écran étroit, connecté avec chaque rôle :
 
 ### Périmètre restant
 
-Les annuaires mobiles sont en lecture seule. La création/modification des clients, agences et commandes, l’édition des anciennes spécifications textuelles, les documents, les plannings production/expédition, les archives, le recouvrement, le stockage et l’administration restent dans la version ordinateur. Les écrans ajoutés réutilisent les API existantes et ne changent ni les droits serveur ni le périmètre agence.
+Les annuaires mobiles sont en lecture seule. La création/modification des clients et agences, l’édition des anciennes spécifications textuelles, les archives, le recouvrement, la gestion complète du stockage et l’administration restent dans la version ordinateur. Les écrans ajoutés réutilisent les API existantes et ne changent ni les droits serveur ni le périmètre agence.
 
 ## Vérification des composants techniques sur mobile
 
@@ -108,3 +112,17 @@ Les annuaires mobiles sont en lecture seule. La création/modification des clien
 7. Tester une erreur réseau, une session expirée et un verrou détenu par un autre utilisateur : erreur affichée, brouillon conservé en cas d’échec d’écriture, possibilité de réessayer.
 
 La sélection du catalogue affiche au maximum 50 résultats à la fois ; une recherche permet de retrouver les autres matières. Le serveur conserve les règles de verrouillage, de traçabilité et de notification existantes.
+
+## Recette documents, plannings et saisie commerciale
+
+Les tests automatisés utilisent des API simulées ; la recette réelle doit être effectuée avec une base de test et un stockage Drive de test, car les validations de planning appliquent de vraies quantités.
+
+1. **Commercial / Super Admin** : depuis Commandes → Nouvelle commande, saisir date, client, agence, état et plusieurs articles ; vérifier le numéro généré et l’ouverture de la fiche. Modifier les informations et ajouter un article ; vérifier que les spécifications techniques, usines, dates de chargement et descriptions existantes sont conservées. Tester une quantité non entière, nulle ou inférieure au cumul produit/livré.
+2. **Planification** : créer une commande Sur Stock sans agence ; vérifier l’agence interne attribuée par le serveur et l’absence des deux autres états commerciaux. Vérifier qu’il n’y a pas d’édition commerciale des commandes existantes pour ce rôle.
+3. **Brouillons commerciaux** : quitter via Annuler ou la navigation du bas et refuser la confirmation ; le formulaire doit rester ouvert. Une navigation est bloquée pendant l’enregistrement. Le navigateur est averti lors d’une fermeture/recharge avec une saisie non enregistrée (selon les restrictions du navigateur mobile). Tester un verrou serveur : erreur visible et brouillon conservé.
+4. **Documents** : envoyer un PDF et une image, choisir leur catégorie, ouvrir/télécharger ; rechercher un fichier existant et l’associer sans le dupliquer. Refuser puis accepter une dissociation ; vérifier que le fichier reste dans Stockage. Tester format interdit, fichier vide, absence de Drive configuré et droits de consultation.
+5. **Production** : ajouter un article à une journée/usine depuis sa fiche ; le retrouver dans Plus → Planning production. Tester recherche, quantité, mise en cours, suspension sans/avec motif. Refuser puis confirmer Terminé ; vérifier le cumul produit côté commande et l’absence de bouton d’édition une fois appliqué. Tester un doublon : le refus doit être affiché, jamais annoncé comme un succès.
+6. **Expédition** : sur un article déjà produit, planifier une quantité disponible, un chauffeur et une date. Modifier la ligne, puis refuser/confirmer Livré ; vérifier le cumul livré et le verrouillage de la ligne mobile. Tester quantité supérieure au stock et doublons, avec erreurs serveur affichées.
+7. **Droits / appareils** : Gérant en consultation des deux plannings, Consultant Prod du seul planning production ; pas de raccourci de gestion pour les autres rôles. Tester en mode sombre, sur Android/iPhone, sur réseau lent et avec une session expirée.
+
+Les fonctions de suppression des lignes de planning et des articles existants, les exports et les opérations groupées ne sont pas exposées dans cette interface mobile.

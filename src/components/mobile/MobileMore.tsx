@@ -25,6 +25,9 @@ export default function MobileMore({ user, onOpen }: { user: User; onOpen: (sect
         </button>
         {([
           { key: "notifications", label: "Notifications" },
+          { key: "newOrder", label: "Nouvelle commande" },
+          { key: "productionPlanning", label: "Planning production" },
+          { key: "expeditionPlanning", label: "Planning d’expédition" },
           { key: "clients", label: "Clients" },
           { key: "agencies", label: "Agences" },
         ] as const).filter((item) => canOpenMobileSection(user.role, item.key)).map((item) => (

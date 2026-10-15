@@ -25,7 +25,7 @@ type OrderCard = {
 const PAGE_SIZE = 30;
 
 /** Liste des commandes en cartes, avec recherche et filtres tactiles */
-export default function MobileOrders({ user, onOpen, onSessionExpired }: { user: User; onOpen: (id: number) => void; onSessionExpired: () => void }) {
+export default function MobileOrders({ user, onCreate, onOpen, onSessionExpired }: { user: User; onCreate: () => void; onOpen: (id: number) => void; onSessionExpired: () => void }) {
   const { getBadgeStyle } = useColors();
   const [orders, setOrders] = useState<OrderCard[]>([]);
   const [loading, setLoading] = useState(true);
@@ -66,6 +66,7 @@ export default function MobileOrders({ user, onOpen, onSessionExpired }: { user:
         <button onClick={load} className={btnGhost}>{loading ? "…" : "🔄 Actualiser"}</button>
       </div>
 
+      {["superadmin", "commercial", "planification"].includes(user.role) && <button type="button" className="min-h-[48px] w-full rounded-xl bg-blue-600 text-white font-semibold" onClick={onCreate}>Nouvelle commande</button>}
       <input
         type="search"
         value={query}
