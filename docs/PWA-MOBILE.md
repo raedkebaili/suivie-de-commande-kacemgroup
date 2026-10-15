@@ -28,7 +28,8 @@ Elle utilise le même site, la même base de données et les mêmes API que la v
 
 - **Accueil** : chiffres du tableau de bord (commandes, états, quantités, avancement).
 - **Commandes** : cartes, recherche (n°, client, agence, affaire ; accents ignorés), filtres d'état et de priorité.
-- **Fiche commande** : sections Informations, Priorité et état, Articles, Planification.
+- **Fiche commande** : sections Informations, Priorité et état, Articles, Planification. Chaque article affiche ses anciennes spécifications textuelles et ses composants, avec auteur et date.
+- **Composants techniques** (Technique et Super Admin) : édition par article, recherche référence/libellé, filtre catégorie, sélection multiple, retrait, annulation et sauvegarde via l’API existante. Les matières déjà associées mais absentes du catalogue actif sont conservées tant qu’elles ne sont pas retirées explicitement.
 - **Formulaire de planification** (responsable planification et superadmin) : priorité, état, motif, cause d'annulation.
   - Le responsable planification choisit « En instance » ou « Annulée ». « En production » et « Livrée » se soldent dans le planning (version ordinateur).
 - **Plus** : accès à « Mon compte », aide à l’installation Android/iPhone et lien vers la version ordinateur. Les autres modules restent accessibles dans cette dernière selon les droits existants.
@@ -94,4 +95,16 @@ Sur un écran étroit, connecté avec chaque rôle :
 
 ### Périmètre restant
 
-Les annuaires mobiles sont en lecture seule. La création/modification des clients, agences et commandes, les spécifications techniques, les documents, les plannings production/expédition, les archives, le recouvrement, le stockage et l’administration restent dans la version ordinateur. Les écrans ajoutés réutilisent les API existantes et ne changent ni les droits serveur ni le périmètre agence.
+Les annuaires mobiles sont en lecture seule. La création/modification des clients, agences et commandes, l’édition des anciennes spécifications textuelles, les documents, les plannings production/expédition, les archives, le recouvrement, le stockage et l’administration restent dans la version ordinateur. Les écrans ajoutés réutilisent les API existantes et ne changent ni les droits serveur ni le périmètre agence.
+
+## Vérification des composants techniques sur mobile
+
+1. Ouvrir une commande contenant plusieurs articles : vérifier les spécifications textuelles, les composants et leur traçabilité.
+2. Avec Technique ou Super Admin, toucher « Modifier les composants » sur un article. Rechercher une référence, filtrer une catégorie, sélectionner plusieurs matières puis enregistrer.
+3. Recharger : vérifier les composants enregistrés et vérifier que les autres articles, quantités et champs commerciaux sont inchangés.
+4. Retirer un composant, annuler, puis rouvrir : la sélection serveur doit être intacte. Tester aussi le retrait de tous les composants.
+5. Vérifier qu’une matière inactive déjà sélectionnée est conservée et peut être retirée explicitement.
+6. Avec les autres rôles : les spécifications sont consultables, sans bouton d’édition technique.
+7. Tester une erreur réseau, une session expirée et un verrou détenu par un autre utilisateur : erreur affichée, brouillon conservé en cas d’échec d’écriture, possibilité de réessayer.
+
+La sélection du catalogue affiche au maximum 50 résultats à la fois ; une recherche permet de retrouver les autres matières. Le serveur conserve les règles de verrouillage, de traçabilité et de notification existantes.

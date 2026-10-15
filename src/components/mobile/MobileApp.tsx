@@ -69,7 +69,7 @@ export default function MobileApp() {
 
       <main className="flex-1 px-4 py-4 pb-28 space-y-4 max-w-xl w-full mx-auto">
         {orderId !== null ? (
-          <MobileOrderDetail orderId={orderId} user={user} onBack={closeOrder} onSessionExpired={onSessionExpired} />
+          <MobileOrderDetail key={orderId} orderId={orderId} user={user} onBack={closeOrder} onSessionExpired={onSessionExpired} />
         ) : tab === "home" ? (
           <MobileHome user={user} onSeeOrders={() => selectTab("orders")} onSessionExpired={onSessionExpired} />
         ) : tab === "orders" ? (

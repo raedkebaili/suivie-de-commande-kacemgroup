@@ -5,19 +5,11 @@ import { apiFetch } from "@/lib/api";
 import { useColors } from "@/lib/color-context";
 import { priorityLabel, PRIORITY_OPTIONS } from "@/lib/priority";
 import { canEditPlanningOnMobile, mobilePlanningStateOptions, MOBILE_PRODUCTION_STATES } from "@/lib/mobile-orders";
-import type { User } from "@/lib/types";
+import MobileTechnicalItem from "./MobileTechnicalItem";
+import type { OrderItem, User } from "@/lib/types";
 import { Notice, Row, Section, StatePill, btnGhost, btnPrimary, fieldClass, fmtDay } from "@/components/mobile/ui";
 
-type DetailItem = {
-  id: number;
-  articleName: string;
-  quantity: number;
-  producedQty?: number | null;
-  deliveredQty?: number | null;
-  productionUnit?: string | null;
-  plannedLoadingDate?: string | null;
-  note?: string | null;
-};
+type DetailItem = OrderItem & { id: number };
 
 type OrderDetail = {
   id: number;
@@ -163,6 +155,7 @@ export default function MobileOrderDetail({ orderId, user, onBack, onSessionExpi
                     </div>
                   )}
                   {it.note && <div className="mt-1 text-xs italic text-slate-500">{it.note}</div>}
+                  <MobileTechnicalItem item={it} orderId={order.id} user={user} onSaved={load} onSessionExpired={onSessionExpired} />
                 </li>
               ))}
             </ul>
@@ -207,7 +200,7 @@ export default function MobileOrderDetail({ orderId, user, onBack, onSessionExpi
               </div>
             </Section>
           ) : (
-            <Notice tone="info">Les modifications de cette commande se font depuis la version ordinateur.</Notice>
+            <Notice tone="info">Les données commerciales se modifient depuis la version ordinateur. Les composants techniques sont modifiables ci-dessus pour les rôles autorisés.</Notice>
           )}
         </>
       )}
