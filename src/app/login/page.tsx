@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { safeNextPath } from "@/lib/safe-redirect";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -13,7 +14,12 @@ export default function LoginPage() {
   const didRedirect = useRef(false);
 
   useEffect(() => {
-    if (!loading && user && !didRedirect.current) { didRedirect.current = true; router.replace("/"); }
+    if (!loading && user && !didRedirect.current) {
+      didRedirect.current = true;
+      // Retour vers la page demandée (ex. /mobile) : chemin interne uniquement
+      const next = safeNextPath(new URLSearchParams(window.location.search).get("next"));
+      router.replace(next);
+    }
   }, [loading, user, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {

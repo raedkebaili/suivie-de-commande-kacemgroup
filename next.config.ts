@@ -54,6 +54,14 @@ const nextConfig: NextConfig = {
         headers: [...SECURITY_HEADERS, { key: "Content-Security-Policy", value: CSP }],
       },
       {
+        // Service worker : jamais en cache navigateur (mises à jour immédiates)
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+          { key: "Service-Worker-Allowed", value: "/" },
+        ],
+      },
+      {
         source: "/api/google-drive/oauth/callback",
         headers: [...SECURITY_HEADERS, { key: "Content-Security-Policy", value: "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" }],
       },
