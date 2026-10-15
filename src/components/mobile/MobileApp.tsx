@@ -10,7 +10,11 @@ import MobileOrderDetail from "@/components/mobile/MobileOrderDetail";
 import MobileMore from "@/components/mobile/MobileMore";
 import MobileAccount from "@/components/mobile/MobileAccount";
 
-type MobileTab = "home" | "orders" | "more" | "account";
+import MobileDirectory from "@/components/mobile/MobileDirectory";
+import MobileNotifications from "@/components/mobile/MobileNotifications";
+import { canOpenMobileSection, type MobileSection } from "@/lib/mobile-navigation";
+
+type MobileTab = "home" | "orders" | "more" | MobileSection;
 
 const TABS: { key: MobileTab; label: string; icon: string }[] = [
   { key: "home", label: "Accueil", icon: "🏠" },
@@ -71,11 +75,19 @@ export default function MobileApp() {
         ) : tab === "orders" ? (
           <MobileOrders user={user} onOpen={openOrder} onSessionExpired={onSessionExpired} />
         ) : tab === "more" ? (
-          <MobileMore onOpenAccount={() => selectTab("account")} />
+          <MobileMore user={user} onOpen={selectTab} />
         ) : (
           <>
             <button type="button" onClick={() => selectTab("more")} className="min-h-[44px] text-sm font-medium text-blue-700 dark:text-blue-300">← Retour à Plus</button>
-            <MobileAccount user={user} onLogout={onSessionExpired} />
+            {!canOpenMobileSection(user.role, tab) ? (
+              <p role="alert">Accès refusé.</p>
+            ) : tab === "notifications" ? (
+              <MobileNotifications onOpenOrder={openOrder} onSessionExpired={onSessionExpired} />
+            ) : tab === "clients" || tab === "agencies" ? (
+              <MobileDirectory key={tab} kind={tab} onSessionExpired={onSessionExpired} />
+            ) : (
+              <MobileAccount user={user} onLogout={onSessionExpired} />
+            )}
           </>
         )}
       </main>
@@ -83,7 +95,7 @@ export default function MobileApp() {
       <nav aria-label="Navigation principale" className="fixed bottom-0 inset-x-0 z-20 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 pb-[env(safe-area-inset-bottom)]">
         <div className="grid grid-cols-3 max-w-xl mx-auto">
           {TABS.map((t) => {
-            const active = orderId === null && (tab === t.key || (t.key === "more" && tab === "account"));
+            const active = orderId === null && (tab === t.key || (t.key === "more" && tab !== "home" && tab !== "orders"));
             return (
               <button
                 key={t.key}

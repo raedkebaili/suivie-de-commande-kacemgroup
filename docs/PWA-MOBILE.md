@@ -32,6 +32,9 @@ Elle utilise le même site, la même base de données et les mêmes API que la v
 - **Formulaire de planification** (responsable planification et superadmin) : priorité, état, motif, cause d'annulation.
   - Le responsable planification choisit « En instance » ou « Annulée ». « En production » et « Livrée » se soldent dans le planning (version ordinateur).
 - **Plus** : accès à « Mon compte », aide à l’installation Android/iPhone et lien vers la version ordinateur. Les autres modules restent accessibles dans cette dernière selon les droits existants.
+- **Notifications** (depuis Plus, tous les rôles) : liste personnelle, compteur non lu, marquage lu/non lu, ouverture de la fiche commande et chargement progressif (jusqu’aux 500 dernières notifications). Les erreurs de lecture/écriture sont affichées, sans modification optimiste des données.
+- **Clients** (depuis Plus, superadmin/commercial/recouvrement) : annuaire en cartes, recherche insensible aux accents, coordonnées avec liens téléphone/e-mail, statut et adresse.
+- **Agences** (depuis Plus, superadmin/commercial) : annuaire en cartes, recherche, code, statut et adresse.
 - **Mon compte** (depuis Plus) : profil et déconnexion, avec un bouton « Retour à Plus ». L’onglet Plus reste actif pendant la consultation du compte.
 
 Les règles d'accès et de statut sont celles du serveur. L'interface ne fait qu'afficher ce qui est permis.
@@ -81,3 +84,14 @@ Sur un écran étroit, connecté avec chaque rôle :
 4. Vérifier l’aide Android/iPhone et le lien Version ordinateur (`/?bureau=1`).
 5. Vérifier le mode sombre et la navigation clavier (focus visible des raccourcis).
 6. Se déconnecter depuis Mon compte : retour à la connexion mobile.
+
+## Vérification des nouveaux écrans du menu Plus
+
+- Tous les rôles : Notifications et Mon compte visibles. Clients visible seulement pour superadmin, commercial et recouvrement ; Agences pour superadmin et commercial.
+- Notifications : actualiser, charger la suite, marquer lu/non lu, ouvrir une commande puis revenir aux notifications. Vérifier les messages en cas de refus d’accès ou d’échec réseau.
+- Annuaires : rechercher par nom/code et coordonnées client ; tester une recherche accentuée, un résultat vide, les liens téléphone/e-mail et « Afficher plus ».
+- Vérifier le retour à Plus, les zones tactiles, le mode sombre et le retour à la connexion en cas de session expirée.
+
+### Périmètre restant
+
+Les annuaires mobiles sont en lecture seule. La création/modification des clients, agences et commandes, les spécifications techniques, les documents, les plannings production/expédition, les archives, le recouvrement, le stockage et l’administration restent dans la version ordinateur. Les écrans ajoutés réutilisent les API existantes et ne changent ni les droits serveur ni le périmètre agence.
