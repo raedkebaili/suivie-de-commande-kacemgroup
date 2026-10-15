@@ -10,8 +10,11 @@
 import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
 import { db } from "@/db";
-import { users, activityLogs, modificationLogs, notifications } from "@/db/schema";
+import { users, activityLogs, modificationLogs } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { readAuthCookie } from "@/lib/auth-cookie";
+import { getAssignedAgencyIds } from "@/lib/agency-access";
+import { initialAdminPasswordError, shouldSeedDefaultUser } from "@/lib/admin-bootstrap";
 
 const TOKEN_TTL = "12h";
 
@@ -26,7 +29,15 @@ function getJwtSecret(): Uint8Array {
   return new TextEncoder().encode(secret);
 }
 
-export type UserPayload = { id: number; username: string; role: string; fullName: string; darkMode: boolean };
+export type UserPayload = {
+  id: number;
+  username: string;
+  role: string;
+  fullName: string;
+  darkMode: boolean;
+  /** Agences attribuées par l'administrateur ; vide = aucune restriction. */
+  agencyIds?: number[];
+};
 
 export async function hashPassword(p: string) { return bcrypt.hash(p, 12); }
 export async function verifyPassword(p: string, h: string) { return bcrypt.compare(p, h); }
@@ -41,9 +52,12 @@ export async function verifyToken(token: string): Promise<UserPayload | null> {
 }
 
 export async function getUserFromHeaders(request: Request): Promise<UserPayload | null> {
-  const h = request.headers.get("authorization");
-  if (!h || !h.startsWith("Bearer ")) return null;
-  const payload = await verifyToken(h.slice(7));
+  const authorization = request.headers.get("authorization");
+  const token = authorization?.startsWith("Bearer ")
+    ? authorization.slice(7)
+    : readAuthCookie(request.headers.get("cookie"));
+  if (!token) return null;
+  const payload = await verifyToken(token);
   if (!payload) return null;
   // R9 — re-validation systématique en base : jeton révoqué de fait si le
   // compte est désactivé ou supprimé ; le rôle est TOUJOURS celui de la base.
@@ -52,7 +66,8 @@ export async function getUserFromHeaders(request: Request): Promise<UserPayload 
       .select({ id: users.id, username: users.username, role: users.role, fullName: users.fullName, darkMode: users.darkMode, active: users.active })
       .from(users).where(eq(users.id, payload.id)).limit(1);
     if (!row || !row.active) return null;
-    return { id: row.id, username: row.username, role: row.role, fullName: row.fullName, darkMode: row.darkMode };
+    const agencyIds = await getAssignedAgencyIds(row.id);
+    return { id: row.id, username: row.username, role: row.role, fullName: row.fullName, darkMode: row.darkMode, agencyIds };
   } catch (error) {
     // Base indisponible : refuser par prudence plutôt qu'authentifier à l'aveugle.
     console.error("[auth] Re-validation utilisateur impossible:", error);
@@ -64,31 +79,27 @@ export async function logActivity(uid: number, uname: string, action: string, de
   await db.insert(activityLogs).values({ userId: uid, username: uname, action, details: details || null });
 }
 
-/** Mot de passe initial du compte admin semé — changement OBLIGATOIRE (R2). */
-export const DEFAULT_ADMIN_PASSWORD = "Admin@2024";
-
+/**
+ * Initialise le premier compte administrateur uniquement dans une base vide.
+ * Le mot de passe initial vient de la variable d'environnement dédiée et doit
+ * être remplacé à la première connexion. Un compte `admin` supprimé alors
+ * que d'autres utilisateurs existent ne doit jamais être recréé en secret.
+ */
 export async function seedDefaultUser() {
-  const ex = await db.select().from(users).where(eq(users.username, "admin")).limit(1);
-  if (ex.length === 0) {
-    const h = await hashPassword(DEFAULT_ADMIN_PASSWORD);
-    // mustChangePassword = true : connexion possible uniquement pour choisir
-    // un nouveau mot de passe unique, aucun accès aux modules avant cela.
-    await db.insert(users).values({ username: "admin", passwordHash: h, role: "superadmin", fullName: "Super Administrateur", active: true, darkMode: false, mustChangePassword: true });
-    console.log("[Seed] Compte admin initialisé — changement de mot de passe obligatoire à la 1re connexion");
-  }
-}
+  const [existingUser] = await db.select({ id: users.id }).from(users).limit(1);
+  if (!shouldSeedDefaultUser(existingUser)) return;
 
-export async function notifyUser(userId: number, type: string, title: string, message: string, orderId?: number) {
-  await db.insert(notifications).values({ userId, type, title, message, orderId: orderId || null, read: false });
+  const initialPassword = process.env.INITIAL_ADMIN_PASSWORD;
+  const initialPasswordError = initialAdminPasswordError(initialPassword);
+  if (initialPasswordError) throw new Error(initialPasswordError);
+
+  const h = await hashPassword(initialPassword as string);
+  // mustChangePassword = true : connexion possible uniquement pour choisir
+  // un nouveau mot de passe unique, aucun accès aux modules avant cela.
+  await db.insert(users).values({ username: "admin", passwordHash: h, role: "superadmin", fullName: "Super Administrateur", active: true, darkMode: false, mustChangePassword: true });
+  console.log("[Seed] Compte administrateur initialisé — changement de mot de passe obligatoire à la 1re connexion");
 }
 
 export async function logModification(orderId: number, userId: number, username: string, field: string, oldValue: string | null, newValue: string | null) {
   await db.insert(modificationLogs).values({ orderId, userId, username, field, oldValue, newValue });
-}
-
-export async function notifyRole(role: string, type: string, title: string, message: string, orderId?: number) {
-  const us = await db.select().from(users).where(eq(users.role, role));
-  for (const u of us) {
-    await notifyUser(u.id, type, title, message, orderId);
-  }
 }

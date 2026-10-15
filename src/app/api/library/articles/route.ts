@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const u = await getUserFromHeaders(request);
   if (!u) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  if (u.role === "gerant") return NextResponse.json({ error: "Accès en lecture seule" }, { status: 403 });
   const { name, description } = await request.json();
   if (!name) return NextResponse.json({ error: "Nom requis" }, { status: 400 });
   const ex = await db.select().from(articleLibrary).where(eq(articleLibrary.name, name.trim())).limit(1);

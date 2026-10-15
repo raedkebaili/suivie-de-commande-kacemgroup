@@ -18,7 +18,7 @@
 
 | Route | Verbe | Rôles | Objectif / règles |
 |---|---|---|---|
-| `/api/auth/login` | POST | public | Vérifie bcrypt, contrôle `active`, renvoie `{token, user}`. **Effet de bord** : appelle `seedDefaultUser()` (crée `admin/admin123` si absent). Journalise `LOGIN`. Pas de rate-limit. |
+| `/api/auth/login` | POST | public | Vérifie bcrypt, contrôle `active`, renvoie `{token, user}`. **Effet de bord** : appelle `seedDefaultUser()` (crée `admin / mot de passe initial configuré hors dépôt` si absent). Journalise `LOGIN`. Pas de rate-limit. |
 | `/api/auth/me` | GET | ✓ | Renvoie l'utilisateur du JWT (sans relecture DB). Seed admin également. |
 | `/api/auth/logout` | POST | ✓ | Journalise `LOGOUT`, renvoie toujours succès (token non révoqué). |
 | `/api/health` | GET | public | Santé + **seeds idempotents** (admin, catégories matières, recouvrement, couleurs archive/planning). `200 {ok:true}` / `500`. |
@@ -34,7 +34,7 @@
 | `/api/orders/[id]` | PUT | ✓ (périmètre par rôle) | **Route multi-sections, une par mission** : ① verrou optimiste 5 min (`423 Locked` si détenu par un autre) ; ② **SA/COM** : infos, statut commercial (`SUR_STOCK/BON_COMMANDE/PREVISION` uniquement), ajout/suppression/modif d'items — un item n'est supprimé que s'il n'a **aucun lot** production/expédition ; chaque champ modifié → `modification_logs` ; ③ **SA/TECH** (`techItems`) : 7 specs techniques avec `*_by/_at` seulement si valeur changée ; (`dynamicTechItems`) : mise à jour **différentielle** des composants matières (suppression/ajout loggés individuellement, traçabilité préservée), en transaction ; marque `tech_completed`, notifie le créateur ; ④ **SA/PLAN** : `priority`, `productionStatus` (+`statusReason`, annulation horodatée), `itemUpdates` (unité de production, date de chargement), marque `planif_completed`, notifie le créateur. Verrou relâché en fin de requête. |
 | `/api/orders/[id]` | DELETE | SA | Suppression ordonnée (batches, logs, notifications, items, commande) — les FK `production_batches/expedition_batches` n'ont pas de cascade, d'où ces `DELETE` manuels. |
 | `/api/orders/column-visibility` | GET/PUT | ✓ | Préférences de colonnes du tableau des commandes. |
-| `/api/orders/grouped-articles` | GET | ✓ | Articles regroupés par 3 premiers caractères significatifs (`article-grouping.ts`). |
+| `/api/orders/grouped-articles` | GET | ✓ | Articles regroupés par 4 premiers caractères significatifs (`article-grouping.ts`). |
 | `/api/orders/export` | GET | ✓ | Classeur Excel des commandes (`excel.ts`, `xlsx`). |
 | `/api/search` | GET | ✓ | Recherche transversale. |
 | `/api/templates` | GET | ✓ | Modèle (template) de fichier d'import. |
@@ -99,7 +99,7 @@
 | `/api/colors` | GET | ✓ | Couleurs dynamiques (tous les clients en ont besoin). |
 | `/api/colors` | PUT/POST | SA | Modification/création de couleurs (onglet Couleurs). |
 | `/api/settings` | GET/PUT | SA | Paramètres système (dont `backup_time`, `backup_max_count`). |
-| `/api/admin/reset-database` | POST | SA | **Réinitialisation totale** : confirmation texte `REINITIALISER` + **mot de passe admin revérifié** ; `TRUNCATE … RESTART IDENTITY CASCADE` sur 16 tables explicites (le CASCADE vide de fait toutes les tables FK-dépendantes) puis recrée `admin/admin123`. |
+| `/api/admin/reset-database` | POST | SA | **Réinitialisation totale** : confirmation texte `REINITIALISER` + **mot de passe admin revérifié** ; `TRUNCATE … RESTART IDENTITY CASCADE` sur 16 tables explicites (le CASCADE vide de fait toutes les tables FK-dépendantes) puis recrée `admin / mot de passe initial configuré hors dépôt`. |
 
 ## 4.7 Sauvegarde / restauration
 

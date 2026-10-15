@@ -1,5 +1,6 @@
 "use client";
 
+import { type ShortcutRequest } from "@/lib/keyboard-shortcuts";
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
@@ -16,7 +17,7 @@ type Factory = {
  * Chaque usine dispose de son propre planning de production.
  * Le responsable est obligatoirement un utilisateur de la plateforme.
  */
-export default function FactoriesView({ user }: { user: User }) {
+export default function FactoriesView({ user, pendingAction, onPendingActionHandled }: { user: User; pendingAction?: ShortcutRequest | null; onPendingActionHandled?: () => void }) {
   const canManage = user.role === "superadmin" || user.role === "planification";
 
   const [items, setItems] = useState<Factory[]>([]);
@@ -89,6 +90,15 @@ export default function FactoriesView({ user }: { user: User }) {
     } catch (err) { setError(err instanceof Error ? err.message : "Erreur"); }
   };
 
+  // Raccourci clavier demandé par la page — voir src/lib/keyboard-shortcuts.ts
+  useEffect(() => {
+    if (pendingAction?.action !== "new-factory") return;
+    onPendingActionHandled?.();
+    if (canManage) { reset(); setShow(true); }
+    // Fonctions locales recréées à chaque rendu : seule la demande pilote l'effet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAction]);
+
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center flex-wrap gap-2">
@@ -99,7 +109,7 @@ export default function FactoriesView({ user }: { user: User }) {
           </p>
         </div>
         {canManage && (
-          <button onClick={() => { reset(); setShow(true); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+          <button onClick={() => { reset(); setShow(true); }} title="Nouvelle usine (Alt+U)" className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
             + Nouvelle usine
           </button>
         )}

@@ -25,6 +25,21 @@ export const agencies = pgTable("agencies", {
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
 });
 
+// Accès agence optionnel attribué par le superadmin.
+// Sans ligne pour un utilisateur : aucune restriction (compatibilité existante).
+// Avec une ou plusieurs lignes : seules ces agences sont visibles sur les
+// commandes et les vues dérivées.
+export const userAgencyAccess = pgTable("user_agency_access", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  agencyId: integer("agency_id").notNull().references(() => agencies.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("user_agency_access_user_agency_unique").on(table.userId, table.agencyId),
+  index("user_agency_access_user_idx").on(table.userId),
+  index("user_agency_access_agency_idx").on(table.agencyId),
+]);
+
 export const clients = pgTable("clients", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().unique(),
@@ -135,6 +150,33 @@ export const expeditionBatches = pgTable("expedition_batches", {
   index("expedition_batches_order_idx").on(table.orderId),
 ]);
 
+// Planning d'expédition journalier. Cette table prépare les chargements sans
+// modifier les quantités réellement livrées : seule l'API /api/expedition
+// écrit dans order_items.delivered_qty et expedition_batches.
+export const expeditionPlanEntries = pgTable("expedition_plan_entries", {
+  id: serial("id").primaryKey(),
+  planDate: text("plan_date").notNull(),
+  itemId: integer("item_id").notNull().references(() => orderItems.id, { onDelete: "cascade" }),
+  orderId: integer("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),
+  articleName: text("article_name").notNull(),
+  orderNumber: text("order_number"),
+  clientName: text("client_name"),
+  plannedQty: integer("planned_qty").notNull().default(0),
+  loadedQty: integer("loaded_qty").notNull().default(0),
+  driverName: text("driver_name").notNull(),
+  status: text("status").notNull().default("NON_TRAITE"),
+  note: text("note"),
+  createdById: integer("created_by_id").references(() => users.id, { onDelete: "set null" }),
+  createdByName: text("created_by_name"),
+  updatedByName: text("updated_by_name"),
+  createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
+}, (table) => [
+  index("expedition_plan_entries_date_driver_idx").on(table.planDate, table.driverName),
+  index("expedition_plan_entries_item_idx").on(table.itemId),
+  index("expedition_plan_entries_status_idx").on(table.status),
+]);
+
 export const productionUnitLib = pgTable("production_unit_lib", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().unique(),
@@ -225,14 +267,21 @@ export const modificationLogs = pgTable("modification_logs", {
 export const notifications = pgTable("notifications", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull().references(() => users.id),
-  type: text("type").notNull(),
+  // eventKey identifie l'événement métier à l'origine de la notification.
+  // type reste conservé comme niveau de gravité pour compatibilité client.
+  eventKey: text("event_key").notNull().default("LEGACY_INFO"),
+  type: text("type").notNull().default("info"),
+  severity: text("severity").notNull().default("info"),
   title: text("title").notNull(),
   message: text("message").notNull(),
   orderId: integer("order_id").references(() => orders.id),
+  targetTab: text("target_tab"),
   read: boolean("read").notNull().default(false),
+  readAt: timestamp("read_at", { mode: "string" }),
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
 }, (table) => [
   index("notifications_user_read_idx").on(table.userId, table.read),
+  index("notifications_user_created_idx").on(table.userId, table.createdAt),
   index("notifications_order_idx").on(table.orderId),
 ]);
 
@@ -317,8 +366,9 @@ export const photometricStudyItems = pgTable("photometric_study_items", {
   productName: text("product_name").notNull(),             // Produit concerné (snapshot serveur en mode commande)
   // ÉVOLUTION ÉTUDES (§10-§21) : lens_id (EXISTANT) devient officiellement
   // l'OVERRIDE imposé par l'étude — priorité absolue sur order_items.lens
-  // pour cette étude uniquement (cf. src/lib/study-lens.ts). La fiche article
-  // n'est JAMAIS modifiée par une étude.
+  // pour la résolution de l'étude (cf. src/lib/study-lens.ts). Lorsqu'une
+  // étude est liée à une commande, l'API recopie aussi la référence dans la
+  // colonne technique existante order_items.lens, sans créer de composant.
   lensId: integer("lens_id").references(() => matieres.id, { onDelete: "set null" }),
   lensReference: text("lens_reference"),                   // Copie de la référence pour historique
   lensLabel: text("lens_label"),                           // Copie du libellé pour historique
@@ -385,9 +435,10 @@ export const storageConfig = pgTable("storage_config", {
 
 // ── Usines (unités de production) ───────────────────────────────────
 // Chaque usine possède son propre planning de production.
-// Le NOM de l'usine est recopié dans order_items.production_unit lors de la
-// planification, afin que le tableau des commandes et l'export Excel
-// continuent d'afficher l'unité de production exactement comme avant.
+// Le NOM de l'usine est recopié dans order_items.production_unit lors de
+// la présélection/modification par le service planification ou lors de
+// l'ajout au planning, afin que le tableau des commandes et l'export Excel
+// affichent la même unité de production.
 export const factories = pgTable("factories", {
   id: serial("id").primaryKey(),
   code: text("code").notNull().unique(),
@@ -489,6 +540,40 @@ export const archiveCellColors = pgTable("archive_cell_colors", {
   updatedByName: text("updated_by_name"),
   updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
 }, (table) => [uniqueIndex("archive_cell_colors_row_col_uq").on(table.rowId, table.columnIndex)]);
+
+// Marquage « modifié par un commercial » : une ligne par cellule modifiée.
+// Distinct de archive_cell_colors (couleurs personnalisées du superadmin).
+export const archiveCellModifications = pgTable("archive_cell_modifications", {
+  id: serial("id").primaryKey(),
+  sheetId: integer("sheet_id").notNull().references(() => archiveSheets.id, { onDelete: "cascade" }),
+  rowId: integer("row_id").notNull().references(() => archiveRows.id, { onDelete: "cascade" }),
+  columnIndex: integer("column_index").notNull(),
+  modifiedById: integer("modified_by_id").references(() => users.id, { onDelete: "set null" }),
+  modifiedByName: text("modified_by_name"),
+  modifiedAt: timestamp("modified_at", { mode: "string" }).notNull().defaultNow(),
+}, (table) => [uniqueIndex("archive_cell_modifications_row_col_uq").on(table.rowId, table.columnIndex)]);
+
+// Catalogue des familles d'articles (géré par le superadmin).
+// Hiérarchie : FAMILLE (catégorie) > SOUS FAMILLE (famille commerciale) > VARIANTE.
+// variant vaut "" lorsqu'il n'y a pas de variante.
+export const articleFamilyCatalog = pgTable("article_family_catalog", {
+  id: serial("id").primaryKey(),
+  category: text("category").notNull(),
+  subFamily: text("sub_family").notNull(),
+  variant: text("variant").notNull().default(""),
+  createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
+}, (table) => [uniqueIndex("article_family_catalog_uq").on(table.category, table.subFamily, table.variant)]);
+
+// Affectation MANUELLE d'une désignation originale à une famille du catalogue.
+// Clé = désignation exacte : aucune donnée de commande n'est modifiée.
+export const articleFamilyAssignments = pgTable("article_family_assignments", {
+  id: serial("id").primaryKey(),
+  designation: text("designation").notNull(),
+  catalogId: integer("catalog_id").notNull().references(() => articleFamilyCatalog.id, { onDelete: "cascade" }),
+  assignedByName: text("assigned_by_name"),
+  assignedAt: timestamp("assigned_at", { mode: "string" }).notNull().defaultNow(),
+}, (table) => [uniqueIndex("article_family_assignments_designation_uq").on(table.designation)]);
 
 // Historique des changements d'état de recouvrement (traçabilité, style activity_logs)
 export const clientRecouvrementLogs = pgTable("client_recouvrement_logs", {

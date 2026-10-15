@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { appColors } from "@/db/schema";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, inArray } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 import { DEFAULT_COLORS, isValidHexColor, normalizeHexColor } from "@/lib/color-utils";
 import { ensureArchiveColors } from "@/lib/archive";
@@ -21,19 +21,22 @@ import { ensurePlanningColors } from "@/lib/production-planning";
  * l'administrateur) ne sont JAMAIS écrasées.
  */
 async function ensureDefaultColors() {
-  for (const color of DEFAULT_COLORS) {
-    const [existing] = await db.select({ id: appColors.id }).from(appColors).where(eq(appColors.key, color.key)).limit(1);
-    if (!existing) {
-      await db.insert(appColors).values({
-        key: color.key,
-        category: color.category,
-        label: color.label,
-        color: color.color,
-        description: color.description,
-        sortOrder: color.sortOrder,
-      });
-    }
-  }
+  const keys = DEFAULT_COLORS.map(color => color.key);
+  const existing = await db.select({ key: appColors.key })
+    .from(appColors)
+    .where(inArray(appColors.key, keys));
+  const existingKeys = new Set(existing.map(color => color.key));
+  const missing = DEFAULT_COLORS.filter(color => !existingKeys.has(color.key));
+  if (missing.length === 0) return;
+
+  await db.insert(appColors).values(missing.map(color => ({
+    key: color.key,
+    category: color.category,
+    label: color.label,
+    color: color.color,
+    description: color.description,
+    sortOrder: color.sortOrder,
+  }))).onConflictDoNothing({ target: appColors.key });
 }
 
 /**
@@ -58,7 +61,9 @@ export async function GET(request: NextRequest) {
       .from(appColors)
       .orderBy(asc(appColors.sortOrder), asc(appColors.label));
 
-    return NextResponse.json({ colors });
+    return NextResponse.json({ colors }, {
+      headers: { "Cache-Control": "private, no-store, max-age=0" },
+    });
   } catch (error) {
     console.error("Erreur lors de la récupération des couleurs:", error);
     return NextResponse.json(

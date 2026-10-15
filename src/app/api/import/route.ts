@@ -8,6 +8,11 @@ import { getUserFromHeaders, logActivity } from "@/lib/auth";
 // Generic import for clients / agencies.
 // For technical component libraries (matières), use /api/matieres instead —
 // it enforces the predefined category list used by the technical spec fields.
+const MAX_FILE_BYTES = 5 * 1024 * 1024;
+const MAX_ROWS = 5_000;
+const ALLOWED_TYPES = new Set(["clients", "agencies"]);
+const EXCEL_EXTENSIONS = /\.(xlsx|xls|csv)$/i;
+
 export async function POST(request: NextRequest) {
   try {
     const user = await getUserFromHeaders(request);
@@ -15,17 +20,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
 
     const fd = await request.formData();
-    const file = fd.get("file") as File;
-    const type = fd.get("type") as string;
+    const file = fd.get("file");
+    const type = String(fd.get("type") || "");
 
-    if (!file) return NextResponse.json({ error: "Fichier requis" }, { status: 400 });
-    if (!type) return NextResponse.json({ error: "Type requis (clients, agencies)" }, { status: 400 });
+    if (!(file instanceof File)) return NextResponse.json({ error: "Fichier requis" }, { status: 400 });
+    if (!ALLOWED_TYPES.has(type)) return NextResponse.json({ error: "Type invalide (clients ou agencies)" }, { status: 400 });
+    if (!EXCEL_EXTENSIONS.test(file.name)) return NextResponse.json({ error: "Format accepté : .xlsx, .xls ou .csv" }, { status: 400 });
+    if (file.size === 0) return NextResponse.json({ error: "Fichier vide" }, { status: 400 });
+    if (file.size > MAX_FILE_BYTES) return NextResponse.json({ error: "Fichier trop volumineux (5 Mo maximum)" }, { status: 400 });
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const XLSX = await import("xlsx");
     const wb = XLSX.read(buffer, { type: "buffer" });
     const sheet = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json<Record<string, string>>(sheet);
+    if (!sheet) return NextResponse.json({ error: "Le fichier ne contient aucune feuille" }, { status: 400 });
+    const rows = XLSX.utils.sheet_to_json<Record<string, string>>(sheet, { defval: "" });
+    if (rows.length > MAX_ROWS) return NextResponse.json({ error: `Le fichier dépasse la limite de ${MAX_ROWS} lignes` }, { status: 400 });
 
     let imported = 0;
     for (const row of rows) {

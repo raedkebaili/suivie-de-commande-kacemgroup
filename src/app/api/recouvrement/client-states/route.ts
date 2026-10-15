@@ -1,9 +1,10 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { clients, clientRecouvrementStates, recouvrementStates } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { clients, clientRecouvrementStates, recouvrementStates, orders } from "@/db/schema";
+import { eq, inArray } from "drizzle-orm";
 import { getUserFromHeaders } from "@/lib/auth";
+import { agencyScopeForUser } from "@/lib/agency-access";
 
 /**
  * GET /api/recouvrement/client-states
@@ -15,6 +16,10 @@ export async function GET(request: NextRequest) {
   if (!u) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
   try {
+    const agencyScope = agencyScopeForUser(u);
+    const visibleClientIds = agencyScope
+      ? db.select({ clientId: orders.clientId }).from(orders).where(inArray(orders.agencyId, agencyScope))
+      : undefined;
     const rows = await db
       .select({
         clientId: clientRecouvrementStates.clientId,
@@ -29,7 +34,8 @@ export async function GET(request: NextRequest) {
       })
       .from(clientRecouvrementStates)
       .innerJoin(recouvrementStates, eq(clientRecouvrementStates.stateId, recouvrementStates.id))
-      .innerJoin(clients, eq(clientRecouvrementStates.clientId, clients.id));
+      .innerJoin(clients, eq(clientRecouvrementStates.clientId, clients.id))
+      .where(visibleClientIds ? inArray(clientRecouvrementStates.clientId, visibleClientIds) : undefined);
 
     return NextResponse.json({ assignments: rows });
   } catch (error) {

@@ -20,7 +20,7 @@ import {
   Download, Eye, FilePlus2, FileSpreadsheet, FileText, File as FileIcon,
   FileImage, HardDrive, Link2, Loader2, Search, Trash2, UploadCloud, X,
 } from "lucide-react";
-import { apiFetch, getToken } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
 import {
   DOCUMENT_CATEGORIES,
@@ -59,8 +59,7 @@ function formatDate(iso: string | null | undefined): string {
 
 /** Lien de téléchargement via la route de Stockage EXISTANTE */
 export function documentDownloadUrl(driveFileId: string, mode: "attachment" | "inline" = "attachment"): string {
-  const token = getToken() || "";
-  return `/api/storage/download/${encodeURIComponent(driveFileId)}?mode=${mode}&token=${encodeURIComponent(token)}`;
+  return `/api/storage/download/${encodeURIComponent(driveFileId)}?mode=${mode}`;
 }
 
 /** Upload séquentiel de documents en attente (flux « création » des formulaires) */
@@ -194,7 +193,7 @@ export default function DocumentsPanel({ entity, entityId, user, canAdd, title, 
   useEffect(() => { load(); }, [load]);
 
   const isAdmin = user.role === "superadmin";
-  const canUnlink = (doc: LinkedDocument) => isAdmin || doc.uploadedById === user.id;
+  const canUnlink = (doc: LinkedDocument) => user.role !== "gerant" && (isAdmin || doc.uploadedById === user.id);
 
   const unlink = async (doc: LinkedDocument) => {
     if (!window.confirm(`Retirer « ${doc.fileName} » de cette ${entity === "order" ? "affaire" : "étude"} ?\nLe fichier restera disponible dans l'onglet Stockage.`)) return;

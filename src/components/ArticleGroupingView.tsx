@@ -1,20 +1,65 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiFetch, getToken } from "@/lib/api";
-import type { ArticleGroup } from "@/lib/article-grouping";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { apiFetch } from "@/lib/api";
+import type { ArticleGroup, GroupedLine, PowerBreakdown } from "@/lib/article-grouping";
+import { UNCLASSIFIED_GROUP_KEY, type FamilySource } from "@/lib/article-family";
+
+const powerLabel = (power: number | null) => (power === null ? "Puissance non précisée" : `${power} W`);
+
+/** Origine lisible de la famille d'une ligne (manuel prime sur automatique) */
+function OriginBadge({ source }: { source: FamilySource | null }) {
+  if (source === "MANUEL") return <span className="px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-300 text-[10px] font-semibold whitespace-nowrap" title="Famille affectée manuellement (catalogue)">Manuel</span>;
+  if (source === "AUTOMATIQUE") return <span className="px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 text-[10px] font-semibold whitespace-nowrap" title="Famille reconnue automatiquement">Auto</span>;
+  return <span className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 text-[10px] font-semibold whitespace-nowrap">À classifier</span>;
+}
+
+/** Trois compteurs lisibles d'un groupe ou d'une répartition */
+function Metric({ label, value, tone }: { label: string; value: number; tone: string }) {
+  return (
+    <span className="inline-flex items-baseline gap-1 whitespace-nowrap">
+      <span className="text-[11px] text-gray-500 dark:text-gray-400">{label}</span>
+      <b className={`text-sm ${tone}`}>{value}</b>
+    </span>
+  );
+}
+
+/** Répartition par puissance d'un groupe : une puce par puissance */
+function PowerBreakdownBar({ breakdown }: { breakdown: PowerBreakdown[] }) {
+  if (breakdown.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-2 px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+      <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 self-center mr-1">Par puissance :</span>
+      {breakdown.map(b => (
+        <span key={String(b.power)} className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-xs">
+          <b className="text-gray-800 dark:text-gray-100">{powerLabel(b.power)}</b>
+          <span className="text-gray-500 dark:text-gray-400">{b.lines} ligne(s)</span>
+          <Metric label="Commandé" value={b.quantity} tone="text-blue-700 dark:text-blue-400" />
+          <Metric label="Reste à livrer" value={b.remaining} tone="text-orange-600 dark:text-orange-400" />
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** Origine d'un groupe : tous manuels, tous automatiques, mixte ou à classifier */
+function groupOrigin(lines: GroupedLine[]): FamilySource | null {
+  const sources = new Set(lines.map(l => l.familySource));
+  if (sources.size === 1) return [...sources][0];
+  return null;
+}
 
 type Totals = { groups: number; lines: number; quantity: number; produced: number; delivered: number; remaining: number };
 
 /**
- * Tableau de regroupement des articles par préfixe de 3 caractères.
+ * Tableau de regroupement des articles par famille identifiée (voir src/lib/article-family.ts).
  * Affiché sous les études photométriques dans l'onglet Commandes.
  *
  * « Toujours à jour » : rechargé à chaque changement de filtre et à chaque
  * rafraîchissement du tableau des commandes (prop refreshKey), donc les
  * nouvelles commandes apparaissent automatiquement.
  */
-export default function ArticleGroupingView({
+function ArticleGroupingView({
   filters,
   refreshKey,
 }: {
@@ -27,7 +72,13 @@ export default function ArticleGroupingView({
   const [error, setError] = useState("");
   const [open, setOpen] = useState(true);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearch(searchDraft), 180);
+    return () => window.clearTimeout(timer);
+  }, [searchDraft]);
 
   const query = useMemo(() => {
     const p = new URLSearchParams();
@@ -64,7 +115,7 @@ export default function ArticleGroupingView({
   const exportXlsx = async () => {
     try {
       const res = await fetch(`/api/orders/grouped-articles?${query}${query ? "&" : ""}format=xlsx`, {
-        headers: { Authorization: `Bearer ${getToken() || ""}` },
+        credentials: "same-origin",
       });
       if (!res.ok) throw new Error("Export impossible");
       const blob = await res.blob();
@@ -98,10 +149,10 @@ export default function ArticleGroupingView({
           <span>{open ? "▾" : "▸"}</span> 📊 Regroupement par Article
         </button>
         {totals && <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">{totals.groups} groupe(s) · {totals.lines} ligne(s)</span>}
-        <span className="text-[11px] text-gray-400 italic">Regroupement sur les 3 premiers caractères du nom d&apos;article</span>
+        <span className="text-[11px] text-gray-400 italic">Une famille = nom + génération. Les puissances sont détaillées dans chaque groupe. « À classifier » est affiché à part.</span>
         <div className="flex-1" />
         {open && <>
-          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Filtrer article, affaire, client..."
+          <input type="text" value={searchDraft} onChange={e => setSearchDraft(e.target.value)} placeholder="🔍 Filtrer article, affaire, client..."
             className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm w-56 text-gray-700 dark:text-gray-200" />
           <button onClick={load} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg text-sm hover:bg-gray-300">🔄 Actualiser</button>
           <button onClick={exportXlsx} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">📤 Exporter</button>
@@ -122,30 +173,38 @@ export default function ArticleGroupingView({
               return (
                 <div key={g.key} className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
                   {/* En-tête du groupe */}
-                  <button onClick={() => toggleGroup(g.key)}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 bg-slate-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-left hover:bg-slate-200 dark:hover:bg-gray-700 transition-colors">
+                  <button onClick={() => toggleGroup(g.key)} aria-expanded={!isCollapsed}
+                    className={`w-full flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 text-left transition-colors ${g.key === UNCLASSIFIED_GROUP_KEY ? "bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/40" : "bg-slate-100 hover:bg-slate-200 dark:bg-gray-800 dark:hover:bg-gray-700"}`}>
                     <span className="text-gray-500 dark:text-gray-400 text-xs">{isCollapsed ? "▸" : "▾"}</span>
-                    <span className="font-mono font-bold text-sm px-2 py-0.5 rounded bg-blue-600 text-white">{g.key}</span>
-                    <span className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">{g.variants.join(" · ")}</span>
+                    <span className={`font-bold text-sm px-2.5 py-0.5 rounded text-white ${g.key === UNCLASSIFIED_GROUP_KEY ? "bg-amber-600" : "bg-blue-600"}`}>{g.key}</span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">{g.variants.length} article(s) · {g.lines.length} ligne(s)</span>
+                    <OriginBadge source={groupOrigin(g.lines)} />
                     <div className="flex-1" />
-                    <span className="text-xs text-gray-600 dark:text-gray-300 whitespace-nowrap">
-                      <b className="text-blue-700 dark:text-blue-400">{g.totalQuantity}</b> cmd · <b>{g.totalProduced}</b> prod · <b>{g.totalDelivered}</b> livré · <b className="text-orange-600 dark:text-orange-400">{g.totalRemaining}</b> reste
-                    </span>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                      <Metric label="Commandé" value={g.totalQuantity} tone="text-blue-700 dark:text-blue-400" />
+                      <Metric label="Produit" value={g.totalProduced} tone="text-gray-700 dark:text-gray-200" />
+                      <Metric label="Livré" value={g.totalDelivered} tone="text-gray-700 dark:text-gray-200" />
+                      <Metric label="Reste à livrer" value={g.totalRemaining} tone="text-orange-600 dark:text-orange-400" />
+                    </div>
                   </button>
 
                   {!isCollapsed && (
+                    <>
+                    <PowerBreakdownBar breakdown={g.powerBreakdown} />
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead>
                           <tr className="bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700 text-left">
                             <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Article</th>
-                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300 text-right">Quantité</th>
+                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Puissance</th>
+                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Famille</th>
+                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300 text-right" title="Quantité commandée">Commandé</th>
                             <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Affaire</th>
                             <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Client</th>
                             <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">N° Cmd</th>
-                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300 text-right">Produit</th>
-                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300 text-right">Livré</th>
-                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300 text-right">Reste</th>
+                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300 text-right" title="Quantité produite">Produit</th>
+                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300 text-right" title="Quantité livrée">Livré</th>
+                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300 text-right">Reste à livrer</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -154,21 +213,25 @@ export default function ArticleGroupingView({
                             const newArticle = i === 0 || l.articleName !== g.lines[i - 1].articleName;
                             return (
                               <tr key={`${g.key}-${i}`} className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 ${newArticle && i > 0 ? "border-t-2 border-t-gray-300 dark:border-t-gray-600" : ""}`}>
-                                <td className={`px-3 py-1.5 ${newArticle ? "font-semibold text-gray-800 dark:text-gray-100" : "text-gray-400 dark:text-gray-500 pl-6"}`}>
-                                  {newArticle ? l.articleName : "↳"}
+                                <td className={`px-3 py-1.5 ${newArticle ? "font-semibold text-gray-800 dark:text-gray-100" : "text-gray-500 dark:text-gray-400"}`}>
+                                  {l.articleName}
                                 </td>
+                                <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300 whitespace-nowrap">{l.power === null ? <span className="text-gray-400 italic">—</span> : `${l.power} W`}</td>
+                                <td className="px-3 py-1.5"><OriginBadge source={l.familySource} /></td>
                                 <td className="px-3 py-1.5 text-right font-bold text-blue-700 dark:text-blue-400">{l.quantity}</td>
                                 <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300">{l.affaire || <span className="text-gray-400 italic">—</span>}</td>
                                 <td className="px-3 py-1.5 text-gray-500 dark:text-gray-400">{l.clientName || "-"}</td>
                                 <td className="px-3 py-1.5 text-gray-500 dark:text-gray-400 font-mono text-[10px]">{l.orderNumber || "-"}</td>
                                 <td className="px-3 py-1.5 text-right text-gray-600 dark:text-gray-300">{l.producedQty}</td>
                                 <td className="px-3 py-1.5 text-right text-gray-600 dark:text-gray-300">{l.deliveredQty}</td>
-                                <td className="px-3 py-1.5 text-right font-medium text-orange-600 dark:text-orange-400">{l.remaining}</td>
+                                <td className="px-3 py-1.5 text-right font-semibold text-orange-600 dark:text-orange-400">{l.remaining}</td>
                               </tr>
                             );
                           })}
                           <tr className="bg-slate-50 dark:bg-gray-800 font-bold border-t-2 border-gray-300 dark:border-gray-600">
-                            <td className="px-3 py-1.5 text-gray-700 dark:text-gray-200">TOTAL {g.key}</td>
+                            <td className="px-3 py-1.5 text-gray-700 dark:text-gray-200">Total « {g.key} »</td>
+                            <td className="px-3 py-1.5"></td>
+                            <td className="px-3 py-1.5"></td>
                             <td className="px-3 py-1.5 text-right text-blue-700 dark:text-blue-400">{g.totalQuantity}</td>
                             <td className="px-3 py-1.5" colSpan={3}></td>
                             <td className="px-3 py-1.5 text-right text-gray-700 dark:text-gray-200">{g.totalProduced}</td>
@@ -178,6 +241,7 @@ export default function ArticleGroupingView({
                         </tbody>
                       </table>
                     </div>
+                    </>
                   )}
                 </div>
               );
@@ -201,3 +265,10 @@ export default function ArticleGroupingView({
     </div>
   );
 }
+
+export default memo(ArticleGroupingView, (previous, next) =>
+  previous.refreshKey === next.refreshKey &&
+  previous.filters.status === next.filters.status &&
+  previous.filters.agency === next.filters.agency &&
+  previous.filters.priority === next.filters.priority,
+);

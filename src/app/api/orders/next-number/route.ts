@@ -1,16 +1,20 @@
 export const dynamic = "force-dynamic";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getNextOrderNumberPreview } from "@/lib/order-number";
+import { getUserFromHeaders } from "@/lib/auth";
 
 /**
  * GET /api/orders/next-number
  * Retourne un aperçu du prochain numéro de commande
  * Format: N/AAAA (ex: 1/2026, 125/2026)
- * 
+ *
  * Note: Ce numéro est indicatif. Le numéro définitif est généré
  * au moment de la création de la commande pour garantir l'unicité.
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const user = await getUserFromHeaders(request);
+  if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+
   try {
     const orderNumber = await getNextOrderNumberPreview();
     return NextResponse.json({ orderNumber });

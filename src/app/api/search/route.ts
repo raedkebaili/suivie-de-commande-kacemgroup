@@ -2,8 +2,9 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { orders, clients, agencies, orderItems } from "@/db/schema";
-import { desc, or, ilike, eq } from "drizzle-orm";
+import { and, desc, or, ilike, eq, inArray } from "drizzle-orm";
 import { getUserFromHeaders } from "@/lib/auth";
+import { agencyScopeForUser } from "@/lib/agency-access";
 
 export async function GET(request: NextRequest) {
   const user = await getUserFromHeaders(request);
@@ -13,6 +14,8 @@ export async function GET(request: NextRequest) {
   if (q.length < 2) return NextResponse.json({ orders: [], items: [], clients: [] });
 
   const like = `%${q}%`;
+  const agencyScope = agencyScopeForUser(user);
+  const orderSearch = or(ilike(orders.orderNumber, like), ilike(orders.affaire, like), ilike(clients.name, like), ilike(clients.code, like));
 
   const foundOrders = await db.select({
     id: orders.id,
@@ -23,7 +26,7 @@ export async function GET(request: NextRequest) {
   }).from(orders)
     .leftJoin(clients, eq(orders.clientId, clients.id))
     .leftJoin(agencies, eq(orders.agencyId, agencies.id))
-    .where(or(ilike(orders.orderNumber, like), ilike(orders.affaire, like), ilike(clients.name, like), ilike(clients.code, like)))
+    .where(agencyScope ? and(inArray(orders.agencyId, agencyScope), orderSearch) : orderSearch)
     .orderBy(desc(orders.createdAt))
     .limit(20);
 
@@ -35,13 +38,21 @@ export async function GET(request: NextRequest) {
   }).from(orderItems)
     .innerJoin(orders, eq(orderItems.orderId, orders.id))
     .leftJoin(clients, eq(orders.clientId, clients.id))
-    .where(ilike(orderItems.articleName, like))
+    .where(agencyScope
+      ? and(inArray(orders.agencyId, agencyScope), ilike(orderItems.articleName, like))
+      : ilike(orderItems.articleName, like))
     .orderBy(desc(orderItems.id))
     .limit(20);
 
-  const foundClients = await db.select().from(clients)
-    .where(or(ilike(clients.name, like), ilike(clients.code, like)))
-    .limit(10);
+  const foundClients = agencyScope
+    ? await db.selectDistinct({ id: clients.id, name: clients.name, code: clients.code })
+      .from(clients)
+      .innerJoin(orders, eq(clients.id, orders.clientId))
+      .where(and(inArray(orders.agencyId, agencyScope), or(ilike(clients.name, like), ilike(clients.code, like))))
+      .limit(10)
+    : await db.select().from(clients)
+      .where(or(ilike(clients.name, like), ilike(clients.code, like)))
+      .limit(10);
 
   return NextResponse.json({ orders: foundOrders, items: foundItems, clients: foundClients, query: q });
 }

@@ -1,9 +1,10 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { clients } from "@/db/schema";
-import { eq, desc, count } from "drizzle-orm";
+import { clients, orders } from "@/db/schema";
+import { eq, desc, count, inArray } from "drizzle-orm";
 import { logActivity, getUserFromHeaders } from "@/lib/auth";
+import { agencyScopeForUser } from "@/lib/agency-access";
 
 async function auth(request: Request, roles?: string[]) {
   const u = await getUserFromHeaders(request);
@@ -14,7 +15,13 @@ async function auth(request: Request, roles?: string[]) {
 
 export async function GET(request: NextRequest) {
   const a = await auth(request); if (!a.ok) return NextResponse.json({ error: a.error }, { status: a.status });
-  const data = await db.select().from(clients).orderBy(desc(clients.createdAt));
+  const agencyScope = agencyScopeForUser(a.user);
+  const visibleClientIds = agencyScope
+    ? db.select({ clientId: orders.clientId }).from(orders).where(inArray(orders.agencyId, agencyScope))
+    : undefined;
+  const data = await db.select().from(clients)
+    .where(visibleClientIds ? inArray(clients.id, visibleClientIds) : undefined)
+    .orderBy(desc(clients.createdAt));
   return NextResponse.json({ clients: data });
 }
 

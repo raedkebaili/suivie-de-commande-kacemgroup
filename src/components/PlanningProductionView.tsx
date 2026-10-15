@@ -1,5 +1,6 @@
 "use client";
 
+import { type ShortcutRequest } from "@/lib/keyboard-shortcuts";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
@@ -13,6 +14,7 @@ import {
   todayISO,
 } from "@/lib/production-planning-constants";
 import { priorityColorKey, priorityLabel, prioritySortRank } from "@/lib/priority";
+import { takePlanningNotice } from "@/lib/order-state-redirect";
 
 type Factory = { id: number; code: string; name: string; responsableName: string | null; active: boolean };
 
@@ -39,13 +41,16 @@ type ProdItem = {
  * l'onglet Production, d'en suivre l'état en temps réel et d'appliquer
  * automatiquement la quantité produite lorsque la ligne passe à « Terminé ».
  */
-export default function PlanningProductionView({ user }: { user: User }) {
+export default function PlanningProductionView({ user, pendingAction, onPendingActionHandled }: { user: User; pendingAction?: ShortcutRequest | null; onPendingActionHandled?: () => void }) {
   const canManage = user.role === "superadmin" || user.role === "planification";
   const { getColor } = useColors();
 
   const [date, setDate] = useState(todayISO());
   const [factories, setFactories] = useState<Factory[]>([]);
+  // Par défaut « Toutes les usines » à chaque ouverture de l'onglet (le composant est remonté à chaque fois)
   const [factoryId, setFactoryId] = useState<string>("");
+  const [planningNotice, setPlanningNotice] = useState("");
+  useEffect(() => { const n = takePlanningNotice(); if (n) setPlanningNotice(n); }, []);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -82,7 +87,7 @@ export default function PlanningProductionView({ user }: { user: User }) {
   // Liste des usines (chaque usine a son propre planning)
   useEffect(() => {
     apiFetch<{ factories: Factory[] }>("/api/factories")
-      .then(d => { setFactories(d.factories); setFactoryId(prev => prev || (d.factories.find(f => f.active)?.id ? String(d.factories.find(f => f.active)!.id) : "")); })
+      .then(d => { setFactories(d.factories); })
       .catch(() => {});
   }, []);
 
@@ -227,8 +232,23 @@ export default function PlanningProductionView({ user }: { user: User }) {
     setDate(d.toISOString().slice(0, 10));
   };
 
+  // Raccourci clavier demandé par la page — voir src/lib/keyboard-shortcuts.ts
+  useEffect(() => {
+    if (pendingAction?.action !== "plan-production") return;
+    onPendingActionHandled?.();
+    if (canManage) void openPicker();
+    // Fonctions locales recréées à chaque rendu : seule la demande pilote l'effet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAction]);
+
   return (
     <div className="space-y-4">
+      {planningNotice && (
+        <div role="status" className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 text-sm text-amber-900 dark:text-amber-200 flex items-start justify-between gap-3">
+          <span>📌 {planningNotice}</span>
+          <button onClick={() => setPlanningNotice("")} className="text-xs underline whitespace-nowrap">Fermer</button>
+        </div>
+      )}
       {/* En-tête */}
       <div className="flex justify-between items-center flex-wrap gap-2">
         <div>
@@ -236,9 +256,10 @@ export default function PlanningProductionView({ user }: { user: User }) {
           <p className="text-xs text-gray-500 dark:text-gray-400">
             Suivi journalier en temps réel des articles en cours de production.
           </p>
+          {!canManage && <span className="mt-1 inline-block rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">Consultation seule</span>}
         </div>
         {canManage && (
-          <button onClick={openPicker} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+          <button onClick={openPicker} title="Planifier des articles (Alt+P)" className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
             + Planifier des articles
           </button>
         )}
@@ -377,6 +398,29 @@ export default function PlanningProductionView({ user }: { user: User }) {
         des commandes sont mis à jour automatiquement. Les articles <b>en cours</b> clignotent ici et dans le tableau des commandes.
         Les couleurs sont personnalisables dans l&apos;onglet Couleurs (section « Planning de Production »).
       </p>
+
+      {/* Mode d'emploi des annulations (encart visible en permanence) */}
+      <section aria-label="Comment annuler une commande ou un article" className="rounded-xl border-2 border-red-500 bg-red-50 dark:bg-red-950/40 dark:border-red-500 p-4 space-y-2 shadow-sm">
+        <h4 className="text-sm font-bold text-red-800 dark:text-red-300">⚠️ Annuler une commande ou un article</h4>
+        <ul className="list-disc pl-5 space-y-1 text-xs text-gray-800 dark:text-gray-100">
+          <li>
+            <b>Annuler toute la commande</b> : ouvrez la commande dans l&apos;onglet <b>Commandes</b> (bouton <b>Détails</b>),
+            allez dans le formulaire <b>Détails</b>, rubrique <b>Planification</b>, et choisissez l&apos;état <b>Annulée</b>.
+          </li>
+          <li>
+            <b>Annuler un article de la commande</b> : le planning de production s&apos;en occupe. Passez sa ligne à <b>Annulé</b> et
+            saisissez la cause dans la colonne <b>Raison</b> (obligatoire).
+          </li>
+          <li>
+            <b>Annuler toute la commande depuis le planning</b> : annulez <b>un par un tous ses articles</b> dans le planning.
+            Quand tous les articles de la commande sont annulés, la commande passe automatiquement en <b>Annulée</b>.
+          </li>
+        </ul>
+        <p className="text-[11px] text-red-700 dark:text-red-300">
+          Les causes saisies apparaissent dans le tableau des commandes, en alternance avec la couleur de la ligne.
+          Une commande annulée reste annulée : pour la rouvrir, modifiez son état dans le formulaire Détails.
+        </p>
+      </section>
 
       {/* Sélecteur d'articles */}
       {showPicker && canManage && (

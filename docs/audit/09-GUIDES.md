@@ -14,7 +14,7 @@ npx drizzle-kit push          # crée les 32 tables
 npm run dev                   # http://localhost:3000
 ```
 
-Première connexion : `admin / admin123` (compte semé par `/api/health` ou
+Première connexion : `admin / mot de passe initial configuré hors dépôt` (compte semé par `/api/health` ou
 `/api/auth/login`). **Changez ce mot de passe immédiatement**
 (onglet Utilisateurs).
 
@@ -30,7 +30,7 @@ Première connexion : `admin / admin123` (compte semé par `/api/health` ou
 ### B. Serveur Linux (générique)
 ```bash
 npm install && npm run build
-DATABASE_URL=postgresql://... JWT_SECRET=... npm run start
+DATABASE_URL=<valeur-hors-depot> JWT_SECRET=<secret-hors-depot> npm run start
 ```
 Derrière un reverse proxy TLS (nginx/caddy) si exposition externe —
 et **après** correction des points critiques du rapport 05.

@@ -11,7 +11,7 @@ import {
   searchOrders,
   type ArticleOption,
 } from "../study-search";
-import { articleLensToValue, LENS_OVERRIDE_MESSAGE, resolveStudyLens } from "../study-lens";
+import { articleLensToValue, LENS_OVERRIDE_MESSAGE, latestStudyItemForOrderItem, resolveStudyLens } from "../study-lens";
 
 // ── Jeu d'essai : commande 125/2026 (cf. §3) ─────────────────────────────
 const ORDER_125 = { id: 125, orderNumber: "125/2026", affaire: "Éclairage stade", clientName: "Ville de Tunis" };
@@ -156,5 +156,21 @@ describe("TEST H — suppression lentille étude ⇒ retour LENS-A (article inta
   });
   it("la spec générale de l'article n'est jamais supprimée", () => {
     expect(articleLensToValue("LENS-A")).not.toBeNull();
+  });
+});
+
+// ── TEST I — une étude récente sans lentille neutralise l'ancienne ────────
+describe("TEST I — priorité à la dernière modification d'étude", () => {
+  it("retourne la ligne récente même lorsque lensId est null", () => {
+    const recent: { orderItemId: number; lensId: string | null; lensReference?: string | null } = { orderItemId: 2, lensId: null, lensReference: null };
+    const old: { orderItemId: number; lensId: string | null; lensReference?: string | null } = { orderItemId: 2, lensId: "12", lensReference: "LENS-B" };
+    expect(latestStudyItemForOrderItem([{ items: [recent] }, { items: [old] }], 2)).toBe(recent);
+  });
+
+  it("ne mélange pas les articles de deux études", () => {
+    const first = { orderItemId: 1, lensId: "11" };
+    const second = { orderItemId: 2, lensId: "12" };
+    expect(latestStudyItemForOrderItem([{ items: [first, second] }], 2)).toBe(second);
+    expect(latestStudyItemForOrderItem([{ items: [first, second] }], 99)).toBeNull();
   });
 });

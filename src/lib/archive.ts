@@ -10,21 +10,24 @@
  */
 import { db } from "@/db";
 import { appColors } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { ARCHIVE_COLOR_CATEGORY, ARCHIVE_STATES } from "./archive-constants";
 
 export async function ensureArchiveColors() {
-  for (const state of ARCHIVE_STATES) {
-    const [existing] = await db.select().from(appColors).where(eq(appColors.key, state.colorKey)).limit(1);
-    if (!existing) {
-      await db.insert(appColors).values({
-        key: state.colorKey,
-        category: ARCHIVE_COLOR_CATEGORY,
-        label: `Archive — ${state.label}`,
-        color: state.defaultColor,
-        description: state.description,
-        sortOrder: state.sortOrder,
-      });
-    }
-  }
+  const keys = ARCHIVE_STATES.map(state => state.colorKey);
+  const existing = await db.select({ key: appColors.key })
+    .from(appColors)
+    .where(inArray(appColors.key, keys));
+  const existingKeys = new Set(existing.map(color => color.key));
+  const missing = ARCHIVE_STATES.filter(state => !existingKeys.has(state.colorKey));
+  if (missing.length === 0) return;
+
+  await db.insert(appColors).values(missing.map(state => ({
+    key: state.colorKey,
+    category: ARCHIVE_COLOR_CATEGORY,
+    label: `Archive — ${state.label}`,
+    color: state.defaultColor,
+    description: state.description,
+    sortOrder: state.sortOrder,
+  }))).onConflictDoNothing({ target: appColors.key });
 }

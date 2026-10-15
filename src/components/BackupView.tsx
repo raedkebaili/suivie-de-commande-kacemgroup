@@ -1,6 +1,6 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
-import { apiFetch, getToken, removeToken } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
 
 type BackupMeta = {
@@ -30,6 +30,7 @@ type BackupSettings = {
   enabled: boolean;
   time: string;
   maxCount: number;
+  idleTimeoutMinutes: number;
   lastRun: string | null;
   lastStatus: string | null;
   lastBackup: BackupHistoryItem | null;
@@ -101,6 +102,7 @@ export default function BackupView({ user }: { user: User }) {
   const [formEnabled, setFormEnabled] = useState(true);
   const [formTime, setFormTime] = useState("22:00");
   const [formMaxCount, setFormMaxCount] = useState(30);
+  const [formIdleTimeout, setFormIdleTimeout] = useState(30);
 
   // Charger les paramètres et l'historique
   const loadData = useCallback(async () => {
@@ -118,6 +120,7 @@ export default function BackupView({ user }: { user: User }) {
       setFormEnabled(settingsRes.enabled);
       setFormTime(settingsRes.time || "22:00");
       setFormMaxCount(settingsRes.maxCount || 30);
+      setFormIdleTimeout(settingsRes.idleTimeoutMinutes || 30);
     } catch (err) {
       console.error("Erreur chargement paramètres backup:", err);
     } finally {
@@ -139,10 +142,7 @@ export default function BackupView({ user }: { user: User }) {
     setMessage(null);
     setDownloading(true);
     try {
-      const token = getToken();
-      const res = await fetch("/api/backup", {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await fetch("/api/backup", { credentials: "same-origin" });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Erreur inconnue" }));
         throw new Error(err.error || "Erreur lors du téléchargement");
@@ -189,13 +189,10 @@ export default function BackupView({ user }: { user: User }) {
     setMessage(null);
     try {
       const text = await pendingFile.file.text();
-      const token = getToken();
       const res = await fetch("/api/backup", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
         body: text,
       });
       const json = await res.json();
@@ -220,6 +217,7 @@ export default function BackupView({ user }: { user: User }) {
           backup_enabled: String(formEnabled),
           backup_time: formTime,
           backup_max_count: String(formMaxCount),
+          session_idle_timeout_minutes: String(formIdleTimeout),
         }),
       });
       setMessage({ type: "success", text: "Paramètres de sauvegarde automatique enregistrés" });
@@ -255,10 +253,7 @@ export default function BackupView({ user }: { user: User }) {
   const downloadFromHistory = async (id: number, filename: string) => {
     setMessage(null);
     try {
-      const token = getToken();
-      const res = await fetch(`/api/backup/download/${id}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await fetch(`/api/backup/download/${id}`, { credentials: "same-origin" });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Erreur inconnue" }));
         throw new Error(err.error || "Erreur lors du téléchargement");
@@ -281,33 +276,32 @@ export default function BackupView({ user }: { user: User }) {
   const resetDatabase = async () => {
     if (resetConfirmation !== "REINITIALISER" || !resetPassword) return;
     const accepted = confirm(
-      "DANGER : toutes les commandes, clients, agences, utilisateurs, bibliothèques et tous les journaux seront définitivement supprimés. Continuer ?",
+      "DANGER : toutes les commandes, études et leurs données de suivi seront définitivement supprimées. Les matières, clients, agences et comptes utilisateurs seront conservés. Continuer ?",
     );
     if (!accepted) return;
 
     setResetting(true);
     setMessage(null);
     try {
-      const token = getToken();
       const res = await fetch("/api/admin/reset-database", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           password: resetPassword,
           confirmation: resetConfirmation,
         }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Erreur lors du formatage");
+      if (!res.ok) throw new Error(json.error || "Erreur lors de la réinitialisation");
 
-      removeToken();
-      alert("Base réinitialisée. Reconnectez-vous avec admin / admin123.");
-      window.location.assign("/login");
+      setResetPassword("");
+      setResetConfirmation("");
+      setMessage({ type: "success", text: `${json.message} Prochaine commande : ${json.nextOrderNumber}.` });
+      await loadData();
     } catch (err) {
-      setMessage({ type: "error", text: err instanceof Error ? err.message : "Erreur lors du formatage" });
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Erreur lors de la réinitialisation" });
+    } finally {
       setResetting(false);
     }
   };
@@ -351,7 +345,7 @@ export default function BackupView({ user }: { user: User }) {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
               {/* Activer/Désactiver */}
               <div className="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
                 <label className="flex items-center gap-3 cursor-pointer">
@@ -396,6 +390,25 @@ export default function BackupView({ user }: { user: User }) {
                     />
                     <span className="text-xs text-gray-500">sauvegardes</span>
                   </div>
+                </label>
+              </div>
+
+              {/* Déconnexion automatique */}
+              <div className="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+                <label className="block">
+                  <span className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Déconnexion après inactivité</span>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={1440}
+                      value={formIdleTimeout}
+                      onChange={(e) => setFormIdleTimeout(parseInt(e.target.value) || 30)}
+                      className="w-20 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-center text-gray-800 dark:text-white"
+                    />
+                    <span className="text-xs text-gray-500">minutes</span>
+                  </div>
+                  <span className="block mt-1 text-[11px] text-gray-400">1 à 1440 minutes, appliqué aux sessions ouvertes.</span>
                 </label>
               </div>
             </div>
@@ -582,14 +595,14 @@ export default function BackupView({ user }: { user: User }) {
         )}
       </div>
 
-      {/* Factory reset */}
+      {/* Reset commandes / études */}
       <div className="bg-red-50 dark:bg-red-950/30 rounded-2xl p-6 border-2 border-red-300 dark:border-red-900">
         <div className="flex items-start gap-3">
           <div className="text-2xl" aria-hidden="true">⚠️</div>
           <div className="flex-1">
-            <h4 className="font-semibold text-red-800 dark:text-red-300">Zone de danger — Formater la base</h4>
+            <h4 className="font-semibold text-red-800 dark:text-red-300">Zone de danger — Réinitialiser commandes et études</h4>
             <p className="text-sm text-red-700 dark:text-red-400 mt-1">
-              Supprime définitivement toutes les données et remet tous les compteurs à zéro. Seul le compte de secours <strong>admin / admin123</strong> sera recréé.
+              Supprime les commandes, études photométriques et données de suivi associées, puis remet le compteur de commandes à zéro. Les matières, catégories de matières, clients, agences et utilisateurs sont conservés.
             </p>
           </div>
         </div>
@@ -628,7 +641,7 @@ export default function BackupView({ user }: { user: User }) {
         >
           {resetting
             ? <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Formatage en cours...</>
-            : <>🗑️ Réinitialiser et formater la base</>}
+            : <>🗑️ Réinitialiser commandes et études</>}
         </button>
       </div>
 

@@ -227,7 +227,7 @@ export default function AutocompleteInput({
       {show && suggestions.length === 0 && value.length >= minChars && !loading && (
         <div className="absolute z-30 top-full left-0 right-0 mt-0.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg p-2">
           <div className="text-xs text-gray-500 text-center">
-            Aucune suggestion pour "{value}"
+            Aucune suggestion pour &quot;{value}&quot;
           </div>
         </div>
       )}

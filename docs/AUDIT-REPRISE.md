@@ -211,7 +211,7 @@ reset protégé par double confirmation ; `friendlyDbErrorMessage` évite les fu
    verrouillage de compte ; JWT 24 h sans rotation/révocation (stateless).
 4. **Moyen — Fallback de secret JWT en clair** dans `src/lib/auth.ts` : en l'absence de
    `JWT_SECRET`, des tokens forgeables. Mitigé en recette par un `.env` généré (64 octets hex).
-5. **Moyen — Identifiants par défaut** `admin / admin123` réaffichés sur l'écran de login et
+5. **Moyen — Identifiants par défaut** `admin / mot de passe initial configuré hors dépôt` réaffichés sur l'écran de login et
    recréés paresseusement : mot de passe à changer à la première mise en production.
 6. **Faible — Import Excel** : pas de limite de taille/type déclarée (parsing `xlsx` en mémoire).
 7. **Faible — Validations d'entrée** minimalistes (pas de schéma déclaratif), longueurs non bornées
@@ -272,7 +272,7 @@ stale possible).
 
 ### Guide express d'installation (recette validée)
 1. `npm install` 2. `.env` : `DATABASE_URL` + `JWT_SECRET` (≥32 car. aléatoires)
-3. `npx drizzle-kit push` 4. `npm run build && npm start` 5. Login `admin/admin123` → **changer le mot de passe**.
+3. `npx drizzle-kit push` 4. `npm run build && npm start` 5. Login `admin / mot de passe initial configuré hors dépôt` → **changer le mot de passe**.
 
 ### Risques principaux
 | # | Risque | Impact | Action proposée (avec votre accord) |

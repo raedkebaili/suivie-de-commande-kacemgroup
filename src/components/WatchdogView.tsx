@@ -44,7 +44,7 @@ export default function WatchdogView({ user: _ }: { user: User }) {
   return <div className="space-y-3">
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-3">
-        <h3 className="text-lg font-semibold text-gray-800 dark:text-white">📋 Journal d'Activité</h3>
+        <h3 className="text-lg font-semibold text-gray-800 dark:text-white">📋 Journal d&apos;Activité</h3>
         <span className="flex items-center gap-1.5 text-xs font-medium text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 px-2 py-0.5 rounded-full">
           <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />Live
         </span>

@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromHeaders } from "@/lib/auth";
-import { FOLDER_MIME, ensureRootFolder, friendlyDriveError, getDriveClient, updateConfig } from "@/lib/google-drive";
+import { FOLDER_MIME, assertInsideRoot, ensureRootFolder, friendlyDriveError, getDriveClient, updateConfig } from "@/lib/google-drive";
 
 /**
  * GET /api/storage/files
@@ -33,6 +33,9 @@ export async function GET(request: NextRequest) {
     const { drive } = await getDriveClient();
     const root = await ensureRootFolder();
     const folderId = sp.get("folderId") || root.id;
+    if (folderId !== root.id && !(await assertInsideRoot(folderId))) {
+      return NextResponse.json({ error: "Dossier hors du stockage applicatif" }, { status: 404 });
+    }
 
     // Recherche : portée à l'ensemble des fichiers de l'application (scope drive.file)
     const clauses: string[] = ["trashed=false"];

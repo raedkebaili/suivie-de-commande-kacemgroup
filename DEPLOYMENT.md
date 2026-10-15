@@ -29,7 +29,7 @@ Sur votre ordinateur, vous avez besoin de :
 
 | Outil | Pourquoi | Vérifier |
 |-------|----------|----------|
-| **Node.js 18+** | Pour exécuter les migrations | `node --version` |
+| **Node.js 20.9+** | Requis par Next.js 16 et pour exécuter les migrations | `node --version` |
 | **npm** | Pour installer les dépendances | `npm --version` |
 | **Git** | Pour pousser le code sur GitHub | `git --version` |
 
@@ -75,8 +75,8 @@ Après la création, Neon affiche une page avec l'URL de connexion.
 1. Dans la section **Connection string**, cliquez sur l'icône de copie
 2. L'URL ressemble à ceci :
 
-```
-postgresql://neondb_owner:AbCdEf123456@ep-xyz-abc-123456.eu-central-1.aws.neon.tech/otp_db?sslmode=require
+```text
+<valeur-de-connexion-Neon-a-conserver-hors-du-depot>
 ```
 
 3. **GARDEZ CETTE URL** — vous en aurez besoin à l'étape 3
@@ -153,7 +153,9 @@ C'est l'étape la plus importante. Sur l'écran de configuration du projet :
 | Name | Value |
 |------|-------|
 | `DATABASE_URL` | *(collez l'URL Neon copiée à l'étape 2.3)* |
-| `JWT_SECRET` | *(voir ci-dessous pour générer)* |
+| `JWT_SECRET` | *(secret aléatoire d'au moins 32 caractères)* |
+| `APP_ENCRYPTION_KEY` | *(clé hexadécimale aléatoire de 64 caractères)* |
+| `BACKUP_SECRET` | *(secret aléatoire pour les sauvegardes automatiques)* |
 
 **Pour générer le JWT_SECRET**, ouvrez un terminal et exécutez :
 
@@ -162,6 +164,15 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```
 
 Copiez la chaîne de 96 caractères affichée et collez-la comme valeur de `JWT_SECRET`.
+
+Générez également les deux secrets suivants et renseignez-les dans Vercel :
+
+```bash
+# APP_ENCRYPTION_KEY — 32 octets, soit 64 caractères hexadécimaux
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+# BACKUP_SECRET — secret indépendant pour les sauvegardes automatiques
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
 
 **Exemple** (ne pas utiliser cette valeur, générez la vôtre) :
 ```
@@ -211,12 +222,9 @@ npm install
 
 Créez un fichier `.env` à la racine du projet avec l'URL Neon :
 
-```bash
-# Windows (PowerShell)
-echo 'DATABASE_URL=postgresql://neondb_owner:VOTRE_MOT_DE_PASSE@ep-xyz.neon.tech/otp_db?sslmode=require' > .env
-
-# macOS / Linux
-echo 'DATABASE_URL=postgresql://neondb_owner:VOTRE_MOT_DE_PASSE@ep-xyz.neon.tech/otp_db?sslmode=require' > .env
+```text
+Configurez DATABASE_URL directement dans l’environnement du déploiement,
+avec la valeur fournie par Neon. Ne l’écrivez pas dans Git ni dans ce guide.
 ```
 
 > Remplacez l'URL par la vraie URL Neon copiée à l'étape 2.3.
@@ -266,7 +274,9 @@ L'écran de connexion s'affiche. Utilisez les identifiants par défaut :
 
 ```
 Identifiant : admin
-Mot de passe : admin123
+Mot de passe temporaire : communiqué par la procédure d’installation
+
+Le changement du mot de passe est obligatoire lors de la première connexion.
 ```
 
 > ⚠️ **CHANGEZ IMMÉDIATEMENT le mot de passe** après la première connexion
@@ -426,7 +436,7 @@ cd ordertrack-pro
 npm install
 
 # ── 3. Configurer le .env local (pour les migrations) ──
-echo 'DATABASE_URL=postgresql://user:pass@host.neon.tech/otp_db?sslmode=require' > .env
+# Configurez DATABASE_URL dans l’environnement hors dépôt avec la valeur fournie par l’hébergeur
 
 # ── 4. Générer un JWT_SECRET ──
 node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
@@ -445,7 +455,7 @@ git push
 
 # ── 8. Ouvrir l'application ──
 # → https://votre-projet.vercel.app
-# → Compte : admin / admin123
+# → Compte : admin ; mot de passe temporaire, changement obligatoire
 ```
 
 ---

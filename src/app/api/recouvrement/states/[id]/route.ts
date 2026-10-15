@@ -2,9 +2,9 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { appColors, clientRecouvrementStates, recouvrementStates } from "@/db/schema";
-import { count, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
-import { RECOUVREMENT_MANAGER_ROLES } from "@/lib/recouvrement-constants";
+import { DEFAULT_RECOUVREMENT_STATES, RECOUVREMENT_MANAGER_ROLES } from "@/lib/recouvrement-constants";
 
 async function auth(request: Request, roles?: readonly string[]) {
   const u = await getUserFromHeaders(request);
@@ -35,7 +35,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (body.label !== undefined) {
       const label = String(body.label || "").trim();
       if (!label) return NextResponse.json({ error: "Libellé requis" }, { status: 400 });
-      if (label.length > 80) return NextResponse.json({ error: "Libellé trop long (80 caractères max)" }, { status: 400 });
+      if (!DEFAULT_RECOUVREMENT_STATES.some((state) => state.label === label)) {
+        return NextResponse.json({ error: "Seuls les états Retard important et Client Bloqué sont autorisés" }, { status: 400 });
+      }
       updates.label = label;
     }
     if (body.description !== undefined) updates.description = String(body.description || "").trim() || null;
@@ -62,8 +64,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
 /**
  * DELETE /api/recouvrement/states/[id]
- * Supprime un état du catalogue — refusé s'il est encore attribué à un client
- * (cohérent avec la FK onDelete: "restrict" et la logique existante de protection).
+ * Supprime un état du catalogue et retire ses affectations courantes.
+ * Les journaux historiques sont conservés ; leur FK met l'état à null.
  * Rôles : superadmin, recouvrement.
  */
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -77,13 +79,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     const [existing] = await db.select().from(recouvrementStates).where(eq(recouvrementStates.id, stateId)).limit(1);
     if (!existing) return NextResponse.json({ error: "État non trouvé" }, { status: 404 });
 
-    const [usage] = await db.select({ c: count() }).from(clientRecouvrementStates).where(eq(clientRecouvrementStates.stateId, stateId));
-    if ((usage?.c || 0) > 0) {
-      return NextResponse.json({
-        error: `Impossible de supprimer : cet état est attribué à ${usage.c} client(s). Retirez-le d'abord des clients concernés.`,
-      }, { status: 400 });
-    }
-
+    // La FK des affectations est restrictive : retirer d'abord les liens
+    // courants permet enfin de supprimer un état réellement utilisé.
+    await db.delete(clientRecouvrementStates).where(eq(clientRecouvrementStates.stateId, stateId));
     await db.delete(recouvrementStates).where(eq(recouvrementStates.id, stateId));
     await logActivity(a.user.id, a.user.username, "DELETE_RECOUVREMENT_STATE", `État recouvrement supprimé: ${existing.label}`);
     return NextResponse.json({ ok: true });

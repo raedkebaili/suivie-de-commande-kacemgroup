@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
 import {
-  users, agencies, clients, orders, orderItems, productionBatches, expeditionBatches,
+  users, agencies, userAgencyAccess, clients, orders, orderItems, productionBatches, expeditionBatches, expeditionPlanEntries,
   productionUnitLib, articleLibrary, techLibrary, materialCategories, matieres, itemTechnicalComponents,
   activityLogs, modificationLogs, notifications, backupHistory, photometricStudies, photometricStudyItems,
   recouvrementStates, clientRecouvrementStates, clientRecouvrementLogs,
   systemSettings, appColors, orderCounters,
   archiveSheets, archiveRows, archiveCellColors,
-  productionPlanEntries, factories, storageConfig,
+  productionPlanEntries, factories, storageConfig, articleFamilyCatalog, articleFamilyAssignments,
 } from "@/db/schema";
 import { getUserFromHeaders, logActivity, hashPassword } from "@/lib/auth";
 import { collectBackupData } from "@/lib/backup-data";
@@ -108,11 +108,15 @@ export async function POST(request: NextRequest) {
     mustChangePassword: u.passwordHash ? (u.mustChangePassword ?? false) : true,
   })) as (typeof users.$inferInsert)[];
   const agenciesRows = arr<typeof agencies.$inferInsert>("agencies");
+  const userAgencyAccessRows = arr<typeof userAgencyAccess.$inferInsert>("userAgencyAccess");
+  const restoreAgencyAccess = Object.prototype.hasOwnProperty.call(data, "userAgencyAccess");
   const clientsRows = arr<typeof clients.$inferInsert>("clients");
   const ordersRows = arr<typeof orders.$inferInsert>("orders");
   const orderItemsRows = arr<typeof orderItems.$inferInsert>("orderItems");
   const productionBatchesRows = arr<typeof productionBatches.$inferInsert>("productionBatches");
   const expeditionBatchesRows = arr<typeof expeditionBatches.$inferInsert>("expeditionBatches");
+  const expeditionPlanEntriesRows = arr<typeof expeditionPlanEntries.$inferInsert>("expeditionPlanEntries");
+  const restoreExpeditionPlanning = expeditionPlanEntriesRows.length > 0;
   const productionUnitLibRows = arr<typeof productionUnitLib.$inferInsert>("productionUnitLib");
   const articleLibraryRows = arr<typeof articleLibrary.$inferInsert>("articleLibrary");
   const techLibraryRows = arr<typeof techLibrary.$inferInsert>("techLibrary");
@@ -150,6 +154,11 @@ export async function POST(request: NextRequest) {
   const restoreFactories = factoriesRows.length > 0;
   const storageConfigRows = arr<typeof storageConfig.$inferInsert>("storageConfig");
   const restoreStorage = storageConfigRows.length > 0;
+  // Catalogue des familles d'articles : même garde de rétrocompatibilité (une sauvegarde
+  // antérieure à ce module ne doit pas effacer un catalogue existant).
+  const articleFamilyCatalogRows = arr<typeof articleFamilyCatalog.$inferInsert>("articleFamilyCatalog");
+  const articleFamilyAssignmentsRows = arr<typeof articleFamilyAssignments.$inferInsert>("articleFamilyAssignments");
+  const restoreArticleFamilies = articleFamilyCatalogRows.length > 0;
   // Catalogue des états de recouvrement : même garde. Une sauvegarde antérieure
   // à ce module ne doit pas effacer un catalogue enrichi par l'utilisateur.
   // (Les affectations clients partent de toute façon en cascade avec clients.)
@@ -163,7 +172,6 @@ export async function POST(request: NextRequest) {
     if (rows.length === 0) return;
     const chunkSize = 200;
     for (let i = 0; i < rows.length; i += chunkSize) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await tx.insert(table).values(rows.slice(i, i + chunkSize) as any);
     }
   };
@@ -172,6 +180,10 @@ export async function POST(request: NextRequest) {
     await db.transaction(async (tx) => {
       // Delete in reverse FK-dependency order
       if (restorePlanning) await tx.delete(productionPlanEntries);
+      if (restoreArticleFamilies) {
+        await tx.delete(articleFamilyAssignments);
+        await tx.delete(articleFamilyCatalog);
+      }
       if (restoreFactories) await tx.delete(factories);
       if (restoreStorage) await tx.delete(storageConfig);
       if (restoreArchive) {
@@ -186,6 +198,7 @@ export async function POST(request: NextRequest) {
       await tx.delete(activityLogs);
       await tx.delete(photometricStudyItems);
       await tx.delete(photometricStudies);
+      if (restoreExpeditionPlanning) await tx.delete(expeditionPlanEntries);
       await tx.delete(expeditionBatches);
       await tx.delete(productionBatches);
       await tx.delete(itemTechnicalComponents);
@@ -198,6 +211,7 @@ export async function POST(request: NextRequest) {
       await tx.delete(productionUnitLib);
       await tx.delete(clients);
       if (restoreRecouvrement) await tx.delete(recouvrementStates);
+      if (restoreAgencyAccess) await tx.delete(userAgencyAccess);
       await tx.delete(agencies);
       if (restoreSettings) await tx.delete(systemSettings);
       if (restoreColors) await tx.delete(appColors);
@@ -207,6 +221,7 @@ export async function POST(request: NextRequest) {
       // Insert in forward FK-dependency order (parents first)
       await insertChunked(tx, users, usersRows);
       await insertChunked(tx, agencies, agenciesRows);
+      if (restoreAgencyAccess) await insertChunked(tx, userAgencyAccess, userAgencyAccessRows);
       await insertChunked(tx, clients, clientsRows);
       if (restoreRecouvrement) {
         await insertChunked(tx, recouvrementStates, recouvrementStatesRows);
@@ -220,6 +235,7 @@ export async function POST(request: NextRequest) {
       await insertChunked(tx, itemTechnicalComponents, itemTechnicalComponentsRows);
       await insertChunked(tx, productionBatches, productionBatchesRows);
       await insertChunked(tx, expeditionBatches, expeditionBatchesRows);
+      if (restoreExpeditionPlanning) await insertChunked(tx, expeditionPlanEntries, expeditionPlanEntriesRows);
       await insertChunked(tx, productionUnitLib, productionUnitLibRows);
       await insertChunked(tx, articleLibrary, articleLibraryRows);
       await insertChunked(tx, techLibrary, techLibraryRows);
@@ -234,6 +250,10 @@ export async function POST(request: NextRequest) {
       if (restoreFactories) await insertChunked(tx, factories, factoriesRows);
       if (restoreStorage) await insertChunked(tx, storageConfig, storageConfigRows);
       if (restorePlanning) await insertChunked(tx, productionPlanEntries, productionPlanEntriesRows);
+      if (restoreArticleFamilies) {
+        await insertChunked(tx, articleFamilyCatalog, articleFamilyCatalogRows);
+        await insertChunked(tx, articleFamilyAssignments, articleFamilyAssignmentsRows);
+      }
       if (restoreArchive) {
         await insertChunked(tx, archiveSheets, archiveSheetsRows);
         await insertChunked(tx, archiveRows, archiveRowsRows);
@@ -242,8 +262,8 @@ export async function POST(request: NextRequest) {
 
       // Resync auto-increment sequences with the restored max ids
       const tableNames = [
-        "users", "agencies", "clients", "orders", "order_items", "production_batches",
-        "expedition_batches", "production_unit_lib", "article_library", "tech_library",
+        "users", "agencies", ...(restoreAgencyAccess ? ["user_agency_access"] : []), "clients", "orders", "order_items", "production_batches",
+        "expedition_batches", ...(restoreExpeditionPlanning ? ["expedition_plan_entries"] : []), "production_unit_lib", "article_library", "tech_library",
         "material_categories", "matieres", "item_technical_components", "activity_logs", "modification_logs", "notifications",
         "photometric_studies", "photometric_study_items",
         ...(restoreRecouvrement ? ["recouvrement_states", "client_recouvrement_states", "client_recouvrement_logs"] : []),
@@ -254,6 +274,7 @@ export async function POST(request: NextRequest) {
         ...(restorePlanning ? ["production_plan_entries"] : []),
         ...(restoreFactories ? ["factories"] : []),
         ...(restoreStorage ? ["storage_config"] : []),
+        ...(restoreArticleFamilies ? ["article_family_catalog"] : []),
       ];
       for (const t of tableNames) {
         await tx.execute(
@@ -266,8 +287,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Erreur lors de la restauration: " + String(err) }, { status: 500 });
   }
 
-  const totalRestored = usersRows.length + agenciesRows.length + clientsRows.length + ordersRows.length +
-    orderItemsRows.length + productionBatchesRows.length + expeditionBatchesRows.length +
+  const totalRestored = usersRows.length + agenciesRows.length + userAgencyAccessRows.length + clientsRows.length + ordersRows.length +
+    orderItemsRows.length + productionBatchesRows.length + expeditionBatchesRows.length + expeditionPlanEntriesRows.length +
     productionUnitLibRows.length + articleLibraryRows.length + techLibraryRows.length +
     materialCategoriesRows.length + matieresRows.length + itemTechnicalComponentsRows.length +
     activityLogsRows.length + modificationLogsRows.length + notificationsRows.length +
@@ -275,7 +296,8 @@ export async function POST(request: NextRequest) {
     recouvrementStatesRows.length + clientRecouvrementStatesRows.length + clientRecouvrementLogsRows.length +
     systemSettingsRows.length + appColorsRows.length + orderCountersRows.length +
     archiveSheetsRows.length + archiveRowsRows.length + archiveCellColorsRows.length +
-    productionPlanEntriesRows.length + factoriesRows.length + storageConfigRows.length;
+    productionPlanEntriesRows.length + factoriesRows.length + storageConfigRows.length +
+    articleFamilyCatalogRows.length + articleFamilyAssignmentsRows.length;
 
   await logActivity(user.id, user.username, "BACKUP_RESTORE", `Restauration effectuée: ${totalRestored} enregistrements`);
 

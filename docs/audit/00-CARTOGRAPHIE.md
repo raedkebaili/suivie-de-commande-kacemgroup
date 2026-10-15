@@ -42,7 +42,7 @@ Observation d'hygiène : `@types/bcryptjs` et `@types/xlsx` sont dans
 - **`tsconfig.json`** : strict, alias `@/* → ./src/*`, `moduleResolution:
   bundler`, plugin Next.
 - **`drizzle.config.ts`** : refuse de démarrer sans `DATABASE_URL` ;
-  `drizzle.config.json` (doublon) pointe vers `127.0.0.1:5432/app_db`.
+  `drizzle.config.json` (doublon) pointe vers `<base locale configurée hors dépôt>`.
 - **`.gitignore`** complet (`.env`, `backups/`, `.next/`, `dist/`).
 
 ## Variables d'environnement

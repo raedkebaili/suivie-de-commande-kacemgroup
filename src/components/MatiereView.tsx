@@ -117,7 +117,7 @@ export default function MatiereView({ user: _user }: { user: User }) {
     } catch (error) {
       const errorData = error as { matieresCount?: number };
       if (errorData.matieresCount) {
-        showMessage(`La catégorie contient ${errorData.matieresCount} matière(s). Supprimez-les d'abord.`, "error");
+        showMessage(`La catégorie contient ${errorData.matieresCount} matière(s). Supprimez-les d&apos;abord.`, "error");
       } else {
         showMessage(error instanceof Error ? error.message : "Erreur lors de la suppression", "error");
       }
@@ -243,7 +243,7 @@ export default function MatiereView({ user: _user }: { user: User }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white rounded-xl shadow-xl p-6 max-w-md w-full mx-4">
             <h3 className="text-lg font-bold text-black mb-4">
-              Supprimer la catégorie "{deletingCategory.name}" ?
+              Supprimer la catégorie &quot;{deletingCategory.name}&quot; ?
             </h3>
             
             {categoryInfo && (
@@ -254,7 +254,7 @@ export default function MatiereView({ user: _user }: { user: User }) {
                   </p>
                   {categoryInfo.matieresCount > 0 && (
                     <p className="text-xs text-red-600 mt-1">
-                      ⚠️ Vous devez d'abord supprimer ou réaffecter les matières.
+                      ⚠️ Vous devez d&apos;abord supprimer ou réaffecter les matières.
                     </p>
                   )}
                 </div>
@@ -264,7 +264,7 @@ export default function MatiereView({ user: _user }: { user: User }) {
                   </p>
                   {categoryInfo.usageCount > 0 && (
                     <p className="text-xs text-amber-600 mt-1">
-                      ℹ️ La catégorie sera archivée pour conserver l'historique.
+                      ℹ️ La catégorie sera archivée pour conserver l&apos;historique.
                     </p>
                   )}
                 </div>

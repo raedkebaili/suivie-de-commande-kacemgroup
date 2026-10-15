@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { apiFetch, getToken } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
 import GoogleDriveGuide from "@/components/GoogleDriveGuide";
 
@@ -18,7 +18,8 @@ type DriveFile = {
 };
 type Stats = {
   account: string | null; rootFolderName: string; fileCount: number; folderCount: number;
-  managedSize: number; lastFile: { name: string; modifiedTime: string } | null; lastSync: string;
+  managedSize: number; lastFile: { name: string; modifiedTime: string } | null; lastSync: string | null;
+  partial?: boolean; scannedAt?: string;
   quota: { limit: number | null; usage: number | null; available: number | null; percent: number | null; unlimited: boolean };
 };
 
@@ -42,9 +43,12 @@ const fmtDate = (d: string | null | undefined) => {
  */
 export default function StorageView({ user }: { user: User }) {
   const isAdmin = user.role === "superadmin";
+  const canManageFiles = user.role !== "gerant";
 
   const [cfg, setCfg] = useState<Cfg | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState("");
   const [files, setFiles] = useState<DriveFile[]>([]);
   const [breadcrumb, setBreadcrumb] = useState<{ id: string; name: string }[]>([]);
   const [folderId, setFolderId] = useState<string>("");
@@ -93,12 +97,21 @@ export default function StorageView({ user }: { user: User }) {
     } catch (e) { setError(e instanceof Error ? e.message : "Erreur de chargement"); }
   }, [folderId, debounced, pageSize, sort, typeFilter]);
 
-  const loadStats = useCallback(async () => {
-    try { setStats(await apiFetch<Stats>("/api/storage/stats")); } catch { /* non bloquant */ }
+  /** refresh=true : recalcul côté serveur (après une action ou « Actualiser ») ; sinon réutilise le cache serveur */
+  const loadStats = useCallback(async (refresh = true) => {
+    setStatsLoading(true);
+    try {
+      setStats(await apiFetch<Stats>(`/api/storage/stats${refresh ? "?refresh=1" : ""}`));
+      setStatsError("");
+    } catch (err) {
+      setStatsError(err instanceof Error ? err.message : "Statistiques indisponibles");
+    } finally {
+      setStatsLoading(false);
+    }
   }, []);
 
   useEffect(() => { loadConfig().finally(() => setLoading(false)); }, [loadConfig]);
-  useEffect(() => { if (cfg?.connected) { loadFiles(); loadStats(); } }, [cfg?.connected, loadFiles, loadStats]);
+  useEffect(() => { if (cfg?.connected) { loadFiles(); loadStats(false); } }, [cfg?.connected, loadFiles, loadStats]);
 
   // Retour depuis la fenêtre OAuth
   useEffect(() => {
@@ -172,7 +185,7 @@ export default function StorageView({ user }: { user: User }) {
 
   const download = async (f: DriveFile, inline = false) => {
     try {
-      const res = await fetch(`/api/storage/download/${f.id}?mode=${inline ? "inline" : "attachment"}`, { headers: { Authorization: `Bearer ${getToken() || ""}` } });
+      const res = await fetch(`/api/storage/download/${f.id}?mode=${inline ? "inline" : "attachment"}`, { credentials: "same-origin" });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Téléchargement impossible");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -250,6 +263,7 @@ export default function StorageView({ user }: { user: User }) {
       <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-4 flex items-start justify-between flex-wrap gap-3">
         <div>
           <h3 className="text-lg font-semibold text-gray-800 dark:text-white">🗄️ Stockage</h3>
+          {user.role === "gerant" && <p className="text-xs font-medium text-amber-700 dark:text-amber-400 mt-1">Consultation, téléchargement et aperçu uniquement</p>}
           <div className="flex items-center gap-3 flex-wrap mt-1 text-xs">
             <span className={`font-bold ${connected ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
               {connected ? "🟢 Connecté" : cfg?.status === "expired" ? "🔴 Connexion expirée" : "🔴 Non connecté"}
@@ -352,10 +366,10 @@ export default function StorageView({ user }: { user: User }) {
           {/* Tableau de bord */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
-              { label: "Fichiers", value: stats ? String(stats.fileCount) : "…", sub: stats ? `${stats.folderCount} dossier(s)` : "" },
-              { label: "Volume géré", value: stats ? fmtSize(stats.managedSize) : "…", sub: "fichiers de la plateforme" },
-              { label: "Dernier fichier", value: stats?.lastFile?.name || "—", sub: stats?.lastFile ? fmtDate(stats.lastFile.modifiedTime) : "" },
-              { label: "Dernière synchro.", value: stats ? fmtDate(stats.lastSync) : "…", sub: stats?.account || "" },
+              { label: "Fichiers", value: stats ? String(stats.fileCount) : statsError ? "—" : "Calcul…", sub: stats ? `${stats.folderCount} dossier(s)${stats.partial ? " · décompte partiel" : ""}` : "" },
+              { label: "Volume géré", value: stats ? fmtSize(stats.managedSize) : statsError ? "—" : "Calcul…", sub: "fichiers de la plateforme" },
+              { label: "Dernier fichier", value: stats?.lastFile?.name || (statsLoading && !stats ? "Calcul…" : "—"), sub: stats?.lastFile ? fmtDate(stats.lastFile.modifiedTime) : "" },
+              { label: "Dernière synchro.", value: fmtDate(cfg?.lastSyncAt ?? stats?.lastSync), sub: stats?.account || "" },
             ].map((c, i) => (
               <div key={i} className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-4">
                 <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">{c.label}</div>
@@ -364,6 +378,13 @@ export default function StorageView({ user }: { user: User }) {
               </div>
             ))}
           </div>
+
+          {statsError && (
+            <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-300 flex items-center justify-between gap-3">
+              <span>Statistiques indisponibles : {statsError}</span>
+              <button onClick={() => loadStats(true)} disabled={statsLoading} className="px-2 py-1 rounded bg-white dark:bg-gray-800 border border-amber-300 dark:border-amber-700 disabled:opacity-60">Réessayer</button>
+            </div>
+          )}
 
           {/* Espace disponible — valeurs réelles Google */}
           {stats && (
@@ -403,11 +424,13 @@ export default function StorageView({ user }: { user: User }) {
             <select value={pageSize} onChange={e => setPageSize(parseInt(e.target.value))} className="px-2 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">
               <option value={25}>25/page</option><option value={50}>50/page</option><option value={100}>100/page</option>
             </select>
-            <button onClick={() => { loadFiles(); loadStats(); }} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg text-sm text-gray-700 dark:text-gray-200">🔄 Actualiser</button>
+            <button onClick={() => { loadFiles(); loadStats(true); }} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg text-sm text-gray-700 dark:text-gray-200">🔄 Actualiser</button>
             <div className="flex-1" />
-            <button onClick={createFolder} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">📁 Nouveau dossier</button>
-            <input type="file" accept="application/pdf,.pdf" multiple ref={fileRef} className="hidden" onChange={e => e.target.files && doUpload(e.target.files)} />
-            <button onClick={() => fileRef.current?.click()} disabled={busy} className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">+ Ajouter des fichiers</button>
+            {canManageFiles && <>
+              <button onClick={createFolder} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">📁 Nouveau dossier</button>
+              <input type="file" accept="application/pdf,.pdf" multiple ref={fileRef} className="hidden" onChange={e => e.target.files && doUpload(e.target.files)} />
+              <button onClick={() => fileRef.current?.click()} disabled={busy} className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">+ Ajouter des fichiers</button>
+            </>}
           </div>
 
           {/* Fil d'Ariane + sélection */}
@@ -425,7 +448,7 @@ export default function StorageView({ user }: { user: User }) {
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">{selected.size} fichier(s) sélectionné(s)</span>
                 <button onClick={() => files.filter(f => selected.has(f.id) && !f.isFolder).forEach(f => download(f))} className="px-3 py-1 text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-lg">Télécharger</button>
-                <button onClick={deleteSelected} className="px-3 py-1 text-xs bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg">Supprimer</button>
+                {canManageFiles && <button onClick={deleteSelected} className="px-3 py-1 text-xs bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg">Supprimer</button>}
               </div>
             )}
             {isAdmin && selected.size === 0 && (stats?.fileCount ?? 0) > 0 && (
@@ -442,7 +465,7 @@ export default function StorageView({ user }: { user: User }) {
                 {busy && <span className="text-blue-600 dark:text-blue-400">{uploadState.total - uploadState.success - uploadState.errors.length} en cours</span>}
                 {uploadState.errors.length > 0 && <span className="text-red-600 dark:text-red-400">{uploadState.errors.length} erreur(s)</span>}
                 <div className="flex-1" />
-                {uploadState.errors.length > 0 && <button onClick={() => fileRef.current?.click()} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 rounded">Réessayer les échecs</button>}
+                {canManageFiles && uploadState.errors.length > 0 && <button onClick={() => fileRef.current?.click()} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 rounded">Réessayer les échecs</button>}
                 <button onClick={() => setUploadState(null)} className="text-gray-400 hover:text-gray-600">✕</button>
               </div>
               {uploadState.errors.map((e, i) => <div key={i} className="text-[11px] text-red-600 dark:text-red-400 mt-1">✗ {e.name} — {e.reason}</div>)}
@@ -451,9 +474,9 @@ export default function StorageView({ user }: { user: User }) {
 
           {/* Zone de dépôt + table */}
           <div
-            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files?.length) doUpload(e.dataTransfer.files); }}
+            onDragOver={canManageFiles ? (e => { e.preventDefault(); setDragOver(true); }) : undefined}
+            onDragLeave={canManageFiles ? (() => setDragOver(false)) : undefined}
+            onDrop={canManageFiles ? (e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files?.length) doUpload(e.dataTransfer.files); }) : undefined}
             className={`bg-white dark:bg-gray-900 rounded-2xl shadow-sm border-2 overflow-hidden transition-colors ${dragOver ? "border-blue-500 border-dashed bg-blue-50/50 dark:bg-blue-900/10" : "border-gray-200 dark:border-gray-700"}`}
           >
             <div className="overflow-x-auto">
@@ -475,7 +498,7 @@ export default function StorageView({ user }: { user: User }) {
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                   {files.length === 0 ? (
                     <tr><td colSpan={6} className="text-center py-12 text-gray-400 text-sm">
-                      {debounced.length >= 2 ? "Aucun résultat" : "Dossier vide — glissez-déposez vos PDF ici"}
+                      {debounced.length >= 2 ? "Aucun résultat" : canManageFiles ? "Dossier vide — glissez-déposez vos PDF ici" : "Dossier vide"}
                     </td></tr>
                   ) : files.map(f => (
                     <tr key={f.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
@@ -496,9 +519,11 @@ export default function StorageView({ user }: { user: User }) {
                           <button onClick={() => setPreview(f)} title="Visualiser" className="px-2 py-1 text-xs bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 rounded">👁</button>
                           <button onClick={() => download(f)} title="Télécharger" className="ml-1 px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded">⬇</button>
                         </>}
-                        <button onClick={() => rename(f)} title="Renommer" className="ml-1 px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded">✏️</button>
-                        <button onClick={() => move(f)} title="Déplacer" className="ml-1 px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded">↗</button>
-                        <button onClick={() => removeFile(f)} title="Supprimer" className="ml-1 px-2 py-1 text-xs bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded">🗑</button>
+                        {canManageFiles && <>
+                          <button onClick={() => rename(f)} title="Renommer" className="ml-1 px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded">✏️</button>
+                          <button onClick={() => move(f)} title="Déplacer" className="ml-1 px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded">↗</button>
+                          <button onClick={() => removeFile(f)} title="Supprimer" className="ml-1 px-2 py-1 text-xs bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded">🗑</button>
+                        </>}
                       </td>
                     </tr>
                   ))}
@@ -533,7 +558,7 @@ export default function StorageView({ user }: { user: User }) {
               </div>
             </div>
             <iframe title={preview.name} className="flex-1 w-full rounded-b-2xl"
-              src={`/api/storage/download/${preview.id}?mode=inline&token=${encodeURIComponent(getToken() || "")}`} />
+              src={`/api/storage/download/${preview.id}?mode=inline`} />
           </div>
         </div>
       )}

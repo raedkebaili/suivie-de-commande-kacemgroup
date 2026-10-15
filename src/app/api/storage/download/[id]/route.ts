@@ -1,19 +1,15 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromHeaders, logActivity, verifyToken } from "@/lib/auth";
-import { friendlyDriveError, getDriveClient } from "@/lib/google-drive";
+import { getUserFromHeaders, logActivity } from "@/lib/auth";
+import { assertInsideRoot, friendlyDriveError, getDriveClient } from "@/lib/google-drive";
 
 /**
- * Authentifie la requête via l'en-tête Authorization, ou à défaut via le
- * paramètre `token` — nécessaire pour l'aperçu PDF intégré (<iframe>), qui
- * ne permet pas d'ajouter d'en-tête. Le jeton reste un JWT de la plateforme
- * vérifié normalement : aucun accès anonyme n'est ouvert.
+ * Authentifie la requête via le Bearer legacy ou le cookie HttpOnly de session.
+ * Les aperçus PDF utilisent désormais ce cookie de même origine et n'exposent
+ * plus de JWT dans l'URL.
  */
 async function authenticate(request: NextRequest) {
-  const fromHeader = await getUserFromHeaders(request);
-  if (fromHeader) return fromHeader;
-  const token = new URL(request.url).searchParams.get("token");
-  return token ? verifyToken(token) : null;
+  return getUserFromHeaders(request);
 }
 
 /**
@@ -33,6 +29,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   try {
     const { drive } = await getDriveClient();
+    if (!(await assertInsideRoot(id))) {
+      return NextResponse.json({ error: "Fichier hors du stockage applicatif" }, { status: 404 });
+    }
     const meta = await drive.files.get({ fileId: id, fields: "id,name,mimeType,size" });
     const res = await drive.files.get({ fileId: id, alt: "media" }, { responseType: "arraybuffer" });
 

@@ -2,7 +2,7 @@
 
 ## 5.1 Cycle de vie d'un utilisateur
 
-Créé par le SA (`/api/users`) avec un rôle ; `admin/admin123` est seedé si la
+Créé par le SA (`/api/users`) avec un rôle ; `admin / mot de passe initial configuré hors dépôt` est seedé si la
 base est vide. `active=false` bloque le login, **mais** un JWT déjà émis reste
 valide 24 h (ni le rôle ni `active` ne sont relus en base à chaque requête).
 Suppression possible par le SA (contraintes FK : SET NULL sur les historiques,
@@ -78,7 +78,7 @@ périmètre (route PUT multi-sections) :
   LIVREE ou tout livré) > `awaiting-delivery` (tout produit) > `neutral`.
 - **Archive** : état effectif = `state_override` (manuel) ?? `state_detected`
   (fichier) ?? règle « Reste à livrer = 0 ⇒ LIVRÉ » (cellule vide ≠ 0).
-- **Regroupement d'articles** : clé = 3 premiers caractères significatifs
+- **Regroupement d'articles** : clé = 4 premiers caractères significatifs
   (NETLUX 150W ≈ NETLUX 200W).
 
 ## 5.5 Fonctionnalités « cachées » / règles implicites (à connaître)

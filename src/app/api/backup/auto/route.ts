@@ -8,6 +8,7 @@ import { getUserFromHeaders, logActivity } from "@/lib/auth";
 import { collectBackupData } from "@/lib/backup-data";
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
+import { parseSessionIdleTimeoutMinutes, SESSION_IDLE_TIMEOUT_KEY } from "@/lib/session-timeout";
 
 // CORRECTIF (R3) : comparaison résistante aux attaques temporelles + repli
 // sur JWT_SECRET quand BACKUP_SECRET n'est pas défini (le planificateur
@@ -244,6 +245,7 @@ export async function GET(request: NextRequest) {
       enabled: settingsMap.backup_enabled === "true",
       time: settingsMap.backup_time || "22:00",
       maxCount: parseInt(settingsMap.backup_max_count || "30"),
+      idleTimeoutMinutes: parseSessionIdleTimeoutMinutes(settingsMap[SESSION_IDLE_TIMEOUT_KEY]),
       lastRun: settingsMap.backup_last_run || null,
       lastStatus: settingsMap.backup_last_status || null,
       lastBackup: lastAuto || null,

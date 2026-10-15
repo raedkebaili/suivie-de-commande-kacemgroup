@@ -35,7 +35,7 @@ uploads, dépendances. Vérifié par lecture intégrale du code (aucun test dyna
 | ID | Constat | Preuve | Impact |
 |---|---|---|---|
 | SEC-1 | **Secret JWT de repli codé en dur** : `process.env.JWT_SECRET ‖ "otp-super-secret-jwt-key-2024"` | `src/lib/auth.ts:7` | Si `JWT_SECRET` est absent en prod, n'importe qui forge des tokens SA valides. Le `.bat` génère bien un secret en local, mais rien ne le garantit ailleurs (Vercel…). |
-| SEC-2 | **Compte par défaut `admin/admin123` re-seedé automatiquement** et **identifiants affichés sur la page de login** | `src/lib/auth.ts:27-34`, `login/route.ts:12`, `src/app/login/page.tsx` | Accès SA trivial si le mot de passe n'est pas changé ; re-créé après reset. |
+| SEC-2 | **Compte par défaut `admin / mot de passe initial configuré hors dépôt` re-seedé automatiquement** et **identifiants affichés sur la page de login** | `src/lib/auth.ts:27-34`, `login/route.ts:12`, `src/app/login/page.tsx` | Accès SA trivial si le mot de passe n'est pas changé ; re-créé après reset. |
 
 ### Élevées
 
@@ -53,7 +53,7 @@ uploads, dépendances. Vérifié par lecture intégrale du code (aucun test dyna
 | SEC-7 | **JWT accepté en query string** pour le téléchargement (`?token=`) | `storage/download/[id]/route.ts` | Fuite du token dans les logs serveur/proxy et l'historique navigateur. |
 | SEC-8 | `GET /api/orders/next-number` **publique** | route sans auth | Divulgation du compteur d'activité (faible, mais incohérent avec le reste). |
 | SEC-9 | **Absence totale d'en-têtes de sécurité** (CSP, `X-Frame-Options`, `Referrer-Policy`…) et de middleware | `next.config.ts` | Clickjacking, ressources externes non bornées si XSS. |
-| SEC-10 | **`drizzle.config.json` contient des credentials en dur** (`postgres:postgres@127.0.0.1`) et fait doublon avec `drizzle.config.ts` | racine | Confusion d'environnement, fuite d'info locale, risque de push sur la mauvaise base. |
+| SEC-10 | **`drizzle.config.json` contient des credentials en dur** (une valeur de connexion locale) et fait doublon avec `drizzle.config.ts` | racine | Confusion d'environnement, fuite d'info locale, risque de push sur la mauvaise base. |
 | SEC-11 | Comparaison `x-backup-secret` non **timing-safe** ; secret optionnel non documenté | `backup/auto/route.ts` | Mineur (usage cron), mais à documenter/durcir. |
 
 ### Faibles / hygiène

@@ -34,6 +34,8 @@ export default function ProductionView({ user: _user }: { user: User }) {
   const [batchQtys, setBatchQtys] = useState<Record<number, string>>({});
   const [batchDates, setBatchDates] = useState<Record<number, string>>({});
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [search, setSearch] = useState("");
+  const [stateFilter, setStateFilter] = useState("all");
   // Couleurs de priorité pilotées par le gestionnaire de couleurs existant
   const { getColor } = useColors();
   const priorityBadgeStyle = (p: string): React.CSSProperties => {
@@ -107,18 +109,38 @@ export default function ProductionView({ user: _user }: { user: User }) {
   // À priorité égale, l'ordre d'origine (plus récent en premier) est conservé.
   .sort((a, b) => prioritySortRank(a.priority) - prioritySortRank(b.priority));
 
+  const visibleOrders = orders.filter((order) => {
+    const query = search.trim().toLowerCase();
+    const matchesSearch = !query || [order.orderNumber, order.clientName, order.affaire, ...order.items.map((item) => item.articleName)]
+      .some((value) => String(value || "").toLowerCase().includes(query));
+    const matchesState = stateFilter === "all" || order.visualState === stateFilter;
+    return matchesSearch && matchesState;
+  });
+
   return (
     <div className="space-y-3 text-black operational-content">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-black">🏭 Production</h3>
         <button onClick={fetchData} className="px-3 py-1.5 bg-gray-200 border border-gray-400 rounded-lg text-sm text-black">🔄 Actualiser</button>
       </div>
+      <div className="flex flex-wrap items-center gap-2 bg-white border border-gray-200 rounded-xl p-3">
+        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Rechercher commande, client, affaire ou article…" className="min-w-[220px] flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm text-black" />
+        <select value={stateFilter} onChange={(event) => setStateFilter(event.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-black">
+          <option value="all">Tous les états</option>
+          <option value="neutral">En production</option>
+          <option value="awaiting-delivery">En attente de livraison</option>
+          <option value="delivered">Livrée</option>
+          <option value="cancelled">Annulée</option>
+        </select>
+        <span className="text-xs text-gray-500">{visibleOrders.length} commande(s)</span>
+      </div>
 
       {loading ? (
         <div className="flex justify-center py-12 text-black">Chargement...</div>
       ) : (
         <div className="space-y-2">
-          {orders.map(order => (
+          {visibleOrders.length === 0 && <div className="rounded-xl border border-gray-200 bg-white py-10 text-center text-sm text-gray-500">Aucune commande ne correspond aux filtres.</div>}
+          {visibleOrders.map(order => (
             <div
               key={order.orderId}
               className={`rounded-xl border-2 overflow-hidden text-black ${ORDER_STATE_PANEL_CLASSES[order.visualState]}`}

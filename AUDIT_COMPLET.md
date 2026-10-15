@@ -395,7 +395,7 @@ src/
 **Accès:** Public  
 **Body:**
 ```json
-{ "username": "admin", "password": "admin123" }
+{ "username": "admin", "password": "mot de passe initial hors dépôt" }
 ```
 **Réponse (200):**
 ```json
@@ -770,7 +770,7 @@ App (layout.tsx)
 | **HAUTE** | JWT_SECRET par défaut | Clé hardcodée dans le code | Forcer une clé aléatoire en production |
 | **MOYENNE** | Pas de rate limiting | Vulnérable au brute force | Implémenter rate limiting sur /login |
 | **MOYENNE** | Pas de CSRF protection | Pas de token CSRF | Ajouter middleware CSRF |
-| **BASSE** | Mot de passe admin visible | "admin123" dans la page login | Retirer en production |
+| **BASSE** | Mot de passe admin visible | "mot de passe initial hors dépôt" dans la page login | Retirer en production |
 | **BASSE** | Pas de validation d'entrée stricte | Validation basique | Utiliser Zod pour validation |
 
 ### 10.3 Code à risque
@@ -782,7 +782,7 @@ const JWT_SECRET = new TextEncoder().encode(
 );
 
 // src/app/login/page.tsx - Indication du mot de passe
-<p>admin / admin123</p>  // ⚠️ À retirer en production
+<p>admin / mot de passe initial configuré hors dépôt</p>  // ⚠️ À retirer en production
 ```
 
 ---
@@ -903,7 +903,7 @@ npx drizzle-kit push
 npm run dev
 
 # 7. Accéder à http://localhost:3000
-# Identifiants par défaut: admin / admin123
+# Identifiants par défaut: admin / mot de passe initial configuré hors dépôt
 ```
 
 ### 14.3 Production

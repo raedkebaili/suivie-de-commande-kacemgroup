@@ -1,4 +1,5 @@
 "use client";
+import { type ShortcutRequest } from "@/lib/keyboard-shortcuts";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import type { Client, User, RecouvrementState, ClientRecouvrementAssignment } from "@/lib/types";
@@ -7,7 +8,7 @@ import { getContrastTextColor } from "@/lib/color-utils";
 import RecouvrementAlertCell from "@/components/RecouvrementAlertCell";
 import { HandCoins, X } from "lucide-react";
 
-export default function ClientsView({ user }: { user: User }) {
+export default function ClientsView({ user, pendingAction, onPendingActionHandled }: { user: User; pendingAction?: ShortcutRequest | null; onPendingActionHandled?: () => void }) {
   const [items, setItems] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [show, setShow] = useState(false);
@@ -94,8 +95,17 @@ export default function ClientsView({ user }: { user: User }) {
     return { "--recouv-color": hex, "--recouv-text": getContrastTextColor(hex) } as React.CSSProperties;
   };
 
+  // Raccourci clavier demandé par la page — voir src/lib/keyboard-shortcuts.ts
+  useEffect(() => {
+    if (pendingAction?.action !== "new-client") return;
+    onPendingActionHandled?.();
+    if (canEdit) { reset(); setShow(true); }
+    // Fonctions locales recréées à chaque rendu : seule la demande pilote l'effet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAction]);
+
   return <div className="space-y-4">
-    <div className="flex justify-between items-center"><h3 className="text-lg font-semibold text-gray-800 dark:text-white">Clients</h3><div className="flex gap-2">{canDel && <button onClick={delAll} className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">🗑️ Tout supprimer</button>}{canEdit && <button onClick={() => { reset(); setShow(true); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">+ Nouveau</button>}</div></div>
+    <div className="flex justify-between items-center"><h3 className="text-lg font-semibold text-gray-800 dark:text-white">Clients</h3><div className="flex gap-2">{canDel && <button onClick={delAll} className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">🗑️ Tout supprimer</button>}{canEdit && <button onClick={() => { reset(); setShow(true); }} title="Nouveau client (Alt+C)" className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">+ Nouveau</button>}</div></div>
     <div className="flex items-center gap-2 bg-white dark:bg-gray-900 rounded-xl p-3 border border-gray-200 dark:border-gray-800 flex-wrap">
       {canEdit && <>
         <button onClick={downloadModel} className="px-3 py-1.5 text-xs bg-gray-200 dark:bg-gray-700 rounded-lg hover:bg-gray-300">📥 Modèle Excel</button>

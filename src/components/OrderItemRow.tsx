@@ -3,6 +3,7 @@
 import React from "react";
 import type { OrderItem, TechnicalComponent } from "@/lib/types";
 import { useColors } from "@/lib/color-context";
+import { getContrastTextColor } from "@/lib/color-utils";
 import { ORDER_STATE_PANEL_CLASSES, OrderVisualState } from "@/lib/order-visual-state";
 
 type OrderItemRowProps = {
@@ -16,13 +17,17 @@ type OrderItemRowProps = {
   onShowExpeditionHistory: (itemId: number) => void;
   /** true si l'article est EN COURS DE PRODUCTION d'après le planning (clignotement) */
   planningInProgress?: boolean;
+  /** true si la lentille affichée est imposée par une étude photométrique */
+  studyLens?: boolean;
+  /** true si une ligne du planning d'expédition est en cours de livraison */
+  expeditionInProgress?: boolean;
 };
 
 /**
  * Composant pour afficher une ligne d'article dans le tableau de commande.
  * Applique la coloration des champs modifiés.
  */
-export default function OrderItemRow({
+function OrderItemRow({
   item,
   orderId,
   visualState,
@@ -31,11 +36,16 @@ export default function OrderItemRow({
   fmtDate,
   onShowExpeditionHistory,
   planningInProgress = false,
+  studyLens = false,
+  expeditionInProgress = false,
 }: OrderItemRowProps) {
   const { getModifiedCellStyle, getColor } = useColors();
   // Alerte visuelle « en cours de production » (couleur administrable)
   const planningStyle = planningInProgress
     ? ({ ["--planning-color"]: getColor("PLANNING_EN_COURS"), ["--planning-text"]: "#000000" } as React.CSSProperties)
+    : undefined;
+  const expeditionStyle = expeditionInProgress
+    ? ({ ["--expedition-color"]: "#22c55e", ["--expedition-text"]: "#000000" } as React.CSSProperties)
     : undefined;
   // Famille TÉLÉGESTION : surbrillance de la ligne avec la couleur définie
   // pour les spécifications techniques de télégestion (administrable).
@@ -60,9 +70,9 @@ export default function OrderItemRow({
   const modStyle = getModifiedCellStyle();
 
   return (
-    <tr className={`border-b border-black/20 text-black [&_td]:text-black [&_span]:text-black [&_b]:text-black ${ORDER_STATE_PANEL_CLASSES[itemState]}`}
-      style={telegestionBg ? { backgroundColor: telegestionBg, boxShadow: `inset 3px 0 0 0 ${telegestionBg}` } : undefined}
-      title={isTelegestionItem ? "Article de la famille Télégestion" : undefined}>
+    <tr className={`border-b border-black/20 text-black [&_td]:text-black [&_span]:text-black [&_b]:text-black ${ORDER_STATE_PANEL_CLASSES[itemState]} ${expeditionInProgress ? "expedition-blink" : ""}`}
+      style={expeditionStyle || (telegestionBg ? { backgroundColor: telegestionBg, boxShadow: `inset 3px 0 0 0 ${telegestionBg}` } : undefined)}
+      title={expeditionInProgress ? "En cours de livraison" : isTelegestionItem ? "Article de la famille Télégestion" : undefined}>
       {/* Article */}
       <td 
         className="px-1 py-1 font-medium text-[10px]" 
@@ -71,6 +81,7 @@ export default function OrderItemRow({
       >
         {isArticleModified && <span className="mr-0.5">✏️</span>}
         {isTelegestionItem && <span className="mr-0.5" title="Famille Télégestion">📡</span>}
+        {expeditionInProgress && <span className="mr-1" title="En cours de livraison">🚚</span>}
         {planningInProgress
           ? <span className="planning-blink inline-block px-1 font-bold" style={planningStyle} title="En cours de production (planning)">{highlight(item.articleName)}</span>
           : highlight(item.articleName)}
@@ -120,18 +131,28 @@ export default function OrderItemRow({
         className="px-1 py-1 text-[9px] min-w-[260px]"
         style={isTechModified ? { borderLeft: `4px solid ${modStyle.backgroundColor}` } : undefined}
       >
-        {item.technicalComponents && item.technicalComponents.length > 0 ? (
+        {item.lens || (item.technicalComponents && item.technicalComponents.length > 0) ? (
           <div className="grid gap-1">
+            {item.lens && (
+              <div
+                className={`rounded border px-2 py-1 font-semibold ${studyLens ? "border-sky-700" : "border-black/20 bg-sky-50"}`}
+                style={studyLens ? { backgroundColor: getColor("ETUDE_PHOTOMETRIQUE"), color: getContrastTextColor(getColor("ETUDE_PHOTOMETRIQUE")) } : undefined}
+                title={studyLens ? "Lentille imposée par une étude photométrique" : item.lensBy ? `Lentille renseignée par ${item.lensBy}` : "Lentille technique"}
+              >
+                {studyLens ? "🔒 Lentille étude" : "Lentille"} : <b>{item.lens}</b>
+                {item.lensBy && <span className="ml-1 text-[8px] font-normal">({item.lensBy})</span>}
+              </div>
+            )}
             {isTechModified && (
-              <div 
+              <div
                 className="text-[8px] px-1.5 py-0.5 rounded inline-flex items-center gap-1 w-fit mb-1"
                 style={modStyle}
               >
                 ✏️ Composants modifiés
               </div>
             )}
-            {item.technicalComponents.map(component => (
-              <div 
+            {item.technicalComponents?.map(component => (
+              <div
                 key={component.id}
                 className={`rounded border px-2 py-1 text-black ${
                   component.isTelegestion ? "bg-sky-100 border-sky-500" : "bg-white/70 border-black/20"
@@ -171,6 +192,9 @@ export default function OrderItemRow({
         {item.deliveredQty && item.deliveredQty > 0 ? (
           <span className="font-medium ml-1">{item.deliveredQty}</span>
         ) : null}
+        {item.expeditionPlanDriverName && <span className="block font-semibold">🚚 {item.expeditionPlanDriverName}</span>}
+        {item.expeditionPlanDate && <span className="block font-semibold">Chargement : {item.expeditionPlanDate}</span>}
+        {item.expeditionPlanNote && <span className="block max-w-[120px] truncate" title={item.expeditionPlanNote}>📝 {item.expeditionPlanNote}</span>}
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -184,3 +208,5 @@ export default function OrderItemRow({
     </tr>
   );
 }
+
+export default React.memo(OrderItemRow);

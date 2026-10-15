@@ -1,10 +1,13 @@
 "use client";
 
+import TableFullscreen from "@/components/TableFullscreen";
+import { type ShortcutRequest } from "@/lib/keyboard-shortcuts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
 import { useColors } from "@/lib/color-context";
 import { getContrastTextColor } from "@/lib/color-utils";
+import { archiveRightsFor } from "@/lib/archive-rights";
 import {
   ARCHIVE_CELL_PALETTE,
   ARCHIVE_STATES,
@@ -13,7 +16,7 @@ import {
 } from "@/lib/archive-constants";
 
 type Sheet = { id: number; name: string; sourceFilename: string | null; rowCount: number; importedByName: string | null; createdAt: string };
-type Row = { id: number; rowIndex: number; cells: string[]; stateOverride: string | null; stateDetected?: string | null; state: string | null; stateSource?: string; updatedByName: string | null; cellColors: Record<number, string> };
+type Row = { id: number; rowIndex: number; cells: string[]; stateOverride: string | null; stateDetected?: string | null; state: string | null; stateSource?: string; updatedByName: string | null; cellColors: Record<number, string>; modifiedColumns?: number[] };
 type Pagination = { page: number; pageSize: number; total: number; pages: number };
 
 /**
@@ -93,8 +96,11 @@ function computeClientBars(rows: Row[], clientsIdx: number | null): Bar[] {
   return bars;
 }
 
-export default function ArchiveView({ user }: { user: User }) {
+export default function ArchiveView({ user, pendingAction, onPendingActionHandled }: { user: User; pendingAction?: ShortcutRequest | null; onPendingActionHandled?: () => void }) {
   const isAdmin = user.role === "superadmin";
+  const archiveRights = archiveRightsFor(user.role);
+  const canChangeState = archiveRights.canChangeState;
+  const canEditArchive = archiveRights.canEditCells;
   const { getColor } = useColors();
 
   const [sheets, setSheets] = useState<Sheet[]>([]);
@@ -122,8 +128,11 @@ export default function ArchiveView({ user }: { user: User }) {
   const [importing, setImporting] = useState(false);
   const [replaceExisting, setReplaceExisting] = useState(false);
 
-  // Éditeur de couleur de cellule (admin)
+  // Éditeurs de la ligne d'archive et de couleur de cellule
+  const [rowEditor, setRowEditor] = useState<{ rowId: number; cells: string[] } | null>(null);
+  const [savingRow, setSavingRow] = useState(false);
   const [cellEditor, setCellEditor] = useState<{ rowId: number; columnIndex: number; current?: string } | null>(null);
+  const [isTableFullscreen, setIsTableFullscreen] = useState(false);
 
   const flash = (m: string) => { setNotice(m); setTimeout(() => setNotice(""), 4000); };
 
@@ -164,6 +173,13 @@ export default function ArchiveView({ user }: { user: User }) {
   }, [sheetId, page, debounced, stateFilter]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
+
+  // Raccourci Alt+M demandé par la page : bascule le plein écran du tableau
+  useEffect(() => {
+    if (pendingAction?.action !== "toggle-fullscreen") return;
+    onPendingActionHandled?.();
+    setIsTableFullscreen(value => !value);
+  }, [pendingAction, onPendingActionHandled]);
 
   const doImport = async () => {
     const file = fileRef.current?.files?.[0];
@@ -224,6 +240,27 @@ export default function ArchiveView({ user }: { user: User }) {
     }
   };
 
+  const saveRowCells = async () => {
+    if (!rowEditor || !canEditArchive) return;
+    const previousRows = rows;
+    setSavingRow(true);
+    setRows(current => current.map(row => row.id === rowEditor.rowId ? { ...row, cells: rowEditor.cells } : row));
+    try {
+      const response = await apiFetch<{ row: { id: number; cells: string[]; stateOverride: string | null; state: string | null; stateSource?: string; updatedByName: string | null; modifiedColumns?: number[] } }>(`/api/archive/rows/${rowEditor.rowId}`, {
+        method: "PUT",
+        body: JSON.stringify({ cells: rowEditor.cells }),
+      });
+      setRows(current => current.map(row => row.id === rowEditor.rowId ? { ...row, ...response.row } : row));
+      setRowEditor(null);
+      flash("Ligne d'archive modifiée");
+    } catch (err) {
+      setRows(previousRows);
+      setError(err instanceof Error ? err.message : "Erreur lors de la modification de la ligne");
+    } finally {
+      setSavingRow(false);
+    }
+  };
+
   const setCellColor = async (rowId: number, columnIndex: number, color: string | null) => {
     const prev = rows;
     setRows(rs => rs.map(r => {
@@ -250,8 +287,13 @@ export default function ArchiveView({ user }: { user: User }) {
     return { backgroundColor: bg, color: getContrastTextColor(bg) };
   };
 
-  /** Priorité : couleur personnalisée de la cellule > couleur de l'état de la ligne */
+  /** Priorité : modification commerciale (violet) > couleur personnalisée > couleur de l'état de la ligne */
   const cellStyle = (row: Row, columnIndex: number) => {
+    // Modification faite par un commercial : couleur « Champs Modifiés » du gestionnaire
+    if (row.modifiedColumns?.includes(columnIndex)) {
+      const modifiedBg = getColor("FIELD_MODIFIED");
+      return { backgroundColor: modifiedBg, color: getContrastTextColor(modifiedBg) };
+    }
     const custom = row.cellColors[columnIndex];
     if (custom) return { backgroundColor: custom, color: getContrastTextColor(custom) };
     return undefined; // hérite du style de la ligne
@@ -270,14 +312,127 @@ export default function ArchiveView({ user }: { user: User }) {
     return null;
   };
 
+  // Mode plein écran : seul le tableau (et sa pagination) reste affiché
+  const fullscreenActive = isTableFullscreen && !loading && sheets.length > 0;
+
+  const archiveTableCard = (<>
+          {/* Tableau reproduisant la structure Excel */}
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div className={`overflow-x-auto mobile-scroll-x ${fullscreenActive ? "max-h-[calc(100vh-6rem)]" : "max-h-[65vh]"}`}>
+              <table className="w-full text-xs border-collapse">
+                <thead className="sticky top-0 z-10">
+                  <tr className="bg-gray-100 dark:bg-gray-800 border-b border-gray-300 dark:border-gray-600 text-left">
+                    <th className="px-2 py-2 font-semibold text-gray-600 dark:text-gray-300 whitespace-nowrap">#</th>
+                    {columns.map((c, i) => (
+                      <th key={i} className="px-2 py-2 font-semibold text-gray-600 dark:text-gray-300 whitespace-nowrap border-l border-gray-200 dark:border-gray-700">{c}</th>
+                    ))}
+                    <th className="px-2 py-2 font-semibold text-gray-700 dark:text-gray-200 whitespace-nowrap border-l-2 border-gray-400 dark:border-gray-500 bg-gray-200 dark:bg-gray-700">État</th>
+                    {canEditArchive && <th className="px-2 py-2 font-semibold text-gray-700 dark:text-gray-200 whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Actions</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {loadingRows ? (
+                    <tr><td colSpan={columns.length + (canEditArchive ? 3 : 2)} className="text-center py-10 text-gray-400">Chargement...</td></tr>
+                  ) : rows.length === 0 ? (
+                    <tr><td colSpan={columns.length + (canEditArchive ? 3 : 2)} className="text-center py-10 text-gray-400">Aucune ligne pour ces critères</td></tr>
+                  ) : rows.map((r, ri) => {
+                    const rs = rowStyle(r.state);
+                    return (
+                      <tr key={r.id} style={rs} className={`border-b border-gray-200 dark:border-gray-700 ${rs ? "" : "hover:bg-gray-50 dark:hover:bg-gray-800/50 text-gray-700 dark:text-gray-200"}`}>
+                        <td className="px-2 py-1 text-[10px] opacity-60 whitespace-nowrap">{r.rowIndex + 1}</td>
+                        {columns.map((_, ci) => {
+                          // Colonnes « Clients » et « Affaire » : fusion verticale
+                          // réelle (rowSpan) + centrage, comme dans Excel.
+                          const bar = barFor(ci, ri);
+                          if (bar) {
+                            if (bar.span === "mid") return null; // couverte par la cellule fusionnée
+                            const cs = cellStyle(r, ci);
+                            const merged = bar.groupLen > 1;
+                            return (
+                              <td key={ci} style={cs} rowSpan={bar.groupLen}
+                                className={`px-2 py-1 border-l border-black/10 dark:border-white/10 align-middle text-center whitespace-nowrap ${merged ? "font-bold border-y border-black/20 dark:border-white/20" : ""} ${isAdmin ? "cursor-context-menu" : ""}`}
+                                title={merged ? `${r.cells[ci] || ""} — ${bar.groupLen} lignes regroupées` : (r.cells[ci] || "")}
+                                onContextMenu={isAdmin ? (e) => { e.preventDefault(); setCellEditor({ rowId: r.id, columnIndex: ci, current: r.cellColors[ci] }); } : undefined}>
+                                {r.cells[ci] ?? ""}
+                                {merged && <span className="block text-[9px] font-normal opacity-60">({bar.groupLen})</span>}
+                              </td>
+                            );
+                          }
+                          const cs = cellStyle(r, ci);
+                          return (
+                            <td key={ci} style={cs}
+                              className={`px-2 py-1 border-l border-black/10 dark:border-white/10 whitespace-nowrap max-w-[240px] truncate ${isAdmin ? "cursor-context-menu" : ""}`}
+                              title={r.cells[ci] || ""}
+                              onContextMenu={isAdmin ? (e) => { e.preventDefault(); setCellEditor({ rowId: r.id, columnIndex: ci, current: r.cellColors[ci] }); } : undefined}>
+                              {r.cells[ci] ?? ""}
+                            </td>
+                          );
+                        })}
+                        <td className="px-2 py-1 border-l-2 border-black/20 dark:border-white/20 whitespace-nowrap">
+                          {canChangeState ? (
+                            <span className="inline-flex items-center gap-1">
+                              <select value={r.stateOverride ?? ""} onChange={e => setRowState(r, e.target.value || null)}
+                                title={STATE_SOURCE_HINT[r.stateSource || "aucun"]}
+                                className="text-[11px] px-1 py-0.5 rounded border border-black/20 bg-white/80 text-black">
+                                {/* Valeur vide = automatique : état du fichier, sinon règle Reste à livrer = 0 */}
+                                <option value="">{r.state ? `Auto (${archiveStateLabel(r.state)})` : "Auto (—)"}</option>
+                                {ARCHIVE_STATES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                              </select>
+                              <span className="text-[9px] opacity-70" title={STATE_SOURCE_HINT[r.stateSource || "aucun"]}>
+                                {STATE_SOURCE_BADGE[r.stateSource || "aucun"]}
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="text-[11px] font-semibold inline-flex items-center gap-1">
+                              {archiveStateLabel(r.state)}
+                              <span className="text-[9px] opacity-70" title={STATE_SOURCE_HINT[r.stateSource || "aucun"]}>
+                                {STATE_SOURCE_BADGE[r.stateSource || "aucun"]}
+                              </span>
+                            </span>
+                          )}
+                        </td>
+                        {canEditArchive && <td className="px-2 py-1 border-l border-black/10 dark:border-white/10 whitespace-nowrap">
+                          <button onClick={() => setRowEditor({ rowId: r.id, cells: [...r.cells] })}
+                            className="px-2 py-1 text-[10px] bg-blue-600 text-white rounded hover:bg-blue-700">✎ Modifier</button>
+                        </td>}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+  </>);
+
+  const archivePagination = (<>
+          {/* Pagination */}
+          <div className="flex items-center justify-between gap-2 flex-wrap text-xs text-gray-600 dark:text-gray-300">
+            <span>{pagination.total} ligne(s) — page {pagination.page} / {pagination.pages}</span>
+            <div className="flex gap-1">
+              <button disabled={pagination.page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}
+                className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-40">← Précédent</button>
+              <button disabled={pagination.page >= pagination.pages} onClick={() => setPage(p => p + 1)}
+                className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-40">Suivant →</button>
+            </div>
+          </div>
+  </>);
+
   return (
-    <div className="space-y-4">
+    <div className="archive-content space-y-4">
+      {!fullscreenActive && (<>
       {/* En-tête */}
       <div className="flex justify-between items-center flex-wrap gap-2">
         <div>
           <h3 className="text-lg font-semibold text-gray-800 dark:text-white">📁 Archive commandes</h3>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Anciennes commandes importées depuis Excel — consultation uniquement, séparées du suivi actif.</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Anciennes commandes importées depuis Excel — séparées du suivi actif.</p>
+          {canEditArchive && <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-1">✎ Modification des lignes autorisée pour votre rôle.</p>}
         </div>
+        <button onClick={() => setIsTableFullscreen(value => !value)}
+          className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+          title={isTableFullscreen ? "Quitter le plein écran (Échap)" : "Afficher uniquement le tableau en plein écran (Alt+M)"}>
+          {isTableFullscreen ? "⤢ Quitter plein écran" : "⛶ Plein écran"}
+        </button>
         {isAdmin && (
           <div className="flex items-center gap-2 flex-wrap">
             <input type="file" accept=".xlsx,.xls" ref={fileRef} className="text-sm text-gray-600 dark:text-gray-300" />
@@ -300,8 +455,9 @@ export default function ArchiveView({ user }: { user: User }) {
         )}
       </div>
 
-      {error && <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">{error}</div>}
-      {notice && <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 text-sm">{notice}</div>}
+      </>)}
+      {!fullscreenActive && error && <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">{error}</div>}
+      {!fullscreenActive && notice && <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 text-sm">{notice}</div>}
 
       {loading ? (
         <div className="flex justify-center py-12"><svg className="animate-spin w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg></div>
@@ -314,6 +470,7 @@ export default function ArchiveView({ user }: { user: User }) {
         </div>
       ) : (
         <>
+          {!fullscreenActive && (<>
           {/* Sélection de période + filtres */}
           <div className="bg-white dark:bg-gray-900 rounded-xl p-3 border border-gray-200 dark:border-gray-800 flex items-center gap-2 flex-wrap">
             <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Période / feuille</label>
@@ -352,6 +509,7 @@ export default function ArchiveView({ user }: { user: User }) {
               const bg = getColor(s.colorKey);
               return <span key={s.key} className="px-2 py-0.5 rounded border border-black/10" style={{ backgroundColor: bg, color: getContrastTextColor(bg) }}>{s.label}</span>;
             })}
+            <span className="px-2 py-0.5 rounded border border-black/10" style={{ backgroundColor: getColor("FIELD_MODIFIED"), color: getContrastTextColor(getColor("FIELD_MODIFIED")) }}>Modifié par un commercial</span>
             <span className="text-gray-400 italic">
               États : 📄 lu dans le fichier · ⚙ auto (Reste à livrer = 0) · ✎ modifié manuellement — tous modifiables
             </span>
@@ -378,99 +536,53 @@ export default function ArchiveView({ user }: { user: User }) {
             </div>
           )}
 
-          {/* Tableau reproduisant la structure Excel */}
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div className="overflow-x-auto max-h-[65vh]">
-              <table className="w-full text-xs border-collapse">
-                <thead className="sticky top-0 z-10">
-                  <tr className="bg-gray-100 dark:bg-gray-800 border-b border-gray-300 dark:border-gray-600 text-left">
-                    <th className="px-2 py-2 font-semibold text-gray-600 dark:text-gray-300 whitespace-nowrap">#</th>
-                    {columns.map((c, i) => (
-                      <th key={i} className="px-2 py-2 font-semibold text-gray-600 dark:text-gray-300 whitespace-nowrap border-l border-gray-200 dark:border-gray-700">{c}</th>
-                    ))}
-                    <th className="px-2 py-2 font-semibold text-gray-700 dark:text-gray-200 whitespace-nowrap border-l-2 border-gray-400 dark:border-gray-500 bg-gray-200 dark:bg-gray-700">État</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loadingRows ? (
-                    <tr><td colSpan={columns.length + 2} className="text-center py-10 text-gray-400">Chargement...</td></tr>
-                  ) : rows.length === 0 ? (
-                    <tr><td colSpan={columns.length + 2} className="text-center py-10 text-gray-400">Aucune ligne pour ces critères</td></tr>
-                  ) : rows.map((r, ri) => {
-                    const rs = rowStyle(r.state);
-                    return (
-                      <tr key={r.id} style={rs} className={`border-b border-gray-200 dark:border-gray-700 ${rs ? "" : "hover:bg-gray-50 dark:hover:bg-gray-800/50 text-gray-700 dark:text-gray-200"}`}>
-                        <td className="px-2 py-1 text-[10px] opacity-60 whitespace-nowrap">{r.rowIndex + 1}</td>
-                        {columns.map((_, ci) => {
-                          // Colonnes « Clients » et « Affaire » : fusion verticale
-                          // réelle (rowSpan) + centrage, comme dans Excel.
-                          const bar = barFor(ci, ri);
-                          if (bar) {
-                            if (bar.span === "mid") return null; // couverte par la cellule fusionnée
-                            const cs = cellStyle(r, ci);
-                            const merged = bar.groupLen > 1;
-                            return (
-                              <td key={ci} style={cs} rowSpan={bar.groupLen}
-                                className={`px-2 py-1 border-l border-black/10 dark:border-white/10 align-middle text-center whitespace-nowrap ${merged ? "font-bold border-y border-black/20 dark:border-white/20" : ""} ${isAdmin ? "cursor-context-menu" : ""}`}
-                                title={merged ? `${r.cells[ci] || ""} — ${bar.groupLen} lignes regroupées` : (r.cells[ci] || "")}
-                                onContextMenu={isAdmin ? (e) => { e.preventDefault(); setCellEditor({ rowId: r.id, columnIndex: ci, current: r.cellColors[ci] }); } : undefined}>
-                                {r.cells[ci] ?? ""}
-                                {merged && <span className="block text-[9px] font-normal opacity-60">({bar.groupLen})</span>}
-                              </td>
-                            );
-                          }
-                          const cs = cellStyle(r, ci);
-                          return (
-                            <td key={ci} style={cs}
-                              className={`px-2 py-1 border-l border-black/10 dark:border-white/10 whitespace-nowrap max-w-[240px] truncate ${isAdmin ? "cursor-context-menu" : ""}`}
-                              title={r.cells[ci] || ""}
-                              onContextMenu={isAdmin ? (e) => { e.preventDefault(); setCellEditor({ rowId: r.id, columnIndex: ci, current: r.cellColors[ci] }); } : undefined}>
-                              {r.cells[ci] ?? ""}
-                            </td>
-                          );
-                        })}
-                        <td className="px-2 py-1 border-l-2 border-black/20 dark:border-white/20 whitespace-nowrap">
-                          {isAdmin ? (
-                            <span className="inline-flex items-center gap-1">
-                              <select value={r.stateOverride ?? ""} onChange={e => setRowState(r, e.target.value || null)}
-                                title={STATE_SOURCE_HINT[r.stateSource || "aucun"]}
-                                className="text-[11px] px-1 py-0.5 rounded border border-black/20 bg-white/80 text-black">
-                                {/* Valeur vide = automatique : état du fichier, sinon règle Reste à livrer = 0 */}
-                                <option value="">{r.state ? `Auto (${archiveStateLabel(r.state)})` : "Auto (—)"}</option>
-                                {ARCHIVE_STATES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
-                              </select>
-                              <span className="text-[9px] opacity-70" title={STATE_SOURCE_HINT[r.stateSource || "aucun"]}>
-                                {STATE_SOURCE_BADGE[r.stateSource || "aucun"]}
-                              </span>
-                            </span>
-                          ) : (
-                            <span className="text-[11px] font-semibold inline-flex items-center gap-1">
-                              {archiveStateLabel(r.state)}
-                              <span className="text-[9px] opacity-70" title={STATE_SOURCE_HINT[r.stateSource || "aucun"]}>
-                                {STATE_SOURCE_BADGE[r.stateSource || "aucun"]}
-                              </span>
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Pagination */}
-          <div className="flex items-center justify-between gap-2 flex-wrap text-xs text-gray-600 dark:text-gray-300">
-            <span>{pagination.total} ligne(s) — page {pagination.page} / {pagination.pages}</span>
-            <div className="flex gap-1">
-              <button disabled={pagination.page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}
-                className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-40">← Précédent</button>
-              <button disabled={pagination.page >= pagination.pages} onClick={() => setPage(p => p + 1)}
-                className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-40">Suivant →</button>
-            </div>
-          </div>
+          </>)}
+          {fullscreenActive ? (
+            <TableFullscreen title="Archive — tableau" onExit={() => setIsTableFullscreen(false)}>
+              <div className="archive-content space-y-2">
+                {error && <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">{error}</div>}
+                {archiveTableCard}
+                {archivePagination}
+              </div>
+            </TableFullscreen>
+          ) : (
+            <>
+              {archiveTableCard}
+              {archivePagination}
+            </>
+          )}
         </>
+      )}
+
+      {/* Éditeur des champs de ligne (planification, technique, superadmin) */}
+      {rowEditor && canEditArchive && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
+          <div className="absolute inset-0 bg-black/50" onClick={() => !savingRow && setRowEditor(null)} />
+          <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-6">
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <h4 className="text-base font-semibold text-gray-800 dark:text-white">Modifier la ligne d&apos;archive</h4>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Les données originales de l&apos;archive sont modifiées sans toucher aux commandes actives.</p>
+              </div>
+              <button onClick={() => setRowEditor(null)} disabled={savingRow} className="text-xl text-gray-500 hover:text-gray-800 disabled:opacity-40">×</button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {columns.map((column, columnIndex) => (
+                <label key={columnIndex} className="text-xs text-gray-700 dark:text-gray-300">
+                  <span className="block font-semibold mb-1">{column}</span>
+                  <textarea value={rowEditor.cells[columnIndex] ?? ""}
+                    onChange={event => setRowEditor(current => current ? { ...current, cells: current.cells.map((cell, index) => index === columnIndex ? event.target.value : cell) } : current)}
+                    rows={2}
+                    className="w-full px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm resize-y" />
+                </label>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => setRowEditor(null)} disabled={savingRow} className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40">Annuler</button>
+              <button onClick={saveRowCells} disabled={savingRow} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{savingRow ? "Enregistrement…" : "Enregistrer"}</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Éditeur de couleur de cellule (admin) */}

@@ -27,9 +27,11 @@ const UsersView = dynamic(() => import("@/components/UsersView"), { loading: Tab
 const WatchdogView = dynamic(() => import("@/components/WatchdogView"), { loading: TabLoader });
 const ProductionView = dynamic(() => import("@/components/ProductionView"), { loading: TabLoader });
 const ExpeditionView = dynamic(() => import("@/components/ExpeditionView"), { loading: TabLoader });
+const ExpeditionPlanningView = dynamic(() => import("@/components/ExpeditionPlanningView"), { loading: TabLoader });
 const MatiereView = dynamic(() => import("@/components/MatiereView"), { loading: TabLoader });
 const BackupView = dynamic(() => import("@/components/BackupView"), { loading: TabLoader });
 const ColorsView = dynamic(() => import("@/components/ColorsView"), { loading: TabLoader });
+const ArticleFamiliesView = dynamic(() => import("@/components/ArticleFamiliesView"), { loading: TabLoader });
 const RecouvrementView = dynamic(() => import("@/components/RecouvrementView"), { loading: TabLoader });
 const ArchiveView = dynamic(() => import("@/components/ArchiveView"), { loading: TabLoader });
 const PlanningProductionView = dynamic(() => import("@/components/PlanningProductionView"), { loading: TabLoader });
@@ -39,33 +41,43 @@ const StorageView = dynamic(() => import("@/components/StorageView"), { loading:
 import ForcePasswordChange from "@/components/ForcePasswordChange";
 import type { Notification } from "@/lib/types";
 import { startBackupScheduler, stopBackupScheduler } from "@/lib/backup-scheduler";
+import { GERANT_ALLOWED_TABS, GERANT_ROLE } from "@/lib/gerant-access";
+import { isEditableTarget, resolveShortcut, type ShortcutRequest } from "@/lib/keyboard-shortcuts";
+import KeyboardShortcutsHelp from "@/components/KeyboardShortcutsHelp";
+
+/** Onglets où le plein écran d'un tableau a un sens. */
+const FULLSCREEN_TABS = ["orders", "archive"];
 
 function formatNotifDate(d: string) { if (!d) return ""; const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(d); if (m) return `${m[3]}/${m[2]} ${m[4]}:${m[5]}`; return d.substring(0,16); }
 
-type Tab = "dashboard" | "orders" | "production" | "expedition" | "matieres" | "agencies" | "clients" | "users" | "watchdog" | "backup" | "colors" | "recouvrement" | "archive" | "planning" | "factories" | "telegestion" | "storage";
+type Tab = "familles" | "dashboard" | "orders" | "production" | "expedition" | "expeditionPlanning" | "matieres" | "agencies" | "clients" | "users" | "watchdog" | "backup" | "colors" | "recouvrement" | "archive" | "planning" | "factories" | "telegestion" | "storage";
+const gerantAccess = (tab: Tab) => GERANT_ALLOWED_TABS.includes(tab as (typeof GERANT_ALLOWED_TABS)[number]) ? [GERANT_ROLE] : [];
 
 // Hoisted outside the component: this list is static and doesn't need to be
 // recreated on every render. Also reused by the Electron shortcut handler to
 // check whether the current user's role is allowed to jump to a given tab.
 const TABS: { key: Tab; label: string; roles: string[] }[] = [
   { key: "dashboard", label: "Tableau de bord", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement"] },
-  { key: "orders", label: "Commandes", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement"] },
+  { key: "orders", label: "Commandes", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement", "acces_agence", ...gerantAccess("orders")] },
   // Archive : consultation ouverte à tous les rôles authentifiés
-  { key: "archive", label: "Archive commandes", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement"] },
+  { key: "archive", label: "Archive commandes", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement", ...gerantAccess("archive")] },
   { key: "production", label: "Production", roles: ["superadmin", "planification"] },
-  { key: "expedition", label: "Expédition", roles: ["superadmin", "planification"] },
-  { key: "planning", label: "Planning production", roles: ["superadmin", "planification"] },
+  { key: "expedition", label: "Expédition", roles: ["superadmin", "planification", ...gerantAccess("expedition")] },
+  { key: "expeditionPlanning", label: "Planning d'expédition", roles: ["superadmin", "planification", ...gerantAccess("expeditionPlanning")] },
+  { key: "planning", label: "Planning production", roles: ["superadmin", "planification", "consultant_prod", ...gerantAccess("planning")] },
   { key: "factories", label: "Usines", roles: ["superadmin", "planification"] },
   { key: "matieres", label: "Matières", roles: ["superadmin", "technique"] },
-  { key: "telegestion", label: "Télégestion", roles: ["superadmin", "technique"] },
+  { key: "telegestion", label: "Télégestion", roles: ["superadmin", "technique", ...gerantAccess("telegestion")] },
   { key: "agencies", label: "Agences", roles: ["superadmin", "commercial"] },
   { key: "clients", label: "Clients", roles: ["superadmin", "commercial", "recouvrement"] },
   { key: "recouvrement", label: "Recouvrement", roles: ["superadmin", "recouvrement"] },
-  { key: "storage", label: "Stockage", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement"] },
+  { key: "storage", label: "Stockage", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement", ...gerantAccess("storage")] },
   { key: "users", label: "Utilisateurs", roles: ["superadmin"] },
-  { key: "watchdog", label: "Watchdog", roles: ["superadmin"] },
+  { key: "watchdog", label: "Watchdog", roles: ["superadmin", ...gerantAccess("watchdog")] },
   { key: "backup", label: "Sauvegarde", roles: ["superadmin"] },
   { key: "colors", label: "Couleurs", roles: ["superadmin"] },
+  // Référentiel automatique des familles d'articles (lecture seule, superadmin)
+  { key: "familles", label: "Familles d'articles", roles: ["superadmin"] },
 ];
 
 export default function HomePage() {
@@ -77,13 +89,67 @@ export default function HomePage() {
   const didRedirect = useRef(false);
   const [darkMode, setDarkMode] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifs, setShowNotifs] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{orders: unknown[]; items: unknown[]; clients: unknown[]} | null>(null);
   const [showSearch, setShowSearch] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const restoredTabUserId = useRef<number | null>(null);
+  const [pendingAction, setPendingAction] = useState<ShortcutRequest | null>(null);
+  const shortcutIdRef = useRef(0);
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
 
   const availableTabs = useMemo(() => (user ? TABS.filter(t => t.roles.includes(user.role)) : []), [user]);
+
+  useEffect(() => {
+    if (!user || restoredTabUserId.current === user.id) return;
+    restoredTabUserId.current = user.id;
+    try {
+      const storedTab = window.localStorage.getItem(`ordertrack:active-tab:${user.id}`) as Tab | null;
+      if (storedTab && availableTabs.some((tab) => tab.key === storedTab)) setActiveTab(storedTab);
+    } catch { /* stockage local indisponible : on garde l'onglet par défaut */ }
+  }, [user, availableTabs]);
+
+  useEffect(() => {
+    if (!user || restoredTabUserId.current !== user.id || !availableTabs.some((tab) => tab.key === activeTab)) return;
+    try { window.localStorage.setItem(`ordertrack:active-tab:${user.id}`, activeTab); } catch { /* non bloquant */ }
+  }, [user, activeTab, availableTabs]);
+
+  // Une demande de raccourci ne doit pas survivre à un changement d'onglet.
+  useEffect(() => {
+    if (pendingAction && pendingAction.tab !== activeTab) setPendingAction(null);
+  }, [activeTab, pendingAction]);
+
+  const consumeShortcut = useCallback(() => setPendingAction(null), []);
+
+  // Raccourcis clavier globaux (Alt+lettre, Alt+chiffre, /, F1) — voir src/lib/keyboard-shortcuts.ts
+  useEffect(() => {
+    if (!user || user.mustChangePassword) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const def = resolveShortcut(event, { editable: isEditableTarget(event.target) });
+      if (!def) return;
+      if (def.tab && !availableTabs.some((tab) => tab.key === def.tab)) return;
+      if (def.action === "toggle-fullscreen" && !FULLSCREEN_TABS.includes(activeTab)) return;
+
+      event.preventDefault();
+      if (def.action === "show-help") { setShowShortcutHelp((open) => !open); return; }
+      if (def.action === "focus-search") { searchInputRef.current?.focus(); searchInputRef.current?.select(); return; }
+      if (def.tab) setActiveTab(def.tab as Tab);
+      if (def.action) {
+        shortcutIdRef.current += 1;
+        setPendingAction({ id: shortcutIdRef.current, action: def.action, tab: def.tab ?? activeTab });
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [user, availableTabs, activeTab]);
+
+  useEffect(() => {
+    if (user && !availableTabs.some((tab) => tab.key === activeTab)) {
+      setActiveTab((availableTabs[0]?.key || "orders") as Tab);
+    }
+  }, [user, availableTabs, activeTab]);
 
   useEffect(() => {
     if (searchQuery.length < 2) { setSearchResults(null); return; }
@@ -97,10 +163,12 @@ export default function HomePage() {
     return () => clearTimeout(t);
   }, [searchQuery]);
 
-  const fetchNotifications = useCallback(async () => {
+  const fetchNotifications = useCallback(async (all = false) => {
     try {
-      const data = await apiFetch<{ notifications: Notification[] }>(`/api/notifications?unread=1`);
+      const query = all ? "all=1" : "unread=1&limit=50";
+      const data = await apiFetch<{ notifications: Notification[]; unreadCount: number }>(`/api/notifications?${query}`);
       setNotifications(data.notifications);
+      setUnreadCount(data.unreadCount);
     } catch { /* ok */ }
   }, []);
 
@@ -130,7 +198,16 @@ export default function HomePage() {
 
   const markRead = async (id: number) => {
     await apiFetch(`/api/notifications/${id}`, { method: "PUT", body: JSON.stringify({ read: true }) });
-    fetchNotifications();
+    fetchNotifications(showNotifs);
+  };
+
+  const markAllRead = async () => {
+    const unread = notifications.filter((notification) => !notification.read);
+    await Promise.all(unread.map((notification) => apiFetch(`/api/notifications/${notification.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ read: true }),
+    })));
+    fetchNotifications(showNotifs);
   };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950"><div className="flex flex-col items-center gap-3"><svg className="animate-spin w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg><span className="text-sm text-gray-500 dark:text-gray-400">Chargement...</span></div></div>;
@@ -140,7 +217,7 @@ export default function HomePage() {
   // remplacé, aucun module n'est accessible (barrière applicative complète).
   if (user.mustChangePassword) return <ForcePasswordChange />;
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const latestUnread = notifications.find((notification) => !notification.read);
 
   return (
     <div className={`flex h-screen overflow-hidden ${darkMode ? "dark" : ""} bg-gray-50 dark:bg-gray-950`}>
@@ -174,7 +251,7 @@ export default function HomePage() {
             </h2>
             <span className="text-xs bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full font-medium">KACEM GROUP</span>
             {/* Search bar */}
-            <div className="hidden md:flex items-center gap-2 flex-1 max-w-md mx-4 relative">
+            <div className="hidden md:flex items-center gap-2 flex-1 max-w-sm xl:max-w-md mx-2 xl:mx-4 relative">
               <input ref={searchInputRef} type="text" placeholder="Rechercher commande, client, affaire, article…"
                 value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                 onFocus={() => searchResults && setShowSearch(true)}
@@ -204,53 +281,85 @@ export default function HomePage() {
               )}
             </div>
           </div>
+          {latestUnread && (
+            <div className="notification-ticker notification-ticker-inline flex-1 min-w-0 max-w-xl text-blue-900 dark:text-blue-100" role="alert" aria-live="polite">
+              <div className="notification-ticker-viewport px-2 py-1.5 text-xs">
+                <div className="notification-ticker-track">
+                  <span className="font-semibold">{latestUnread.title}</span>
+                  <span className="mx-2 opacity-60">•</span>
+                  <span>{latestUnread.message}</span>
+                </div>
+              </div>
+            </div>
+          )}
           {/* Notifications bell */}
           <div className="relative">
-            <button onClick={() => { setShowNotifs(!showNotifs); if (!showNotifs) fetchNotifications(); }}
+            <button onClick={() => { setShowNotifs(!showNotifs); if (!showNotifs) fetchNotifications(true); }}
+              aria-label="Ouvrir l'historique complet des notifications"
+              title="Historique complet des notifications"
               className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 relative">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
               {unreadCount > 0 && <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">{unreadCount}</span>}
             </button>
             {showNotifs && (
-              <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-50 max-h-96 overflow-y-auto">
-                <div className="p-3 border-b border-gray-200 dark:border-gray-700 font-semibold text-sm text-gray-800 dark:text-white">Notifications</div>
+              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-50 max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto">
+                <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-2">
+                  <span className="font-semibold text-sm text-gray-800 dark:text-white">Historique des notifications</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-gray-400">{notifications.length} · {unreadCount} non lue(s)</span>
+                    {unreadCount > 0 && <button onClick={markAllRead} className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap">Tout marquer comme lue</button>}
+                  </div>
+                </div>
                 {notifications.length === 0 ? <div className="p-4 text-sm text-gray-400 text-center">Aucune notification</div> :
-                  notifications.slice(0, 20).map(n => (
+                  notifications.map(n => (
                     <div key={n.id} className={`p-3 border-b border-gray-100 dark:border-gray-700/50 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-750 ${!n.read ? "bg-blue-50 dark:bg-blue-900/20" : ""}`}
                       onClick={() => markRead(n.id)}>
-                      <div className="font-medium text-gray-800 dark:text-white text-xs">{n.title}</div>
-                      <div className="text-gray-500 dark:text-gray-400 text-xs mt-0.5">{n.message}</div>
-                      <div className="text-[10px] text-gray-400 mt-1">{formatNotifDate(n.createdAt)}</div>
+                      <div className="flex items-start gap-2">
+                        {!n.read && <span className="mt-1.5 w-2 h-2 rounded-full bg-blue-500 shrink-0" aria-label="Non lue" />}
+                        <div className="min-w-0">
+                          <div className="font-medium text-gray-800 dark:text-white text-xs">{n.title}</div>
+                          <div className="text-gray-500 dark:text-gray-400 text-xs mt-0.5">{n.message}</div>
+                          <div className="text-[10px] text-gray-400 mt-1 flex items-center gap-2">
+                            <span>{formatNotifDate(n.createdAt)}{n.read ? " · Lue" : ""}</span>
+                            {!n.read && <button onClick={(event) => { event.stopPropagation(); markRead(n.id); }} className="font-semibold text-blue-600 dark:text-blue-400 hover:underline">Marquer comme lue</button>}
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   ))}
               </div>
             )}
           </div>
+          <button type="button" onClick={() => setShowShortcutHelp(true)} title="Raccourcis clavier (F1)" aria-label="Raccourcis clavier"
+            className="hidden sm:flex items-center justify-center w-8 h-8 rounded-lg border border-gray-300 dark:border-gray-600 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">⌨</button>
           <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
             <span className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 flex items-center justify-center font-bold text-sm">{user.fullName.charAt(0)}</span>
             <span className="hidden sm:inline font-medium">{user.fullName}</span>
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6 bg-gray-50 dark:bg-gray-950">
+        <main className="flex-1 min-w-0 overflow-y-auto p-2 sm:p-3 lg:p-6 bg-gray-50 dark:bg-gray-950">
           {activeTab === "dashboard" && <DashboardView user={user} />}
-          {activeTab === "orders" && <OrdersView user={user} />}
+          {activeTab === "orders" && <OrdersView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} onNavigateTab={(tab) => setActiveTab(tab as Tab)} />}
           {activeTab === "production" && <ProductionView user={user} />}
           {activeTab === "expedition" && <ExpeditionView user={user} />}
-          {activeTab === "planning" && <PlanningProductionView user={user} />}
-          {activeTab === "factories" && <FactoriesView user={user} />}
+          {activeTab === "expeditionPlanning" && <ExpeditionPlanningView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} />}
+          {activeTab === "planning" && <PlanningProductionView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} />}
+          {activeTab === "factories" && <FactoriesView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} />}
           {activeTab === "matieres" && <MatiereView user={user} />}
           {activeTab === "telegestion" && <TelegestionView user={user} />}
-          {activeTab === "agencies" && <AgenciesView user={user} />}
-          {activeTab === "clients" && <ClientsView user={user} />}
+          {activeTab === "agencies" && <AgenciesView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} />}
+          {activeTab === "clients" && <ClientsView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} />}
           {activeTab === "recouvrement" && <RecouvrementView user={user} />}
-          {activeTab === "archive" && <ArchiveView user={user} />}
+          {activeTab === "archive" && <ArchiveView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} />}
           {activeTab === "storage" && <StorageView user={user} />}
           {activeTab === "users" && <UsersView user={user} />}
           {activeTab === "watchdog" && <WatchdogView user={user} />}
           {activeTab === "backup" && <BackupView user={user} />}
           {activeTab === "colors" && <ColorsView user={user} />}
+          {activeTab === "familles" && <ArticleFamiliesView user={user} />}
         </main>
       </div>
+      {showShortcutHelp && <KeyboardShortcutsHelp allowedTabs={availableTabs.map((tab) => tab.key)} onClose={() => setShowShortcutHelp(false)} />}
     </div>
   );
 }

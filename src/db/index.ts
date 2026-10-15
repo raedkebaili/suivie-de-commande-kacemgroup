@@ -48,14 +48,12 @@ function getDb(): NodePgDatabase<typeof schema> {
 // Proxy qui crée la connexion seulement quand on accède à une propriété
 export const pool = new Proxy({} as Pool, {
   get(_, prop) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (getPool() as any)[prop];
   },
 });
 
 export const db = new Proxy({} as NodePgDatabase<typeof schema>, {
   get(_, prop) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (getDb() as any)[prop];
   },
 });

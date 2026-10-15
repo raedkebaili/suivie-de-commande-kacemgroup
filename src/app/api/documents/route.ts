@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { driveDocuments, orders, photometricStudies } from "@/db/schema";
 import { and, desc, eq } from "drizzle-orm";
 import { getUserFromHeaders, logActivity, type UserPayload } from "@/lib/auth";
+import { agencyScopeForUser } from "@/lib/agency-access";
 import {
   assertInsideRoot,
   bufferToStream,
@@ -81,6 +82,20 @@ export async function GET(request: NextRequest) {
   const params = parseEntityParams(sp.get("entity"), sp.get("id"));
   if (!params) {
     return NextResponse.json({ error: "Paramètres entity (order|study) et id requis" }, { status: 400 });
+  }
+
+  const agencyScope = agencyScopeForUser(user);
+  if (agencyScope) {
+    const linkedOrderId = params.entity === "order"
+      ? params.entityId
+      : (await db.select({ orderId: photometricStudies.orderId }).from(photometricStudies).where(eq(photometricStudies.id, params.entityId)).limit(1))[0]?.orderId;
+    if (linkedOrderId === null || linkedOrderId === undefined) {
+      return NextResponse.json({ error: "Entité inaccessible" }, { status: 404 });
+    }
+    const [order] = await db.select({ agencyId: orders.agencyId }).from(orders).where(eq(orders.id, linkedOrderId)).limit(1);
+    if (!order || !agencyScope.includes(order.agencyId)) {
+      return NextResponse.json({ error: "Entité inaccessible" }, { status: 404 });
+    }
   }
 
   const documents = await db.select().from(driveDocuments)

@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
-import { friendlyDriveError, getDriveClient } from "@/lib/google-drive";
+import { assertInsideRoot, friendlyDriveError, getDriveClient } from "@/lib/google-drive";
 
 /**
  * PUT /api/storage/files/[id] — renommer et/ou déplacer
@@ -10,11 +10,18 @@ import { friendlyDriveError, getDriveClient } from "@/lib/google-drive";
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getUserFromHeaders(request);
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  if (user.role === "gerant") return NextResponse.json({ error: "Accès en lecture seule" }, { status: 403 });
 
   const { id } = await params;
   try {
+    const { drive, cfg } = await getDriveClient();
+    if (!id || (cfg.rootFolderId && id === cfg.rootFolderId)) {
+      return NextResponse.json({ error: "Le dossier racine ne peut pas être modifié." }, { status: 400 });
+    }
+    if (!(await assertInsideRoot(id))) {
+      return NextResponse.json({ error: "Élément hors du stockage applicatif" }, { status: 404 });
+    }
     const body = await request.json();
-    const { drive } = await getDriveClient();
 
     const current = await drive.files.get({ fileId: id, fields: "id,name,parents" });
     const requestBody: Record<string, unknown> = {};
@@ -30,7 +37,11 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
     let addParents: string | undefined, removeParents: string | undefined;
     if (body.parentId !== undefined && String(body.parentId)) {
-      addParents = String(body.parentId);
+      const requestedParent = String(body.parentId);
+      if (requestedParent !== cfg.rootFolderId && !(await assertInsideRoot(requestedParent))) {
+        return NextResponse.json({ error: "Dossier cible hors du stockage applicatif" }, { status: 404 });
+      }
+      addParents = requestedParent;
       removeParents = (current.data.parents || []).join(",");
       action = action ? `${action} et déplacé` : `Déplacé « ${current.data.name} »`;
     }
@@ -59,12 +70,16 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getUserFromHeaders(request);
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  if (user.role === "gerant") return NextResponse.json({ error: "Accès en lecture seule" }, { status: 403 });
 
   const { id } = await params;
   try {
     const { drive, cfg } = await getDriveClient();
     if (cfg.rootFolderId && id === cfg.rootFolderId) {
       return NextResponse.json({ error: "Le dossier racine du stockage ne peut pas être supprimé." }, { status: 400 });
+    }
+    if (!(await assertInsideRoot(id))) {
+      return NextResponse.json({ error: "Élément hors du stockage applicatif" }, { status: 404 });
     }
     const meta = await drive.files.get({ fileId: id, fields: "id,name" });
     await drive.files.delete({ fileId: id });

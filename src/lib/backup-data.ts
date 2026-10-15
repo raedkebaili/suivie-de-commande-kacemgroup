@@ -15,14 +15,14 @@
  */
 import { db } from "@/db";
 import {
-  users, agencies, clients, orders, orderItems, productionBatches, expeditionBatches,
+  users, agencies, userAgencyAccess, clients, orders, orderItems, productionBatches, expeditionBatches, expeditionPlanEntries,
   productionUnitLib, articleLibrary, techLibrary, materialCategories, matieres,
   itemTechnicalComponents, activityLogs, modificationLogs, notifications,
   photometricStudies, photometricStudyItems,
   recouvrementStates, clientRecouvrementStates, clientRecouvrementLogs,
   systemSettings, appColors, orderCounters,
   archiveSheets, archiveRows, archiveCellColors,
-  productionPlanEntries, factories, storageConfig,
+  productionPlanEntries, factories, storageConfig, articleFamilyCatalog, articleFamilyAssignments,
 } from "@/db/schema";
 
 export async function collectBackupData() {
@@ -35,11 +35,13 @@ export async function collectBackupData() {
       passwordHash: null, // jamais exporté (champ conservé pour compat restauration)
     })) as unknown as (typeof users.$inferSelect)[],
     agencies: await db.select().from(agencies),
+    userAgencyAccess: await db.select().from(userAgencyAccess),
     clients: await db.select().from(clients),
     orders: await db.select().from(orders),
     orderItems: await db.select().from(orderItems),
     productionBatches: await db.select().from(productionBatches),
     expeditionBatches: await db.select().from(expeditionBatches),
+    expeditionPlanEntries: await db.select().from(expeditionPlanEntries),
     productionUnitLib: await db.select().from(productionUnitLib),
     articleLibrary: await db.select().from(articleLibrary),
     techLibrary: await db.select().from(techLibrary),
@@ -55,6 +57,9 @@ export async function collectBackupData() {
     recouvrementStates: await db.select().from(recouvrementStates),
     clientRecouvrementStates: await db.select().from(clientRecouvrementStates),
     clientRecouvrementLogs: await db.select().from(clientRecouvrementLogs),
+    // Catalogue des familles d'articles et affectations manuelles
+    articleFamilyCatalog: await db.select().from(articleFamilyCatalog),
+    articleFamilyAssignments: await db.select().from(articleFamilyAssignments),
     // Configuration (couleurs, réglages d'affichage, compteurs de numérotation)
     systemSettings: await db.select().from(systemSettings),
     appColors: await db.select().from(appColors),

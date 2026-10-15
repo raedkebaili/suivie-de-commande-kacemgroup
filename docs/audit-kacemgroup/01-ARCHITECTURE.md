@@ -24,7 +24,7 @@ src/
 ## 2.2 Frontend
 
 ### Pages et routage
-- `/login` (`src/app/login/page.tsx`) : formulaire de connexion ; redirige vers `/` si déjà connecté. ⚠️ Affiche `admin / admin123` en clair.
+- `/login` (`src/app/login/page.tsx`) : formulaire de connexion ; redirige vers `/` si déjà connecté. ⚠️ Affiche `admin / mot de passe initial configuré hors dépôt` en clair.
 - `/` (`src/app/page.tsx`, 297 lignes) : **une seule page qui orchestre 17 onglets** via état local `activeTab` ; chaque onglet = un composant `*View`. Filtrage des onglets selon `user.role` (table `TABS`). Gestion des raccourcis Electron (`window.electronAPI?.onShortcut`).
 
 ### Onglets (module → composant → rôles UI)
@@ -88,7 +88,7 @@ Particularités structurelles :
 | `production-apply.ts` | **source unique de vérité** : appliquer une quantité produite (lot, cumul, passage `LIVREE`, log, promotion) — partagée entre l'onglet Production et le Planning |
 | `production-planning.ts` + `production-planning-constants.ts` | seed couleurs planning, libellés de statuts, `canManage` |
 | `order-visual-state.ts` | état visuel d'une commande (neutre / en attente de livraison / livrée / annulée) + classes CSS |
-| `article-grouping.ts` | regroupement d'articles par 3 premiers caractères significatifs |
+| `article-grouping.ts` | regroupement d'articles par 4 premiers caractères significatifs |
 | `material-categories.ts`, `tech-categories.ts` | seed et constantes des familles de matières |
 | `recouvrement.ts` + `recouvrement-constants.ts` | seed des états de recouvrement (pattern seed idempotent « insert si absent ») |
 | `archive.ts` + `archive-constants.ts` | seed des couleurs d'archive |

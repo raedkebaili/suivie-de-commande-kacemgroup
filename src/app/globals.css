@@ -83,6 +83,31 @@ html { transition: background-color 0.3s ease, color 0.3s ease; }
   animation: planningPulse 1.8s ease-in-out infinite;
   border-radius: 4px;
 }
+
+/* Livraison en cours : la ligne entière du tableau Commandes clignote en vert.
+   Le camion est rendu par OrderItemRow ; LIVRE reste la couleur verte statique
+   existante et ANNULE n'est pas propagé par le planning. */
+@keyframes expeditionPulse {
+  0%, 100% {
+    background-color: transparent;
+    box-shadow: inset 0 0 0 rgba(34, 197, 94, 0);
+  }
+  50% {
+    background-color: var(--expedition-color, #22c55e) !important;
+    color: var(--expedition-text, #000000) !important;
+    box-shadow: inset 0 0 0 2px #15803d, 0 0 12px rgba(34, 197, 94, 0.75);
+  }
+}
+.expedition-blink {
+  animation: expeditionPulse 1.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .expedition-blink {
+    animation: none !important;
+    background-color: var(--expedition-color, #22c55e) !important;
+    color: var(--expedition-text, #000000) !important;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .planning-blink {
     animation: none !important;
@@ -104,6 +129,44 @@ html { transition: background-color 0.3s ease, color 0.3s ease; }
   .doc-blink {
     animation: none !important;
     opacity: 1 !important;
+  }
+}
+
+/* Notification métier : alerte discrète, lente, de droite vers la gauche. */
+.notification-ticker {
+  overflow: hidden;
+}
+.notification-ticker-inline {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.5rem;
+}
+.dark .notification-ticker-inline {
+  background: rgba(30, 58, 138, 0.28);
+  border-color: #1e3a8a;
+}
+.notification-ticker-viewport {
+  overflow: hidden;
+  white-space: nowrap;
+}
+.notification-ticker-track {
+  display: inline-flex;
+  align-items: center;
+  min-width: max-content;
+  animation: notificationTicker 12s linear infinite;
+}
+@keyframes notificationTicker {
+  from { transform: translateX(100vw); }
+  to { transform: translateX(-100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notification-ticker-track {
+    animation: none !important;
+    transform: none !important;
+    white-space: normal;
+  }
+  .notification-ticker-viewport {
+    overflow: auto;
   }
 }
 
@@ -155,6 +218,44 @@ html { transition: background-color 0.3s ease, color 0.3s ease; }
 .dark table { color: #e2e8f0; }
 .dark td, .dark th { color: inherit; }
 .dark .text-gray-500 { color: #94a3b8 !important; }
+
+/* Adaptation mobile : les tableaux restent consultables horizontalement sans
+   casser la largeur du contenu principal. Les contrôles conservent une cible
+   tactile confortable et les modales utilisent toute la largeur disponible. */
+.mobile-scroll-x {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+@media (max-width: 640px) {
+  .operational-content,
+  .archive-content {
+    width: 100%;
+    min-width: 0;
+  }
+  .operational-content table,
+  .archive-content table {
+    min-width: 760px;
+  }
+  .operational-content input,
+  .operational-content select,
+  .operational-content button,
+  .archive-content input,
+  .archive-content select,
+  .archive-content button {
+    min-height: 38px;
+  }
+  .operational-content .text-xs input,
+  .operational-content .text-xs select,
+  .operational-content .text-xs button,
+  .archive-content .text-xs input,
+  .archive-content .text-xs select,
+  .archive-content .text-xs button {
+    min-height: 34px;
+  }
+  .notification-ticker-inline {
+    display: none;
+  }
+}
 .dark .text-gray-600 { color: #cbd5e1 !important; }
 .dark .text-gray-700 { color: #e2e8f0 !important; }
 .dark .text-gray-800 { color: #f1f5f9 !important; }
@@ -248,4 +349,47 @@ html { transition: background-color 0.3s ease, color 0.3s ease; }
   aside, header, .fixed { display: none !important; }
   .operational-content { color: #000 !important; }
   .operational-content * { color: #000 !important; }
+}
+
+/* Plein écran d'un tableau (Commandes, Archive) : en-tête de colonnes toujours visible */
+.table-fullscreen thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: inherit;
+}
+
+/* Cause d'annulation du planning : alternance avec le contenu de la ligne.
+   Les deux couches occupent la même case de grille ; cycle de 6 s. */
+.planning-cause-grid {
+  display: inline-grid;
+  vertical-align: middle;
+  max-width: 240px;
+}
+.planning-cause-grid > * {
+  grid-area: 1 / 1;
+}
+.planning-cause-normal {
+  animation: planningCauseNormal 6s ease-in-out infinite;
+}
+.planning-cause-msg {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: planningCauseMsg 6s ease-in-out infinite;
+}
+@keyframes planningCauseNormal {
+  0%, 40% { opacity: 1; }
+  55%, 95% { opacity: 0; }
+  100% { opacity: 1; }
+}
+@keyframes planningCauseMsg {
+  0%, 40% { opacity: 0; }
+  55%, 95% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .planning-cause-normal { animation: none !important; opacity: 0 !important; }
+  .planning-cause-msg { animation: none !important; opacity: 1 !important; }
 }

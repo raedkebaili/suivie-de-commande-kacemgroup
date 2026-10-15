@@ -4,7 +4,7 @@
 
 | # | Risque | Impact | Probabilité | Niveau |
 |---|---|---|---|---|
-| R1 | Secret JWT de secours + admin/admin123 exposés | compromission totale | élevée si non corrigé | **Critique** |
+| R1 | Secret JWT de secours + admin / mot de passe initial configuré hors dépôt exposés | compromission totale | élevée si non corrigé | **Critique** |
 | R2 | **Lockfile absent** → installation non reproductible, régression silencieuse possible à chaque `npm install` | panne en prod | moyenne | Élevé |
 | R3 | Sauvegarde automatique dépend d'un **navigateur ouvert** | absence silencieuse de sauvegardes | moyenne | Élevé |
 | R4 | Poste Windows unique (appli + base) — pas de cluster ni de réplication | interruption de service | moyenne | Élevé |

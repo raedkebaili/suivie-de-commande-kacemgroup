@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { orderItems, orders } from "@/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { getUserFromHeaders } from "@/lib/auth";
+import { agencyScopeForUser } from "@/lib/agency-access";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const [order] = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
   if (!order) return NextResponse.json({ error: "Commande non trouvée" }, { status: 404 });
+  const agencyScope = agencyScopeForUser(user);
+  if (agencyScope && !agencyScope.includes(order.agencyId)) {
+    return NextResponse.json({ error: "Commande inaccessible" }, { status: 404 });
+  }
 
   const items = await db
     .select()

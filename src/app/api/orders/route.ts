@@ -1,10 +1,13 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { orders, orderItems, clients, agencies, itemTechnicalComponents, driveDocuments } from "@/db/schema";
+import { orders, orderItems, clients, agencies, itemTechnicalComponents, driveDocuments, photometricStudies, expeditionPlanEntries, productionPlanEntries } from "@/db/schema";
 import { eq, desc, and, inArray, sql } from "drizzle-orm";
-import { logActivity, getUserFromHeaders, notifyRole } from "@/lib/auth";
+import { logActivity, getUserFromHeaders } from "@/lib/auth";
+import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
 import { generateOrderNumber } from "@/lib/order-number";
+import { agencyScopeForUser } from "@/lib/agency-access";
+import { planningCancelCauses } from "@/lib/planning-cancellation";
 
 async function auth(r: Request, roles?: string[]) {
   const u = await getUserFromHeaders(r);
@@ -17,6 +20,7 @@ export async function GET(request: NextRequest) {
   const a = await auth(request); if (!a.ok) return NextResponse.json({ error: a.error }, { status: a.status });
   const sp = new URL(request.url).searchParams;
   const status = sp.get("status"); const agencyId = sp.get("agencyId"); const priority = sp.get("priority");
+  const photometricOnly = sp.get("photometric") === "1";
   // Filtre sur l'état de PRODUCTION (colonne distincte de l'état commercial).
   // Ajout rétrocompatible : si le paramètre est absent, comportement inchangé.
   const productionStatus = sp.get("productionStatus");
@@ -24,6 +28,8 @@ export async function GET(request: NextRequest) {
   // l'unité de production correspond au nom de l'usine (alimenté par le planning).
   const factory = sp.get("factory");
   const conds = [];
+  const agencyScope = agencyScopeForUser(a.user);
+  if (agencyScope) conds.push(inArray(orders.agencyId, agencyScope));
   if (status) conds.push(eq(orders.status, status));
   if (productionStatus) conds.push(eq(orders.productionStatus, productionStatus));
   if (agencyId) conds.push(eq(orders.agencyId, parseInt(agencyId)));
@@ -40,6 +46,13 @@ export async function GET(request: NextRequest) {
     const matching = await db.selectDistinct({ orderId: orderItems.orderId })
       .from(orderItems).where(eq(orderItems.isTelegestion, true));
     const ids = matching.map(m => m.orderId);
+    if (ids.length === 0) return NextResponse.json({ orders: [] });
+    conds.push(inArray(orders.id, ids));
+  }
+  if (photometricOnly) {
+    const matching = await db.selectDistinct({ orderId: photometricStudies.orderId })
+      .from(photometricStudies);
+    const ids = matching.map((row) => row.orderId).filter((id): id is number => id !== null);
     if (ids.length === 0) return NextResponse.json({ orders: [] });
     conds.push(inArray(orders.id, ids));
   }
@@ -60,12 +73,38 @@ export async function GET(request: NextRequest) {
   }).from(orders).leftJoin(clients, eq(orders.clientId, clients.id)).leftJoin(agencies, eq(orders.agencyId, agencies.id)).where(where).orderBy(desc(orders.createdAt));
 
   const oids = data.map(o => o.id);
+  const studyRows = oids.length > 0
+    ? await db.selectDistinct({ orderId: photometricStudies.orderId })
+      .from(photometricStudies).where(inArray(photometricStudies.orderId, oids))
+    : [];
+  const studyOrderIds = new Set(studyRows.map((row) => row.orderId).filter((id): id is number => id !== null));
   let allItems: (typeof orderItems.$inferSelect)[] = [];
   if (oids.length > 0) allItems = await db.select().from(orderItems).where(inArray(orderItems.orderId, oids));
   const itemIds = allItems.map(item => item.id);
   const allTechnicalComponents = itemIds.length > 0
     ? await db.select().from(itemTechnicalComponents).where(inArray(itemTechnicalComponents.itemId, itemIds))
     : [];
+  // Seul l'état EN_COURS est propagé à Commandes : NON_TRAITE reste neutre,
+  // LIVRE est déjà représenté par les cumuls réels et ANNULE ne colore pas la ligne.
+  const allExpeditionPlans = itemIds.length > 0
+    ? await db.select({
+        id: expeditionPlanEntries.id,
+        itemId: expeditionPlanEntries.itemId,
+        status: expeditionPlanEntries.status,
+        planDate: expeditionPlanEntries.planDate,
+        driverName: expeditionPlanEntries.driverName,
+        plannedQty: expeditionPlanEntries.plannedQty,
+        note: expeditionPlanEntries.note,
+      }).from(expeditionPlanEntries)
+        .where(inArray(expeditionPlanEntries.itemId, itemIds))
+        .orderBy(desc(expeditionPlanEntries.id))
+    : [];
+  const activePlanByItem = new Map<number, typeof allExpeditionPlans[number]>();
+  const latestPlanByItem = new Map<number, typeof allExpeditionPlans[number]>();
+  for (const plan of allExpeditionPlans) {
+    if (!latestPlanByItem.has(plan.itemId)) latestPlanByItem.set(plan.itemId, plan);
+    if (plan.status === "EN_COURS" && !activePlanByItem.has(plan.itemId)) activePlanByItem.set(plan.itemId, plan);
+  }
 
   // ── Documents associés (gestion documentaire contextuelle) ──────────
   // AJOUT rétrocompatible : 1 requête groupée, champs additifs. Si la table
@@ -81,12 +120,37 @@ export async function GET(request: NextRequest) {
     : [];
   const docByOrder = new Map(docStats.map(d => [d.orderId, d]));
 
+  // Causes d'annulation saisies dans le planning (affichées en alternance sur la ligne)
+  const planningCancelRows = oids.length > 0
+    ? await db.select({
+        orderId: productionPlanEntries.orderId,
+        articleName: productionPlanEntries.articleName,
+        status: productionPlanEntries.status,
+        reason: productionPlanEntries.reason,
+        appliedAt: productionPlanEntries.appliedAt,
+      }).from(productionPlanEntries)
+        .where(and(inArray(productionPlanEntries.orderId, oids), eq(productionPlanEntries.status, "ANNULE")))
+    : [];
+  const causesByOrder = new Map<number, string[]>();
+  for (const orderId of new Set(planningCancelRows.map(r => r.orderId))) {
+    causesByOrder.set(orderId, planningCancelCauses(planningCancelRows.filter(r => r.orderId === orderId)));
+  }
+
   return NextResponse.json({
     orders: data.map(o => {
-      const items = allItems.filter(i => i.orderId === o.id).map(item => ({
-        ...item,
-        technicalComponents: allTechnicalComponents.filter(component => component.itemId === item.id),
-      }));
+      const items = allItems.filter(i => i.orderId === o.id).map(item => {
+        const plan = activePlanByItem.get(item.id);
+        const latestPlan = latestPlanByItem.get(item.id);
+        return {
+          ...item,
+          technicalComponents: allTechnicalComponents.filter(component => component.itemId === item.id),
+          expeditionPlanStatus: plan?.status || null,
+          expeditionPlanDate: latestPlan?.planDate || null,
+          expeditionPlanDriverName: latestPlan?.driverName || null,
+          expeditionPlanQty: latestPlan?.plannedQty || null,
+          expeditionPlanNote: latestPlan?.note || null,
+        };
+      });
       const docStat = docByOrder.get(o.id);
       return {
         ...o,
@@ -97,6 +161,8 @@ export async function GET(request: NextRequest) {
         totalRemaining: items.reduce((s, i) => s + i.quantity - (i.deliveredQty || 0), 0),
         documentCount: docStat ? Number(docStat.totalCount) : 0,
         hasCahierDesCharges: docStat ? Number(docStat.cahierCount) > 0 : false,
+        hasPhotometricStudy: studyOrderIds.has(o.id),
+        planningCancelCauses: causesByOrder.get(o.id) || [],
       };
     })
   });
@@ -163,6 +229,10 @@ export async function POST(request: NextRequest) {
     console.error("Erreur résolution agence:", error);
     return NextResponse.json({ error: "Erreur lors de la résolution de l'agence" }, { status: 500 });
   }
+  const createAgencyScope = agencyScopeForUser(a.user);
+  if (createAgencyScope && !createAgencyScope.includes(resolvedAgencyId)) {
+    return NextResponse.json({ error: "Vous n'avez pas accès à cette agence" }, { status: 403 });
+  }
 
   // Générer automatiquement le numéro de commande (thread-safe)
   let orderNumber: string;
@@ -210,8 +280,20 @@ export async function POST(request: NextRequest) {
 
   // Logger et notifier
   await logActivity(a.user.id, a.user.username, "CREATE_ORDER", `Commande: ${orderNumber}`);
-  await notifyRole("technique", "info", `Nouvelle commande #${orderNumber}`, `Commande ${orderNumber} en attente de traitement technique`, created.id);
-  await notifyRole("planification", "info", `Nouvelle commande #${orderNumber}`, `Commande ${orderNumber} créée par ${a.user.fullName}`, created.id);
+  await notifyRoles(["technique"], {
+    eventKey: NOTIFICATION_EVENTS.ORDER_CREATED,
+    title: `Nouvelle commande #${orderNumber}`,
+    message: `Commande ${orderNumber} en attente de traitement technique`,
+    orderId: created.id,
+    targetTab: "orders",
+  });
+  await notifyRoles(["planification"], {
+    eventKey: NOTIFICATION_EVENTS.ORDER_CREATED,
+    title: `Nouvelle commande #${orderNumber}`,
+    message: `Commande ${orderNumber} créée par ${a.user.fullName}`,
+    orderId: created.id,
+    targetTab: "orders",
+  });
 
   return NextResponse.json({ order: created, orderNumber }, { status: 201 });
 }

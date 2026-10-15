@@ -1,4 +1,4 @@
-export type Role = "superadmin" | "commercial" | "technique" | "planification" | "consultant_prod" | "recouvrement";
+export type Role = "superadmin" | "commercial" | "technique" | "planification" | "consultant_prod" | "recouvrement" | "acces_agence" | "gerant";
 // Priorités : 10 niveaux ordonnés (P1…P10) + NORMALE.
 // Les valeurs historiques restent acceptées (aucune migration de données).
 export type Priority =
@@ -6,13 +6,13 @@ export type Priority =
   | "PREVISION" | "NORMALE" | "URGENTE" | "TRES_URGENTE";
 export type OrderStatus = "SUR_STOCK" | "BON_COMMANDE" | "PREVISION" | "EN_INSTANCE" | "EN_PRODUCTION" | "LIVREE" | "ANNULEE";
 
-export type User = { id: number; username: string; role: Role; fullName: string; active?: boolean; darkMode?: boolean; mustChangePassword?: boolean; createdAt?: string };
+export type User = { id: number; username: string; role: Role; fullName: string; active?: boolean; darkMode?: boolean; mustChangePassword?: boolean; createdAt?: string; agencyIds?: number[] };
 export type Agency = { id: number; name: string; code: string; address?: string | null; active?: boolean; createdAt?: string };
 export type Client = { id: number; name: string; code: string; contactName?: string | null; phone?: string | null; email?: string | null; address?: string | null; active?: boolean; createdAt?: string };
 export type TechnicalComponent = { id: number; itemId: number; orderId: number; categoryId: number | null; materialId: number | null; categoryKey: string; categoryName: string; materialReference: string; materialLabel: string; isTelegestion: boolean; enteredById: number | null; enteredByName: string; enteredAt: string };
 export type MaterialCategory = { id: number; key: string; name: string; isTelegestion: boolean; active: boolean; sortOrder: number };
 export type Material = { id: number; categoryId: number | null; category: string; reference: string; name: string; stock: number; specs: string | null; active?: boolean };
-export type OrderItem = { id?: number; orderId?: number; articleName: string; quantity: number; note?: string | null; clientSpec?: string | null; isTelegestion?: boolean; productionUnit?: string | null; plannedLoadingDate?: string | null; deliveredQty?: number; deliveryDate?: string | null; deliveredBy?: string | null; unitPrice?: string | null; description?: string | null; pcb?: string | null; pcbBy?: string | null; pcbAt?: string | null; colorTemperature?: string | null; colorTempBy?: string | null; colorTempAt?: string | null; lens?: string | null; lensBy?: string | null; lensAt?: string | null; driver?: string | null; driverBy?: string | null; driverAt?: string | null; electricalClass?: string | null; elecClassBy?: string | null; elecClassAt?: string | null; accessories?: string | null; accessoriesBy?: string | null; accessoriesAt?: string | null; otherTechSpecs?: string | null; otsBy?: string | null; otsAt?: string | null; producedQty?: number; productionStatus?: string; producedBy?: string | null; producedAt?: string | null; technicalComponents?: TechnicalComponent[] };
+export type OrderItem = { id?: number; orderId?: number; articleName: string; quantity: number; note?: string | null; clientSpec?: string | null; isTelegestion?: boolean; productionUnit?: string | null; plannedLoadingDate?: string | null; deliveredQty?: number; deliveryDate?: string | null; deliveredBy?: string | null; producedQty?: number; productionStatus?: string; producedBy?: string | null; producedAt?: string | null; expeditionPlanStatus?: ExpeditionPlanStatus | null; expeditionPlanDate?: string | null; expeditionPlanDriverName?: string | null; expeditionPlanQty?: number | null; expeditionPlanNote?: string | null; unitPrice?: string | null; description?: string | null; pcb?: string | null; pcbBy?: string | null; pcbAt?: string | null; colorTemperature?: string | null; colorTempBy?: string | null; colorTempAt?: string | null; lens?: string | null; lensBy?: string | null; lensAt?: string | null; driver?: string | null; driverBy?: string | null; driverAt?: string | null; electricalClass?: string | null; elecClassBy?: string | null; elecClassAt?: string | null; accessories?: string | null; accessoriesBy?: string | null; accessoriesAt?: string | null; otherTechSpecs?: string | null; otsBy?: string | null; otsAt?: string | null; technicalComponents?: TechnicalComponent[] };
 export type Order = {
   id: number; orderNumber: string; orderDate: string; priority: Priority; clientId: number; agencyId: number;
   status: OrderStatus; productionStatus?: string | null; statusReason?: string | null; affaire?: string | null;
@@ -37,7 +37,22 @@ export type Order = {
   clientName?: string; clientCode?: string; agencyName?: string; agencyCode?: string;
   items?: OrderItem[]; totalQuantity?: number;
 };
-export type Notification = { id: number; userId: number; type: string; title: string; message: string; orderId?: number | null; read: boolean; createdAt: string };
+export type Notification = {
+  id: number;
+  userId: number;
+  eventKey: string;
+  type: string;
+  severity?: string;
+  title: string;
+  message: string;
+  orderId?: number | null;
+  targetTab?: string | null;
+  read: boolean;
+  readAt?: string | null;
+  createdAt: string;
+};
+export type ExpeditionPlanStatus = "NON_TRAITE" | "EN_COURS" | "ANNULE" | "LIVRE";
+export type ExpeditionPlan = { id: number; planDate: string; itemId: number; orderId: number; articleName: string; orderNumber: string | null; clientName: string | null; plannedQty: number; loadedQty: number; driverName: string; status: ExpeditionPlanStatus; note: string | null };
 export type ProductionBatch = { id: number; itemId: number; orderId: number; quantity: number; cumulativeTotal: number; producedBy: string; productionDate: string; article_name?: string; createdAt: string };
 export type ExpeditionBatch = { id: number; itemId: number; orderId: number; quantity: number; cumulativeTotal: number; driverName: string | null; plannedLoadingDate: string | null; deliveredBy: string; deliveryDate: string; note: string | null; article_name?: string; createdAt: string };
 
@@ -64,7 +79,7 @@ export const PRIORITY_LABELS: Record<string, string> = {
   P6: "Priorité 6", P7: "Priorité 7", P8: "Priorité 8", P9: "Priorité 9", P10: "Priorité 10",
   PREVISION: "Prévision", NORMALE: "Normale", URGENTE: "Urgente", TRES_URGENTE: "Très Urgente",
 };
-export const ROLE_LABELS: Record<string, string> = { superadmin: "Super Admin", commercial: "Commercial", technique: "Technique", planification: "Planification", consultant_prod: "Consultant Prod", recouvrement: "Recouvrement" };
+export const ROLE_LABELS: Record<string, string> = { superadmin: "Super Admin", commercial: "Commercial", technique: "Technique", planification: "Planification", consultant_prod: "Consultant Prod", recouvrement: "Recouvrement", acces_agence: "Accès agence", gerant: "Gérant" };
 
 // ── Recouvrement ──
 export type RecouvrementState = { id: number; key: string; label: string; description: string | null; colorKey: string; sortOrder: number; active: boolean };

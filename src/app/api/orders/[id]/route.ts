@@ -1,9 +1,12 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { orders, orderItems, productionBatches, expeditionBatches, modificationLogs, notifications, itemTechnicalComponents, matieres, materialCategories } from "@/db/schema";
-import { eq, count } from "drizzle-orm";
-import { logActivity, logModification, getUserFromHeaders, notifyUser } from "@/lib/auth";
+import { orders, orderItems, productionBatches, expeditionBatches, expeditionPlanEntries, modificationLogs, notifications, itemTechnicalComponents, matieres, materialCategories, factories } from "@/db/schema";
+import { eq, count, desc } from "drizzle-orm";
+import { logActivity, logModification, getUserFromHeaders } from "@/lib/auth";
+import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
+import { agencyScopeForUser } from "@/lib/agency-access";
+import { planningStateRedirect } from "@/lib/order-state-redirect";
 
 async function auth(r: Request, roles?: string[]) {
   const u = await getUserFromHeaders(r);
@@ -17,25 +20,55 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
   const [order] = await db.select().from(orders).where(eq(orders.id, parseInt(id))).limit(1);
   if (!order) return NextResponse.json({ error: "Non trouvée" }, { status: 404 });
+  const agencyScope = agencyScopeForUser(a.user);
+  if (agencyScope && !agencyScope.includes(order.agencyId)) {
+    return NextResponse.json({ error: "Commande inaccessible" }, { status: 404 });
+  }
   const items = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
   const components = await db.select().from(itemTechnicalComponents).where(eq(itemTechnicalComponents.orderId, order.id));
+  const plans = await db.select({
+    itemId: expeditionPlanEntries.itemId,
+    status: expeditionPlanEntries.status,
+    planDate: expeditionPlanEntries.planDate,
+    driverName: expeditionPlanEntries.driverName,
+    plannedQty: expeditionPlanEntries.plannedQty,
+    note: expeditionPlanEntries.note,
+  }).from(expeditionPlanEntries).where(eq(expeditionPlanEntries.orderId, order.id)).orderBy(desc(expeditionPlanEntries.id));
   return NextResponse.json({
     order: {
       ...order,
-      items: items.map(item => ({ ...item, technicalComponents: components.filter(component => component.itemId === item.id) })),
+      items: items.map(item => {
+        const plan = plans.find(candidate => candidate.itemId === item.id && candidate.status === "EN_COURS");
+        const latestPlan = plans.find(candidate => candidate.itemId === item.id);
+        return {
+          ...item,
+          technicalComponents: components.filter(component => component.itemId === item.id),
+          expeditionPlanStatus: plan?.status || null,
+          expeditionPlanDate: latestPlan?.planDate || null,
+          expeditionPlanDriverName: latestPlan?.driverName || null,
+          expeditionPlanQty: latestPlan?.plannedQty || null,
+          expeditionPlanNote: latestPlan?.note || null,
+        };
+      }),
     },
   });
 }
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const a = await auth(request); if (!a.ok) return NextResponse.json({ error: a.error }, { status: a.status });
+  if (["acces_agence", "gerant"].includes(a.user.role)) return NextResponse.json({ error: "Ce rôle est limité à la consultation" }, { status: 403 });
   const { id } = await params; const oid = parseInt(id);
   const [existing] = await db.select().from(orders).where(eq(orders.id, oid)).limit(1);
   if (!existing) return NextResponse.json({ error: "Non trouvée" }, { status: 404 });
+  const agencyScope = agencyScopeForUser(a.user);
+  if (agencyScope && !agencyScope.includes(existing.agencyId)) {
+    return NextResponse.json({ error: "Commande inaccessible pour votre agence" }, { status: 404 });
+  }
 
   const body = await request.json();
   const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   const now = new Date().toISOString();
+  let technicalChanged = false;
 
   if (existing.lockedBy && existing.lockedBy !== a.user.id && existing.lockedAt && (Date.now() - new Date(existing.lockedAt).getTime() < 5 * 60 * 1000))
     return NextResponse.json({ error: `Verrouillé par ${existing.lockedByName}` }, { status: 423 });
@@ -52,7 +85,11 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (body.orderNumber !== undefined) { log("N° Commande", existing.orderNumber, body.orderNumber); updates.orderNumber = body.orderNumber; }
     if (body.orderDate !== undefined) { log("Date", existing.orderDate, body.orderDate); updates.orderDate = body.orderDate; }
     if (body.clientId !== undefined) { const v=parseInt(body.clientId); log("Client", existing.clientId, v); updates.clientId = v; }
-    if (body.agencyId !== undefined) { const v=parseInt(body.agencyId); log("Agence", existing.agencyId, v); updates.agencyId = v; }
+    if (body.agencyId !== undefined) {
+      const v = parseInt(body.agencyId);
+      if (agencyScope && !agencyScope.includes(v)) return NextResponse.json({ error: "Vous n'avez pas accès à cette agence" }, { status: 403 });
+      log("Agence", existing.agencyId, v); updates.agencyId = v;
+    }
     if (body.affaire !== undefined) { log("Affaire", existing.affaire, body.affaire); updates.affaire = body.affaire; }
     if (body.status !== undefined) {
       const allowedCommercialStatuses = ["SUR_STOCK", "BON_COMMANDE", "PREVISION"];
@@ -133,6 +170,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         const oldVal = (current as Record<string, unknown>)[field];
         const normalizedNew = newVal.trim() || null;
         if (normalizedNew !== (oldVal || null)) {
+          technicalChanged = true;
           iu[field] = normalizedNew;
           if (normalizedNew) { iu[byField] = a.user.fullName; iu[atField] = now; }
         }
@@ -147,7 +185,6 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       if (Object.keys(iu).length > 0) await db.update(orderItems).set(iu).where(eq(orderItems.id, parseInt(ti.itemId)));
     }
     updates.techCompleted = true;
-    if (existing.createdBy) await notifyUser(existing.createdBy, "success", `Tech OK #${existing.orderNumber}`, `Spécs techniques mises à jour`, oid);
   }
 
   // ── TECHNIQUE DYNAMIQUE: composants sélectionnés depuis la table Matières ──
@@ -182,6 +219,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
           // Aucun changement pour cet article - PRÉSERVER LA TRAÇABILITÉ EXISTANTE
           continue;
         }
+        technicalChanged = true;
 
         // Identifier les composants à SUPPRIMER (présents avant, absents maintenant)
         const toRemove = existingComponents.filter(c => c.materialId !== null && !newMaterialIds.has(c.materialId));
@@ -242,10 +280,27 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       }
     });
     updates.techCompleted = true;
-    if (existing.createdBy) await notifyUser(existing.createdBy, "success", `Tech OK #${existing.orderNumber}`, `Composants techniques mis à jour par ${a.user.fullName}`, oid);
+  }
+
+  // Une sauvegarde sans changement technique réel ne génère aucune alerte.
+  if (technicalChanged) {
+    await notifyRoles(["planification"], {
+      eventKey: NOTIFICATION_EVENTS.TECHNICAL_INTERVENTION,
+      type: "success",
+      title: `Intervention technique #${existing.orderNumber}`,
+      message: `${a.user.fullName} a effectué une intervention technique sur la commande`,
+      orderId: oid,
+      targetTab: "orders",
+    });
   }
 
   // ── PLANIFICATION: priority + productionStatus (independent from commercial status) ──
+  // Le planificateur ne peut pas forcer « En production » ni « Livrée » : ces états se soldent
+  // dans le planning (refus avant toute écriture ; l'interface redirige l'utilisateur).
+  if (body.productionStatus !== undefined) {
+    const redirect = planningStateRedirect(a.user.role, existing.productionStatus, body.productionStatus);
+    if (redirect) return NextResponse.json({ error: redirect.notice, redirectTab: redirect.tab }, { status: 409 });
+  }
   if (["superadmin", "planification"].includes(a.user.role)) {
     if (body.priority !== undefined) updates.priority = body.priority;
     if (body.productionStatus !== undefined) {
@@ -254,26 +309,74 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       if (body.productionStatus === "ANNULEE") { updates.cancelReason = body.cancelReason || null; updates.cancelledBy = a.user.fullName; updates.cancelledAt = now; }
     }
     if (body.itemUpdates && Array.isArray(body.itemUpdates)) {
+      // Préparer et valider toutes les unités avant la moindre écriture.
+      // L'unité est la copie métier du nom d'une usine configurée ; une valeur
+      // libre ne doit pas pouvoir contourner le référentiel des usines.
+      const preparedItemUpdates: { itemId: number; set: Record<string, unknown> }[] = [];
       for (const iu of body.itemUpdates) {
         if (!iu.itemId) continue;
+        const itemId = parseInt(String(iu.itemId));
+        if (!Number.isFinite(itemId)) continue;
+        const [ownedItem] = await db.select({ id: orderItems.id, orderId: orderItems.orderId })
+          .from(orderItems).where(eq(orderItems.id, itemId)).limit(1);
+        if (!ownedItem || ownedItem.orderId !== oid) continue;
+
         const set: Record<string, unknown> = {};
-        if (iu.productionUnit !== undefined) set.productionUnit = iu.productionUnit || null;
+        if (iu.productionUnit !== undefined) {
+          const productionUnit = String(iu.productionUnit || "").trim();
+          if (productionUnit) {
+            const [factory] = await db.select({ name: factories.name, active: factories.active })
+              .from(factories).where(eq(factories.name, productionUnit)).limit(1);
+            if (!factory) return NextResponse.json({ error: `Unité de production inconnue : ${productionUnit}` }, { status: 400 });
+            if (!factory.active) return NextResponse.json({ error: `Cette unité de production est désactivée : ${productionUnit}` }, { status: 400 });
+            set.productionUnit = factory.name;
+          } else {
+            set.productionUnit = null;
+          }
+        }
         if (iu.plannedLoadingDate !== undefined) set.plannedLoadingDate = iu.plannedLoadingDate || null;
-        if (Object.keys(set).length > 0) await db.update(orderItems).set(set).where(eq(orderItems.id, parseInt(iu.itemId)));
+        if (Object.keys(set).length > 0) preparedItemUpdates.push({ itemId, set });
+      }
+      for (const update of preparedItemUpdates) {
+        await db.update(orderItems).set(update.set).where(eq(orderItems.id, update.itemId));
       }
     }
     updates.planifCompleted = true;
-    if (existing.createdBy) await notifyUser(existing.createdBy, "success", `Planif OK #${existing.orderNumber}`, `${a.user.fullName} a planifié`, oid);
   }
 
   updates.lockedBy = null; updates.lockedByName = null; updates.lockedAt = null;
   const [updated] = await db.update(orders).set(updates).where(eq(orders.id, oid)).returning();
+
+  // Les alertes d'état sont émises uniquement lors d'une transition réelle.
+  // Une simple sauvegarde du formulaire ne recrée donc pas de notification.
+  if (body.productionStatus !== undefined && body.productionStatus !== existing.productionStatus) {
+    if (body.productionStatus === "LIVREE") {
+      await notifyRoles(["commercial"], {
+        eventKey: NOTIFICATION_EVENTS.ORDER_DELIVERED,
+        type: "success",
+        title: `Commande livrée #${existing.orderNumber}`,
+        message: `La commande ${existing.orderNumber} vient d'être livrée`,
+        orderId: oid,
+        targetTab: "orders",
+      });
+    }
+    if (body.productionStatus === "ANNULEE") {
+      await notifyRoles(["commercial"], {
+        eventKey: NOTIFICATION_EVENTS.ORDER_CANCELLED,
+        type: "error",
+        title: `Commande annulée #${existing.orderNumber}`,
+        message: `La commande ${existing.orderNumber} a été annulée`,
+        orderId: oid,
+        targetTab: "orders",
+      });
+    }
+  }
   await logActivity(a.user.id, a.user.username, "UPDATE_ORDER", `Commande: ${existing.orderNumber}`);
   return NextResponse.json({ order: updated });
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const a = await auth(request, ["superadmin"]); if (!a.ok) return NextResponse.json({ error: a.error }, { status: a.status });
+  const a = await auth(request, ["superadmin", "commercial"]); if (!a.ok) return NextResponse.json({ error: a.error }, { status: a.status });
   const { id } = await params;
   const oid = parseInt(id);
   try {
@@ -284,7 +387,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     await db.delete(productionBatches).where(eq(productionBatches.orderId, oid));
     await db.delete(expeditionBatches).where(eq(expeditionBatches.orderId, oid));
     await db.delete(modificationLogs).where(eq(modificationLogs.orderId, oid));
-    await db.delete(notifications).where(eq(notifications.orderId, oid));
+    // Conserver l'historique des alertes même si la commande est supprimée.
+    // Le lien devient simplement nul pour respecter la clé étrangère.
+    await db.update(notifications).set({ orderId: null }).where(eq(notifications.orderId, oid));
     await db.delete(orderItems).where(eq(orderItems.orderId, oid));
     await db.delete(orders).where(eq(orders.id, oid));
 

@@ -6,6 +6,8 @@ import { eq } from "drizzle-orm";
 import { verifyPassword, createToken, logActivity, seedDefaultUser } from "@/lib/auth";
 import { friendlyDbErrorMessage } from "@/lib/db-error";
 import { clientIp, consumeRateLimit, resetRateLimit } from "@/lib/rate-limit";
+import { AUTH_COOKIE_MAX_AGE_SECONDS, AUTH_COOKIE_NAME } from "@/lib/auth-cookie";
+import { getAssignedAgencyIds } from "@/lib/agency-access";
 
 // CORRECTIF SÉCURITÉ (R4) : anti force-brute — 5 échecs / 15 min par
 // combinaison (IP + identifiant). Réinitialisé à chaque succès.
@@ -59,6 +61,7 @@ export async function POST(request: NextRequest) {
       fullName: rows[0].fullName,
       darkMode: rows[0].darkMode || false,
     };
+    const agencyIds = await getAssignedAgencyIds(rows[0].id);
 
     const token = await createToken(payload);
 
@@ -66,10 +69,19 @@ export async function POST(request: NextRequest) {
 
     // CORRECTIF (R2) : le drapeau mustChangePassword force l'écran de
     // changement de mot de passe (compte semé ou mot de passe réinitialisé).
-    return NextResponse.json({
-      token,
-      user: { ...payload, mustChangePassword: rows[0].mustChangePassword },
+    const response = NextResponse.json({
+      user: { ...payload, agencyIds, mustChangePassword: rows[0].mustChangePassword },
     });
+    response.cookies.set({
+      name: AUTH_COOKIE_NAME,
+      value: token,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: AUTH_COOKIE_MAX_AGE_SECONDS,
+    });
+    return response;
   } catch (error) {
     console.error("Login error:", error);
     return NextResponse.json({ error: friendlyDbErrorMessage(error) }, { status: 500 });
