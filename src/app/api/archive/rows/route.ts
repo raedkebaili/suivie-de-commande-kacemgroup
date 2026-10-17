@@ -8,6 +8,7 @@ import { resolveArchiveRowState, resolveArchiveStateSource } from "@/lib/archive
 
 /**
  * GET /api/archive/rows?sheetId=1&q=&state=&page=1&pageSize=100
+ * Ajouter all=1 pour renvoyer toute la feuille (filtres conservés), sans pagination.
  * Contenu d'une feuille d'archive : colonnes, préambule, lignes, états et
  * couleurs personnalisées de cellules.
  * Lecture : tout utilisateur authentifié.
@@ -22,6 +23,7 @@ export async function GET(request: NextRequest) {
 
   const q = (sp.get("q") || "").trim().toLowerCase();
   const stateFilter = (sp.get("state") || "").trim();
+  const allRows = sp.get("all") === "1";
   const page = Math.max(1, parseInt(sp.get("page") || "1") || 1);
   const pageSize = Math.min(500, Math.max(10, parseInt(sp.get("pageSize") || "100") || 100));
 
@@ -85,7 +87,7 @@ export async function GET(request: NextRequest) {
 
     const total = mapped.length;
     const start = (page - 1) * pageSize;
-    const paged = mapped.slice(start, start + pageSize);
+    const paged = allRows ? mapped : mapped.slice(start, start + pageSize);
 
     return NextResponse.json({
       sheet: {
@@ -103,7 +105,9 @@ export async function GET(request: NextRequest) {
       columns,
       preamble,
       rows: paged,
-      pagination: { page, pageSize, total, pages: Math.max(1, Math.ceil(total / pageSize)) },
+      pagination: allRows
+        ? { page: 1, pageSize: total, total, pages: 1 }
+        : { page, pageSize, total, pages: Math.max(1, Math.ceil(total / pageSize)) },
     });
   } catch (error) {
     console.error("Erreur lecture lignes archive:", error);
