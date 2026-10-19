@@ -4,7 +4,8 @@ import { db } from "@/db";
 import { orderItems, articleFamilyCatalog, articleFamilyAssignments } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { getUserFromHeaders } from "@/lib/auth";
-import { classifyArticleDesignation, resolveDesignationFamily, ARTICLE_FAMILY_STATUS, UNCLASSIFIED_GROUP_KEY } from "@/lib/article-family";
+import { ARTICLE_FAMILY_STATUS, UNCLASSIFIED_GROUP_KEY } from "@/lib/article-family";
+import { createArticleRecognizer } from "@/lib/article-recognition";
 import { catalogLabel } from "@/lib/article-family-catalog";
 
 /**
@@ -41,20 +42,22 @@ export async function GET(request: NextRequest) {
     const usage = new Map<number, number>();
     for (const a of assignments) usage.set(a.catalogId, (usage.get(a.catalogId) || 0) + 1);
 
+    const recognize = createArticleRecognizer(catalog, new Map(assignments.flatMap(assignment => {
+      const entry = catalogById.get(assignment.catalogId);
+      return entry ? [[assignment.designation, catalogLabel(entry)] as const] : [];
+    })));
     const items = rows.map((r) => {
       const manualId = assignmentByDesignation.get(r.designation) ?? null;
       const manual = manualId !== null ? catalogById.get(manualId) : undefined;
-      const manualLabel = manual ? catalogLabel(manual) : null;
-      const resolved = resolveDesignationFamily(r.designation, manualLabel);
-      const auto = classifyArticleDesignation(r.designation);
+      const resolved = recognize(r.designation);
       return {
         designation: r.designation,
         status: resolved.status,
         familyKey: resolved.familyKey,
         source: resolved.source,
-        category: manual ? manual.category : null,
+        category: resolved.category,
         catalogId: manual ? manual.id : null,
-        power: auto.power,
+        power: resolved.power,
         occurrences: Number(r.occurrences),
         orderCount: Number(r.orderCount),
         totalQuantity: Number(r.totalQuantity),

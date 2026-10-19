@@ -8,19 +8,17 @@ import { agencyScopeForUser } from "@/lib/agency-access";
 import { groupArticles, type GroupableItem } from "@/lib/article-grouping";
 import { catalogLabel } from "@/lib/article-family-catalog";
 
-/** Affectations manuelles désignation → libellé de famille (vide si la table n'existe pas encore) */
-async function loadManualFamilies(): Promise<Map<string, string>> {
-  try {
-    const rows = await db
-      .select({ designation: articleFamilyAssignments.designation, subFamily: articleFamilyCatalog.subFamily, variant: articleFamilyCatalog.variant })
-      .from(articleFamilyAssignments)
-      .innerJoin(articleFamilyCatalog, eq(articleFamilyAssignments.catalogId, articleFamilyCatalog.id));
-    return new Map(rows.map((r) => [r.designation, catalogLabel(r)]));
-  } catch (error) {
-    // Repli : classification automatique seule (le tableau reste disponible)
-    console.error("Affectations familles indisponibles:", error);
-    return new Map();
+/** Catalogue complet : les nouvelles désignations peuvent être reconnues sans affectation. */
+async function loadFamilyRecognition() {
+  const catalog = await db.select().from(articleFamilyCatalog);
+  const assignments = await db.select().from(articleFamilyAssignments);
+  const byId = new Map(catalog.map(entry => [entry.id, entry]));
+  const manual = new Map<string, string>();
+  for (const assignment of assignments) {
+    const entry = byId.get(assignment.catalogId);
+    if (entry) manual.set(assignment.designation, catalogLabel(entry));
   }
+  return { catalog, manual };
 }
 
 /**
@@ -72,8 +70,8 @@ export async function GET(request: NextRequest) {
       .where(where)
       .orderBy(desc(orders.createdAt));
 
-    const manualFamilies = await loadManualFamilies();
-    const groups = groupArticles(rows as GroupableItem[], manualFamilies);
+    const { catalog, manual } = await loadFamilyRecognition();
+    const groups = groupArticles(rows as GroupableItem[], manual, catalog);
 
     if (format === "xlsx") {
       const XLSX = await import("xlsx");
@@ -88,6 +86,9 @@ export async function GET(request: NextRequest) {
           detail.push({
             "Groupe": g.key,
             "Article": l.articleName,
+            "Famille": l.familyCategory || "Non définie dans le catalogue",
+            "Sous-famille / variante": g.key,
+            "Puissance (W)": l.power ?? "",
             "Quantité": l.quantity,
             "Affaire": l.affaire || "",
             "Client": l.clientName || "",
@@ -109,7 +110,8 @@ export async function GET(request: NextRequest) {
 
       // Feuille synthèse : un total par groupe
       const summary = groups.map(g => ({
-        "Famille": g.key,
+        "Famille": [...new Set(g.lines.map(line => line.familyCategory).filter(Boolean))].join(" | ") || "Non définie dans le catalogue",
+        "Sous-famille / variante": g.key,
         "Articles du groupe": g.variants.join(" | "),
         "Nb variantes": g.variants.length,
         "Nb lignes": g.lines.length,
@@ -121,11 +123,11 @@ export async function GET(request: NextRequest) {
 
       const wb = XLSX.utils.book_new();
       const wsSum = XLSX.utils.json_to_sheet(summary);
-      wsSum["!cols"] = [{ wch: 14 }, { wch: 50 }, { wch: 12 }, { wch: 10 }, { wch: 15 }, { wch: 10 }, { wch: 10 }, { wch: 14 }];
+      wsSum["!cols"] = [{ wch: 38 }, { wch: 24 }, { wch: 50 }, { wch: 12 }, { wch: 10 }, { wch: 15 }, { wch: 10 }, { wch: 10 }, { wch: 14 }];
       XLSX.utils.book_append_sheet(wb, wsSum, "Synthèse par groupe");
 
       const wsDet = XLSX.utils.json_to_sheet(detail);
-      wsDet["!cols"] = [{ wch: 10 }, { wch: 30 }, { wch: 10 }, { wch: 22 }, { wch: 24 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 16 }];
+      wsDet["!cols"] = [{ wch: 10 }, { wch: 30 }, { wch: 38 }, { wch: 24 }, { wch: 16 }, { wch: 10 }, { wch: 22 }, { wch: 24 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 16 }];
       XLSX.utils.book_append_sheet(wb, wsDet, "Détail par article");
 
       const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;

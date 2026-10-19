@@ -15,7 +15,10 @@
  * strictement identique entre les deux.
  */
 
-import { classifyArticleDesignation, familyGroupKey, resolveDesignationFamily, UNCLASSIFIED_GROUP_KEY, type FamilySource } from "./article-family";
+import { familyGroupKey, UNCLASSIFIED_GROUP_KEY, type FamilySource } from "./article-family";
+
+import { createArticleRecognizer } from "./article-recognition";
+import type { ArticleFamilyCatalogEntry } from "./article-family-catalog";
 
 export type GroupableItem = {
   articleName: string;
@@ -38,6 +41,7 @@ export type GroupedLine = GroupableItem & {
   power: number | null;
   /** Origine de la famille de cette ligne ; null si À classifier */
   familySource: FamilySource | null;
+  familyCategory: string | null;
 };
 
 /** Sous-total d'un groupe pour une puissance donnée (null = puissance non précisée) */
@@ -87,15 +91,14 @@ export function articleGroupKey(name: string): string {
  * Les familles sont triées alphabétiquement, « À classifier » est placé en dernier.
  * Les lignes sont triées par article puis affaire.
  */
-export function groupArticles(items: GroupableItem[], manualFamilies?: ReadonlyMap<string, string>): ArticleGroup[] {
+export function groupArticles(items: GroupableItem[], manualFamilies?: ReadonlyMap<string, string>, catalog: readonly ArticleFamilyCatalogEntry[] = []): ArticleGroup[] {
   const map = new Map<string, ArticleGroup>();
+  const recognize = createArticleRecognizer(catalog, manualFamilies);
 
   for (const item of items) {
-    // Affectation manuelle (catalogue admin) prioritaire ; sinon classification automatique
-    const key = resolveDesignationFamily(item.articleName, manualFamilies?.get(item.articleName) ?? null).familyKey
-      ?? UNCLASSIFIED_GROUP_KEY;
-    const resolved = resolveDesignationFamily(item.articleName, manualFamilies?.get(item.articleName) ?? null);
-    const power = classifyArticleDesignation(item.articleName).power;
+    const resolved = recognize(item.articleName);
+    const key = resolved.familyKey ?? UNCLASSIFIED_GROUP_KEY;
+    const power = resolved.power;
     let group = map.get(key);
     if (!group) {
       group = {
@@ -117,7 +120,7 @@ export function groupArticles(items: GroupableItem[], manualFamilies?: ReadonlyM
     const deliveredQty = Number(item.deliveredQty) || 0;
     const remaining = Math.max(0, quantity - deliveredQty);
 
-    group.lines.push({ ...item, quantity, producedQty, deliveredQty, remaining, power, familySource: resolved.source });
+    group.lines.push({ ...item, quantity, producedQty, deliveredQty, remaining, power, familySource: resolved.source, familyCategory: resolved.category });
 
     let bucket = group.powerBreakdown.find(b => b.power === power);
     if (!bucket) {

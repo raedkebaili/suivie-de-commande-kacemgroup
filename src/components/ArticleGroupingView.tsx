@@ -8,7 +8,8 @@ import { UNCLASSIFIED_GROUP_KEY, type FamilySource } from "@/lib/article-family"
 const powerLabel = (power: number | null) => (power === null ? "Puissance non précisée" : `${power} W`);
 
 /** Origine lisible de la famille d'une ligne (manuel prime sur automatique) */
-function OriginBadge({ source }: { source: FamilySource | null }) {
+function OriginBadge({ source }: { source: FamilySource | "MIXTE" | null }) {
+  if (source === "MIXTE") return <span className="text-[10px] text-gray-500 dark:text-gray-400">Reconnaissance mixte</span>;
   if (source === "MANUEL") return <span className="px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-300 text-[10px] font-semibold whitespace-nowrap" title="Famille affectée manuellement (catalogue)">Manuel</span>;
   if (source === "AUTOMATIQUE") return <span className="px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 text-[10px] font-semibold whitespace-nowrap" title="Famille reconnue automatiquement">Auto</span>;
   return <span className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 text-[10px] font-semibold whitespace-nowrap">À classifier</span>;
@@ -43,10 +44,10 @@ function PowerBreakdownBar({ breakdown }: { breakdown: PowerBreakdown[] }) {
 }
 
 /** Origine d'un groupe : tous manuels, tous automatiques, mixte ou à classifier */
-function groupOrigin(lines: GroupedLine[]): FamilySource | null {
+function groupOrigin(lines: GroupedLine[]): FamilySource | "MIXTE" | null {
   const sources = new Set(lines.map(l => l.familySource));
   if (sources.size === 1) return [...sources][0];
-  return null;
+  return "MIXTE";
 }
 
 type Totals = { groups: number; lines: number; quantity: number; produced: number; delivered: number; remaining: number };
@@ -135,6 +136,7 @@ function ArticleGroupingView({
     const q = search.toLowerCase();
     return groups
       .map(g => ({ ...g, lines: g.lines.filter(l =>
+        (l.familyCategory || "").toLowerCase().includes(q) ||
         (l.articleName || "").toLowerCase().includes(q) ||
         (l.affaire || "").toLowerCase().includes(q) ||
         (l.clientName || "").toLowerCase().includes(q) ||
@@ -149,7 +151,7 @@ function ArticleGroupingView({
           <span>{open ? "▾" : "▸"}</span> 📊 Regroupement par Article
         </button>
         {totals && <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">{totals.groups} groupe(s) · {totals.lines} ligne(s)</span>}
-        <span className="text-[11px] text-gray-400 italic">Une famille = nom + génération. Les puissances sont détaillées dans chaque groupe. « À classifier » est affiché à part.</span>
+        <span className="text-[11px] text-gray-400 italic">Groupes par sous-famille et variante du catalogue ; la colonne Famille affiche la catégorie définie. Les puissances sont détaillées dans chaque groupe. « À classifier » est affiché à part.</span>
         <div className="flex-1" />
         {open && <>
           <input type="text" value={searchDraft} onChange={e => setSearchDraft(e.target.value)} placeholder="🔍 Filtrer article, affaire, client..."
@@ -217,7 +219,7 @@ function ArticleGroupingView({
                                   {l.articleName}
                                 </td>
                                 <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300 whitespace-nowrap">{l.power === null ? <span className="text-gray-400 italic">—</span> : `${l.power} W`}</td>
-                                <td className="px-3 py-1.5"><OriginBadge source={l.familySource} /></td>
+                                <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300">{l.familyCategory || <span className="text-gray-400 italic">Non définie dans le catalogue</span>}</td>
                                 <td className="px-3 py-1.5 text-right font-bold text-blue-700 dark:text-blue-400">{l.quantity}</td>
                                 <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300">{l.affaire || <span className="text-gray-400 italic">—</span>}</td>
                                 <td className="px-3 py-1.5 text-gray-500 dark:text-gray-400">{l.clientName || "-"}</td>
