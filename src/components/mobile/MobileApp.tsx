@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import ForcePasswordChange from "@/components/ForcePasswordChange";
+import OnlineUsersIndicator from "@/components/OnlineUsersIndicator";
 import MobileHome from "@/components/mobile/MobileHome";
 import MobileOrders from "@/components/mobile/MobileOrders";
 import MobileOrderDetail from "@/components/mobile/MobileOrderDetail";
@@ -71,8 +72,9 @@ export default function MobileApp() {
     <MobileDraftContext.Provider value={reportDraft}>
     <div className={`${user.darkMode ? "dark" : ""} min-h-[100dvh] flex flex-col bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100`}>
       <header className="sticky top-0 z-20 bg-slate-900 text-white pt-[env(safe-area-inset-top)]">
-        <div className="flex items-center justify-between px-4 h-14">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 min-h-14">
           <div className="font-bold tracking-tight">Order Track Pro</div>
+          {user.role === "superadmin" && <OnlineUsersIndicator />}
           <div className="text-xs text-slate-300 truncate max-w-[50%]">{user.fullName}</div>
         </div>
       </header>

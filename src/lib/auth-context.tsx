@@ -24,6 +24,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [idleTimeoutMinutes, setIdleTimeoutMinutes] = useState(DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES);
   const checked = useRef(false);
+  const presenceClient = useRef<string | null>(null);
 
   useEffect(() => {
     if (checked.current) return;
@@ -73,12 +74,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
+      if (presenceClient.current) {
+        // Un signal de présence indisponible ne doit pas bloquer la déconnexion.
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 2000);
+        try { await apiFetch("/api/presence", { method: "POST", signal: controller.signal, body: JSON.stringify({ clientId: presenceClient.current, offline: true }) }).catch(() => {}); }
+        finally { window.clearTimeout(timeout); }
+      }
       await apiFetch("/api/auth/logout", { method: "POST" });
     } catch {
       // ignore
     }
     setUser(null);
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    if (!presenceClient.current) {
+      // randomUUID exige HTTPS ; getRandomValues fonctionne aussi sur le réseau local HTTP.
+      const bytes = window.crypto.getRandomValues(new Uint8Array(16));
+      bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+      const hex = Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("");
+      presenceClient.current = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    }
+    const heartbeat = () => {
+      if (document.visibilityState === "hidden") return;
+      void apiFetch("/api/presence", { method: "POST", body: JSON.stringify({ clientId: presenceClient.current }) }).catch(() => {});
+    };
+    heartbeat();
+    const interval = window.setInterval(heartbeat, 60_000);
+    document.addEventListener("visibilitychange", heartbeat);
+    return () => { window.clearInterval(interval); document.removeEventListener("visibilitychange", heartbeat); };
+  }, [user]);
 
   useEffect(() => {
     if (!user || idleTimeoutMinutes <= 0) return;

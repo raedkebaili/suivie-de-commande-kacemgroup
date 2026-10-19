@@ -21,57 +21,60 @@ import {
   photometricStudies, photometricStudyItems,
   recouvrementStates, clientRecouvrementStates, clientRecouvrementLogs,
   systemSettings, appColors, orderCounters,
-  archiveSheets, archiveRows, archiveCellColors,
+  archiveSheets, archiveRows, archiveCellColors, archiveCellModifications, driveDocuments,
   productionPlanEntries, factories, storageConfig, articleFamilyCatalog, articleFamilyAssignments,
 } from "@/db/schema";
 
-export async function collectBackupData() {
+export async function collectBackupData(executor: Pick<typeof db, "select"> = db) {
   const data = {
     // CORRECTIF SÉCURITÉ (R8) : les sauvegardes JSON ne contiennent JAMAIS
     // les condensats de mots de passe. À la restauration, les comptes
     // concernés reçoivent un mot de passe temporaire + mustChangePassword.
-    users: (await db.select().from(users)).map(({ passwordHash, ...safeUser }) => ({
+    users: (await executor.select().from(users)).map(({ passwordHash, ...safeUser }) => ({
       ...safeUser,
       passwordHash: null, // jamais exporté (champ conservé pour compat restauration)
     })) as unknown as (typeof users.$inferSelect)[],
-    agencies: await db.select().from(agencies),
-    userAgencyAccess: await db.select().from(userAgencyAccess),
-    clients: await db.select().from(clients),
-    orders: await db.select().from(orders),
-    orderItems: await db.select().from(orderItems),
-    productionBatches: await db.select().from(productionBatches),
-    expeditionBatches: await db.select().from(expeditionBatches),
-    expeditionPlanEntries: await db.select().from(expeditionPlanEntries),
-    productionUnitLib: await db.select().from(productionUnitLib),
-    articleLibrary: await db.select().from(articleLibrary),
-    techLibrary: await db.select().from(techLibrary),
-    materialCategories: await db.select().from(materialCategories),
-    matieres: await db.select().from(matieres),
-    itemTechnicalComponents: await db.select().from(itemTechnicalComponents),
-    activityLogs: await db.select().from(activityLogs),
-    modificationLogs: await db.select().from(modificationLogs),
-    notifications: await db.select().from(notifications),
-    photometricStudies: await db.select().from(photometricStudies),
-    photometricStudyItems: await db.select().from(photometricStudyItems),
+    agencies: await executor.select().from(agencies),
+    userAgencyAccess: await executor.select().from(userAgencyAccess),
+    clients: await executor.select().from(clients),
+    orders: await executor.select().from(orders),
+    orderItems: await executor.select().from(orderItems),
+    productionBatches: await executor.select().from(productionBatches),
+    expeditionBatches: await executor.select().from(expeditionBatches),
+    expeditionPlanEntries: await executor.select().from(expeditionPlanEntries),
+    productionUnitLib: await executor.select().from(productionUnitLib),
+    articleLibrary: await executor.select().from(articleLibrary),
+    techLibrary: await executor.select().from(techLibrary),
+    materialCategories: await executor.select().from(materialCategories),
+    matieres: await executor.select().from(matieres),
+    itemTechnicalComponents: await executor.select().from(itemTechnicalComponents),
+    activityLogs: await executor.select().from(activityLogs),
+    modificationLogs: await executor.select().from(modificationLogs),
+    notifications: await executor.select().from(notifications),
+    photometricStudies: await executor.select().from(photometricStudies),
+    photometricStudyItems: await executor.select().from(photometricStudyItems),
     // Module Recouvrement
-    recouvrementStates: await db.select().from(recouvrementStates),
-    clientRecouvrementStates: await db.select().from(clientRecouvrementStates),
-    clientRecouvrementLogs: await db.select().from(clientRecouvrementLogs),
+    recouvrementStates: await executor.select().from(recouvrementStates),
+    clientRecouvrementStates: await executor.select().from(clientRecouvrementStates),
+    clientRecouvrementLogs: await executor.select().from(clientRecouvrementLogs),
     // Catalogue des familles d'articles et affectations manuelles
-    articleFamilyCatalog: await db.select().from(articleFamilyCatalog),
-    articleFamilyAssignments: await db.select().from(articleFamilyAssignments),
+    articleFamilyCatalog: await executor.select().from(articleFamilyCatalog),
+    articleFamilyAssignments: await executor.select().from(articleFamilyAssignments),
     // Configuration (couleurs, réglages d'affichage, compteurs de numérotation)
-    systemSettings: await db.select().from(systemSettings),
-    appColors: await db.select().from(appColors),
-    orderCounters: await db.select().from(orderCounters),
+    systemSettings: await executor.select().from(systemSettings),
+    appColors: await executor.select().from(appColors),
+    orderCounters: await executor.select().from(orderCounters),
     // Module Archive commandes
-    archiveSheets: await db.select().from(archiveSheets),
-    archiveRows: await db.select().from(archiveRows),
-    archiveCellColors: await db.select().from(archiveCellColors),
+    archiveSheets: await executor.select().from(archiveSheets),
+    archiveRows: await executor.select().from(archiveRows),
+    archiveCellColors: await executor.select().from(archiveCellColors),
+    archiveCellModifications: await executor.select().from(archiveCellModifications),
+    // Associations uniquement : les fichiers physiques restent dans Google Drive.
+    driveDocuments: await executor.select().from(driveDocuments),
     // Planning de production journalier
-    factories: await db.select().from(factories),
-    storageConfig: await db.select().from(storageConfig),
-    productionPlanEntries: await db.select().from(productionPlanEntries),
+    factories: await executor.select().from(factories),
+    storageConfig: await executor.select().from(storageConfig),
+    productionPlanEntries: await executor.select().from(productionPlanEntries),
   };
 
   const totalRecords = Object.values(data).reduce((sum, rows) => sum + rows.length, 0);

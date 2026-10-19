@@ -40,6 +40,7 @@ const TelegestionView = dynamic(() => import("@/components/TelegestionView"), { 
 const StorageView = dynamic(() => import("@/components/StorageView"), { loading: TabLoader });
 import ForcePasswordChange from "@/components/ForcePasswordChange";
 import type { Notification } from "@/lib/types";
+import OnlineUsersIndicator from "@/components/OnlineUsersIndicator";
 import { startBackupScheduler, stopBackupScheduler } from "@/lib/backup-scheduler";
 import { GERANT_ALLOWED_TABS, GERANT_ROLE } from "@/lib/gerant-access";
 import { isEditableTarget, resolveShortcut, type ShortcutRequest } from "@/lib/keyboard-shortcuts";
@@ -292,6 +293,7 @@ export default function HomePage() {
               </div>
             </div>
           )}
+          {user.role === "superadmin" && <OnlineUsersIndicator />}
           {/* Notifications bell */}
           <div className="relative">
             <button onClick={() => { setShowNotifs(!showNotifs); if (!showNotifs) fetchNotifications(true); }}

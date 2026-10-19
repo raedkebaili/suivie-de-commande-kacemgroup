@@ -1,6 +1,7 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
+import { requestBackupFolder } from "@/lib/backup-scheduler";
 import type { User } from "@/lib/types";
 
 type BackupMeta = {
@@ -28,6 +29,14 @@ type BackupHistoryItem = {
 
 type BackupSettings = {
   enabled: boolean;
+  timeZone: string;
+  schedulerMode: "server" | "vercel-cron";
+  cronConfigured: boolean;
+  lastSchedulerCheck: string | null;
+  lastCronCheck: string | null;
+  lastTrigger: string | null;
+  lastSuccess: string | null;
+  schedule: { due: boolean; day: string; reason: string };
   time: string;
   maxCount: number;
   idleTimeoutMinutes: number;
@@ -39,6 +48,8 @@ type BackupSettings = {
 };
 
 const TABLE_LABELS: Record<string, string> = {
+  driveDocuments: "Associations de documents Drive",
+  archiveCellModifications: "Marquages des modifications d’archive",
   users: "Utilisateurs",
   agencies: "Agences",
   clients: "Clients",
@@ -123,6 +134,7 @@ export default function BackupView({ user }: { user: User }) {
       setFormIdleTimeout(settingsRes.idleTimeoutMinutes || 30);
     } catch (err) {
       console.error("Erreur chargement paramètres backup:", err);
+      setMessage({ type: "error", text: "Impossible de lire le statut des sauvegardes. Réessayez." });
     } finally {
       setLoadingSettings(false);
     }
@@ -233,7 +245,7 @@ export default function BackupView({ user }: { user: User }) {
     setTestingBackup(true);
     setMessage(null);
     try {
-      const result = await apiFetch<{ ok: boolean; filename?: string; totalRecords?: number; error?: string }>(
+      const result = await apiFetch<{ ok: boolean; filename?: string; totalRecords?: number; error?: string; reason?: string }>(
         "/api/backup/auto",
         { method: "POST", body: JSON.stringify({ force: true }) }
       );
@@ -241,7 +253,7 @@ export default function BackupView({ user }: { user: User }) {
         setMessage({ type: "success", text: `Test de sauvegarde réussi : ${result.filename} (${result.totalRecords} enregistrements)` });
         loadData();
       } else {
-        throw new Error(result.error || "Erreur inconnue");
+        throw new Error(result.error || result.reason || "Erreur inconnue");
       }
     } catch (err) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : "Erreur lors du test" });
@@ -345,6 +357,22 @@ export default function BackupView({ user }: { user: User }) {
           </div>
         ) : (
           <>
+            {autoSettings && <div className="mb-4 rounded-xl bg-white dark:bg-gray-900 border border-blue-200 dark:border-blue-800 p-4 text-sm space-y-2">
+              <p><b>Planificateur :</b> {autoSettings.schedulerMode === "vercel-cron" ? "Vercel Cron (appel externe, pas de minuterie persistante)" : "Serveur persistant, vérification chaque minute"}</p>
+              <p><b>Fuseau :</b> {autoSettings.timeZone} · <b>Dernière réussite :</b> {autoSettings.lastSuccess ? formatDate(autoSettings.lastSuccess) : "Aucune"}</p>
+              <p><b>Dernière vérification :</b> {autoSettings.lastSchedulerCheck ? formatDate(autoSettings.lastSchedulerCheck) : "Aucune"} ({autoSettings.lastTrigger || "—"})</p>
+              {autoSettings.schedulerMode === "vercel-cron" && <>
+                <p><b>Dernier appel Cron :</b> {autoSettings.lastCronCheck ? formatDate(autoSettings.lastCronCheck) : "Aucun reçu"}</p>
+                <p className="text-xs text-amber-800 dark:text-amber-300">Le Cron fourni appelle à 21:00 UTC (22:00 à Tunis), uniquement sur le déploiement de production. Pour une autre heure ou des reprises fréquentes, configurer un Cron externe plus fréquent.</p>
+                {!autoSettings.cronConfigured && <p role="alert" className="font-semibold text-red-700 dark:text-red-300">CRON_SECRET manque dans l’environnement Vercel. La sauvegarde sans navigateur ne peut pas être déclenchée par Vercel tant que ce secret n’est pas configuré puis redéployé.</p>}
+              </>}
+              {autoSettings.enabled && autoSettings.schedule.due && <p className="text-amber-800 dark:text-amber-300">Échéance {autoSettings.schedule.day} en attente : elle sera rattrapée au prochain déclenchement réussi.</p>}
+              <p className="text-xs text-gray-500 dark:text-gray-400">La sauvegarde principale est conservée dans l’historique en base. Une copie locale nécessite un navigateur ouvert et une permission de dossier. Pour couvrir une perte de la base, conserver aussi une copie extérieure.</p>
+              <button type="button" className="min-h-[44px] px-3 rounded-lg border border-blue-300 text-blue-700 dark:text-blue-300" onClick={async () => {
+                const ok = await requestBackupFolder();
+                setMessage({ type: ok ? "success" : "error", text: ok ? "Dossier de copie locale configuré pour ce navigateur. Il doit rester ouvert pour recevoir les copies." : "Permission refusée ou choix de dossier non pris en charge. La sauvegarde serveur reste indépendante." });
+              }}>Choisir le dossier de copie locale</button>
+            </div>}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
               {/* Activer/Désactiver */}
               <div className="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
@@ -365,7 +393,7 @@ export default function BackupView({ user }: { user: User }) {
               {/* Heure */}
               <div className="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
                 <label className="block">
-                  <span className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Heure d&apos;exécution</span>
+                  <span className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Heure d&apos;exécution ({autoSettings?.timeZone || "Africa/Tunis"})</span>
                   <input
                     type="time"
                     value={formTime}

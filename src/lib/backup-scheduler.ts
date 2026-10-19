@@ -113,7 +113,7 @@ async function verifyPermission(handle: FileSystemDirectoryHandle): Promise<bool
  * Demande à l'utilisateur de choisir un dossier de sauvegarde.
  * Appelé au premier lancement ou si le handle est invalide.
  */
-async function requestBackupFolder(): Promise<boolean> {
+export async function requestBackupFolder(): Promise<boolean> {
   // Vérifier que l'API est supportée
   if (typeof window === "undefined" || !("showDirectoryPicker" in window)) {
     console.log("[BackupScheduler] API File System Access non supportée — fallback téléchargement");
@@ -162,12 +162,12 @@ async function requestBackupFolder(): Promise<boolean> {
  * Écrit le fichier dans le dossier de sauvegarde choisi.
  * Si pas de dossier, fait un téléchargement classique.
  */
-async function saveBackupFile(backupId: number, filename: string): Promise<void> {
+async function saveBackupFile(backupId: number, filename: string): Promise<boolean> {
   try {
     const res = await fetch(`/api/backup/download/${backupId}`, { credentials: "same-origin" });
     if (!res.ok) {
       console.error("[BackupScheduler] Erreur téléchargement backup:", res.status);
-      return;
+      return false;
     }
 
     const blob = await res.blob();
@@ -180,7 +180,7 @@ async function saveBackupFile(backupId: number, filename: string): Promise<void>
         await writable.write(blob);
         await writable.close();
         console.log(`[BackupScheduler] Fichier enregistré dans le dossier : ${filename}`);
-        return;
+        return true;
       } catch (err) {
         console.error("[BackupScheduler] Erreur écriture dossier, fallback téléchargement:", err);
         state.folderReady = false;
@@ -197,58 +197,39 @@ async function saveBackupFile(backupId: number, filename: string): Promise<void>
     a.click();
     setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
     console.log(`[BackupScheduler] Fichier téléchargé : ${filename}`);
+    return true;
   } catch (error) {
     console.error("[BackupScheduler] Erreur sauvegarde fichier:", error);
+    return false;
   }
 }
 
 // ── Logique de planification ────────────────────────────────────────────
 
-function shouldRunBackup(scheduledTime: string, lastRun: string | null): boolean {
-  const now = new Date();
-  const [hours, minutes] = scheduledTime.split(":").map(Number);
-  const scheduledDate = new Date();
-  scheduledDate.setHours(hours, minutes, 0, 0);
-
-  if (lastRun) {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const lastRunDay = new Date(new Date(lastRun)); lastRunDay.setHours(0, 0, 0, 0);
-    if (lastRunDay.getTime() === today.getTime()) return false;
-  }
-
-  const timeDiff = Math.abs(now.getTime() - scheduledDate.getTime());
-  return timeDiff <= 5 * 60 * 1000 && now >= scheduledDate;
-}
-
+let checking = false;
 async function checkAndRunBackup(): Promise<void> {
+  if (checking) return;
+  checking = true;
   state.lastCheck = new Date();
-
   try {
     const status = await apiFetch<BackupStatus>("/api/backup/auto");
     if (!status.enabled) return;
-
-    if (shouldRunBackup(status.time, status.lastRun)) {
-      console.log("[BackupScheduler] Lancement de la sauvegarde automatique...");
-
-      const result = await apiFetch<{ ok: boolean; filename?: string; error?: string }>(
-        "/api/backup/auto",
-        { method: "POST", body: JSON.stringify({ force: true }) }
-      );
-
-      if (result.ok && result.filename) {
-        console.log(`[BackupScheduler] Sauvegarde serveur réussie : ${result.filename}`);
-        // Récupérer l'ID pour télécharger le fichier
-        const updated = await apiFetch<BackupStatus>("/api/backup/auto");
-        if (updated.lastBackup?.id) {
-          await saveBackupFile(updated.lastBackup.id, result.filename);
-        }
-      } else {
-        console.error("[BackupScheduler] Échec :", result.error);
+    // Le serveur décide de l'échéance, du fuseau, du rattrapage et de l'unicité.
+    // Ne JAMAIS forcer une sauvegarde depuis une minuterie de navigateur.
+    const result = await apiFetch<{ ok: boolean; id?: number; filename?: string }>("/api/backup/auto", { method: "POST", body: JSON.stringify({}) });
+    const candidate = result.ok && result.id && result.filename
+      ? { id: result.id, filename: result.filename }
+      : state.folderReady && status.lastBackup?.status === "success" ? status.lastBackup : null;
+    if (candidate) {
+      const key = "ordertrack-last-local-backup";
+      let previous: string | null = null;
+      try { previous = localStorage.getItem(key); } catch { /* stockage privé indisponible */ }
+      if (previous !== String(candidate.id) && await saveBackupFile(candidate.id, candidate.filename)) {
+        try { localStorage.setItem(key, String(candidate.id)); } catch { /* sans persistance, prochaine vérification réessaiera */ }
       }
     }
-  } catch (error) {
-    console.error("[BackupScheduler] Erreur vérification:", error);
-  }
+  } catch (error) { console.error("[BackupScheduler] Erreur vérification:", error); }
+  finally { checking = false; }
 }
 
 // ── API publique ────────────────────────────────────────────────────────
@@ -257,8 +238,12 @@ export async function startBackupScheduler(): Promise<void> {
   if (state.isRunning) return;
   state.isRunning = true;
 
-  // Tenter de configurer le dossier de sauvegarde au premier lancement
-  await requestBackupFolder();
+  // Un sélecteur de dossier exige un clic utilisateur : ne pas bloquer la minuterie.
+  const stored = await loadDirHandle();
+  if (stored && await stored.queryPermission({ mode: "readwrite" }).catch(() => "denied") === "granted") {
+    state.dirHandle = stored; state.folderReady = true;
+  }
+  if (!state.isRunning) return;
 
   // Première vérification
   checkAndRunBackup();

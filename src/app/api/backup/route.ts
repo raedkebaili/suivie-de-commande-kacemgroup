@@ -7,7 +7,7 @@ import {
   activityLogs, modificationLogs, notifications, backupHistory, photometricStudies, photometricStudyItems,
   recouvrementStates, clientRecouvrementStates, clientRecouvrementLogs,
   systemSettings, appColors, orderCounters,
-  archiveSheets, archiveRows, archiveCellColors,
+  archiveSheets, archiveRows, archiveCellColors, archiveCellModifications, driveDocuments,
   productionPlanEntries, factories, storageConfig, articleFamilyCatalog, articleFamilyAssignments,
 } from "@/db/schema";
 import { getUserFromHeaders, logActivity, hashPassword } from "@/lib/auth";
@@ -25,7 +25,10 @@ export async function GET(request: NextRequest) {
 
   try {
     // Collecteur partagé avec la sauvegarde automatique (src/lib/backup-data.ts)
-    const { data, totalRecords } = await collectBackupData();
+    const { data, totalRecords } = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(746201, 1)`);
+      return collectBackupData(tx);
+    }, { isolationLevel: "repeatable read" });
 
 
     const backup = {
@@ -146,6 +149,9 @@ export async function POST(request: NextRequest) {
   const archiveSheetsRows = arr<typeof archiveSheets.$inferInsert>("archiveSheets");
   const archiveRowsRows = arr<typeof archiveRows.$inferInsert>("archiveRows");
   const archiveCellColorsRows = arr<typeof archiveCellColors.$inferInsert>("archiveCellColors");
+  const archiveCellModificationsRows = arr<typeof archiveCellModifications.$inferInsert>("archiveCellModifications");
+  const driveDocumentsRows = arr<typeof driveDocuments.$inferInsert>("driveDocuments");
+  const restoreDocuments = Object.prototype.hasOwnProperty.call(data, "driveDocuments");
   const restoreArchive = archiveSheetsRows.length > 0;
   // Planning de production — même garde de rétrocompatibilité
   const productionPlanEntriesRows = arr<typeof productionPlanEntries.$inferInsert>("productionPlanEntries");
@@ -178,7 +184,10 @@ export async function POST(request: NextRequest) {
 
   try {
     await db.transaction(async (tx) => {
+      // Même verrou que les sauvegardes automatiques : pas de collecte pendant la restauration.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(746201, 1)`);
       // Delete in reverse FK-dependency order
+      if (restoreDocuments) await tx.delete(driveDocuments);
       if (restorePlanning) await tx.delete(productionPlanEntries);
       if (restoreArticleFamilies) {
         await tx.delete(articleFamilyAssignments);
@@ -187,6 +196,7 @@ export async function POST(request: NextRequest) {
       if (restoreFactories) await tx.delete(factories);
       if (restoreStorage) await tx.delete(storageConfig);
       if (restoreArchive) {
+        await tx.delete(archiveCellModifications);
         await tx.delete(archiveCellColors);
         await tx.delete(archiveRows);
         await tx.delete(archiveSheets);
@@ -244,6 +254,7 @@ export async function POST(request: NextRequest) {
       await insertChunked(tx, notifications, notificationsRows);
       await insertChunked(tx, photometricStudies, photometricStudiesRows);
       await insertChunked(tx, photometricStudyItems, photometricStudyItemsRows);
+      if (restoreDocuments) await insertChunked(tx, driveDocuments, driveDocumentsRows);
       if (restoreSettings) await insertChunked(tx, systemSettings, systemSettingsRows);
       if (restoreColors) await insertChunked(tx, appColors, appColorsRows);
       if (restoreCounters) await insertChunked(tx, orderCounters, orderCountersRows);
@@ -258,6 +269,7 @@ export async function POST(request: NextRequest) {
         await insertChunked(tx, archiveSheets, archiveSheetsRows);
         await insertChunked(tx, archiveRows, archiveRowsRows);
         await insertChunked(tx, archiveCellColors, archiveCellColorsRows);
+        await insertChunked(tx, archiveCellModifications, archiveCellModificationsRows);
       }
 
       // Resync auto-increment sequences with the restored max ids
@@ -270,11 +282,12 @@ export async function POST(request: NextRequest) {
         ...(restoreSettings ? ["system_settings"] : []),
         ...(restoreColors ? ["app_colors"] : []),
         ...(restoreCounters ? ["order_counters"] : []),
-        ...(restoreArchive ? ["archive_sheets", "archive_rows", "archive_cell_colors"] : []),
+        ...(restoreArchive ? ["archive_sheets", "archive_rows", "archive_cell_colors", "archive_cell_modifications"] : []),
+        ...(restoreDocuments ? ["drive_documents"] : []),
         ...(restorePlanning ? ["production_plan_entries"] : []),
         ...(restoreFactories ? ["factories"] : []),
         ...(restoreStorage ? ["storage_config"] : []),
-        ...(restoreArticleFamilies ? ["article_family_catalog"] : []),
+        ...(restoreArticleFamilies ? ["article_family_catalog", "article_family_assignments"] : []),
       ];
       for (const t of tableNames) {
         await tx.execute(
@@ -295,7 +308,7 @@ export async function POST(request: NextRequest) {
     photometricStudiesRows.length + photometricStudyItemsRows.length +
     recouvrementStatesRows.length + clientRecouvrementStatesRows.length + clientRecouvrementLogsRows.length +
     systemSettingsRows.length + appColorsRows.length + orderCountersRows.length +
-    archiveSheetsRows.length + archiveRowsRows.length + archiveCellColorsRows.length +
+    archiveSheetsRows.length + archiveRowsRows.length + archiveCellColorsRows.length + archiveCellModificationsRows.length + driveDocumentsRows.length +
     productionPlanEntriesRows.length + factoriesRows.length + storageConfigRows.length +
     articleFamilyCatalogRows.length + articleFamilyAssignmentsRows.length;
 

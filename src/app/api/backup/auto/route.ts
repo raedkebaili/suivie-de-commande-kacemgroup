@@ -4,198 +4,34 @@ import { desc } from "drizzle-orm";
 // Les tables sauvegardées sont désormais listées dans src/lib/backup-data.ts.
 // Cette route n'a plus besoin que de backupHistory et systemSettings.
 import { backupHistory, systemSettings } from "@/db/schema";
-import { getUserFromHeaders, logActivity } from "@/lib/auth";
-import { collectBackupData } from "@/lib/backup-data";
-import { eq } from "drizzle-orm";
-import crypto from "crypto";
+import { getUserFromHeaders } from "@/lib/auth";
+import { runAutomaticBackup, backupTimezone } from "@/lib/automatic-backup";
+import { backupDue, backupRetention } from "@/lib/backup-schedule";
+import { and, eq } from "drizzle-orm";
+import { matchesBackupSecret } from "@/lib/backup-cron-auth";
 import { parseSessionIdleTimeoutMinutes, SESSION_IDLE_TIMEOUT_KEY } from "@/lib/session-timeout";
 
-// CORRECTIF (R3) : comparaison résistante aux attaques temporelles + repli
-// sur JWT_SECRET quand BACKUP_SECRET n'est pas défini (le planificateur
-// serveur built-in utilise la même résolution).
 function isCronAuthorized(header: string | null): boolean {
-  const expected = process.env.BACKUP_SECRET || process.env.JWT_SECRET || "";
-  if (!header || !expected) return false;
-  const a = Buffer.from(String(header));
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  try {
-    return crypto.timingSafeEqual(a, b);
-  } catch {
-    return false;
-  }
+  return matchesBackupSecret(header, process.env.BACKUP_SECRET);
 }
 
 export const dynamic = "force-dynamic";
 
-const BACKUP_VERSION = 1;
+export const maxDuration = 300;
 
-/**
- * Génère les données de sauvegarde (même logique que GET /api/backup)
- */
-async function generateBackupData() {
-  // Collecteur partagé avec la sauvegarde manuelle (src/lib/backup-data.ts) :
-  // garantit que les deux sauvegardes contiennent exactement les mêmes tables.
-  return collectBackupData();
-}
-
-/**
- * Met à jour les paramètres de la dernière sauvegarde
- */
-async function updateLastBackupStatus(status: string, errorMessage?: string) {
-  const now = new Date().toISOString();
-
-  const statusValue = errorMessage ? `error: ${errorMessage}` : status;
-
-  for (const [key, value] of [["backup_last_run", now], ["backup_last_status", statusValue]] as const) {
-    const [existing] = await db.select().from(systemSettings).where(eq(systemSettings.key, key)).limit(1);
-    if (existing) {
-      await db.update(systemSettings).set({ value, updatedAt: now }).where(eq(systemSettings.key, key));
-    } else {
-      await db.insert(systemSettings).values({ key, value, description: key === "backup_last_run" ? "Date/heure de la dernière sauvegarde automatique" : "Statut de la dernière sauvegarde automatique" });
-    }
-  }
-}
-
-/**
- * Supprime les anciennes sauvegardes si la limite est atteinte.
- * Supprime aussi les données JSON associées pour libérer l'espace.
- */
-async function cleanupOldBackups(maxCount: number) {
-  const allBackups = await db.select({ id: backupHistory.id })
-    .from(backupHistory)
-    .where(eq(backupHistory.type, "automatic"))
-    .orderBy(desc(backupHistory.createdAt));
-
-  if (allBackups.length >= maxCount) {
-    const toDelete = allBackups.slice(maxCount - 1); // -1 car on va en ajouter une nouvelle
-    for (const backup of toDelete) {
-      await db.delete(backupHistory).where(eq(backupHistory.id, backup.id));
-    }
-    return toDelete.length;
-  }
-  return 0;
-}
-
-/**
- * POST /api/backup/auto
- * Déclenche une sauvegarde automatique.
- * Le fichier JSON est stocké en base (colonne backup_data) pour
- * pouvoir être téléchargé à tout moment depuis l'historique.
- */
+/** Déclencheur admin ou ancien cron externe ; toutes les règles sont côté serveur. */
 export async function POST(request: NextRequest) {
   const user = await getUserFromHeaders(request);
-
-  // Permettre l'appel sans authentification pour les cron jobs (avec secret)
-  const authHeader = request.headers.get("x-backup-secret");
-  const isValidCron = isCronAuthorized(authHeader);
-
-  if (!user && !isValidCron) {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  }
-
-  if (user && user.role !== "superadmin") {
-    return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
-  }
-
+  const cron = isCronAuthorized(request.headers.get("x-backup-secret"));
+  if (!user && !cron) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  if (user && user.role !== "superadmin") return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
   const body = await request.json().catch(() => ({}));
-  const forceRun = body.force === true;
-
   try {
-    // Vérifier si la sauvegarde automatique est activée
-    if (!forceRun) {
-      const [enabledSetting] = await db.select().from(systemSettings).where(eq(systemSettings.key, "backup_enabled")).limit(1);
-      if (enabledSetting?.value !== "true") {
-        return NextResponse.json({
-          ok: false,
-          skipped: true,
-          reason: "Sauvegarde automatique désactivée",
-        });
-      }
-    }
-
-    // Récupérer le nombre max de sauvegardes à conserver
-    const [maxCountSetting] = await db.select().from(systemSettings).where(eq(systemSettings.key, "backup_max_count")).limit(1);
-    const maxCount = parseInt(maxCountSetting?.value || "30");
-
-    // Supprimer les anciennes sauvegardes au-delà de la limite
-    const deletedCount = await cleanupOldBackups(maxCount);
-
-    // Générer les données de sauvegarde (même format que la sauvegarde manuelle)
-    const { data, totalRecords } = await generateBackupData();
-
-    const now = new Date();
-    const datePart = now.toISOString().slice(0, 10);            // 2026-07-25
-    const timePart = now.toISOString().slice(11, 16).replace(":", "-"); // 22-00
-    const filename = `Backup_${datePart}_${timePart}.json`;
-
-    const backup = {
-      meta: {
-        app: "OrderTrack Pro",
-        version: BACKUP_VERSION,
-        createdAt: now.toISOString(),
-        createdBy: user?.fullName || "Système (automatique)",
-        totalRecords,
-        type: "automatic",
-        tables: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, v.length])),
-      },
-      data,
-    };
-
-    // Sérialiser en JSON — c'est ce fichier que l'utilisateur pourra télécharger
-    const backupJson = JSON.stringify(backup, null, 2);
-    const filesize = Buffer.byteLength(backupJson, "utf8");
-
-    // Stocker dans l'historique AVEC le contenu JSON complet
-    await db.insert(backupHistory).values({
-      filename,
-      filesize,
-      totalRecords,
-      type: "automatic",
-      status: "success",
-      backupData: backupJson,
-      createdById: user?.id || null,
-      createdByName: user?.fullName || "Système",
-    });
-
-    // Mettre à jour le statut de dernière exécution
-    await updateLastBackupStatus("success");
-
-    // Logger l'activité
-    if (user) {
-      await logActivity(user.id, user.username, "AUTO_BACKUP", `Sauvegarde automatique: ${totalRecords} enregistrements, ${filename}`);
-    }
-
-    return NextResponse.json({
-      ok: true,
-      filename,
-      totalRecords,
-      filesize,
-      deletedOldBackups: deletedCount,
-    });
-  } catch (error) {
-    console.error("Erreur sauvegarde automatique:", error);
-
-    const errorMessage = error instanceof Error ? error.message : String(error);
-
-    // Enregistrer l'échec dans l'historique (sans données)
-    try {
-      await db.insert(backupHistory).values({
-        filename: `Backup_FAILED_${new Date().toISOString().slice(0, 19).replace(/[:.]/g, "-")}.json`,
-        totalRecords: 0,
-        type: "automatic",
-        status: "error",
-        errorMessage,
-        createdById: user?.id || null,
-        createdByName: user?.fullName || "Système",
-      });
-      await updateLastBackupStatus("error", errorMessage);
-    } catch { /* best-effort */ }
-
-    return NextResponse.json({
-      ok: false,
-      error: "Erreur lors de la sauvegarde automatique: " + errorMessage,
-    }, { status: 500 });
+    const force = !!user && body?.force === true;
+    const result = await runAutomaticBackup({ force, actor: user || undefined, source: force ? "manual" : cron ? "cron" : "browser" });
+    return NextResponse.json(result);
+  } catch {
+    return NextResponse.json({ ok: false, error: "La sauvegarde a échoué. Consultez l’historique pour le diagnostic." }, { status: 500 });
   }
 }
 
@@ -234,6 +70,10 @@ export async function GET(request: NextRequest) {
       .orderBy(desc(backupHistory.createdAt))
       .limit(1);
 
+    const [lastSuccessful] = await db.select({ createdAt: backupHistory.createdAt }).from(backupHistory)
+      .where(and(eq(backupHistory.type, "automatic"), eq(backupHistory.status, "success")))
+      .orderBy(desc(backupHistory.createdAt)).limit(1);
+
     // Compter les sauvegardes
     const allBackups = await db.select({
       id: backupHistory.id,
@@ -242,9 +82,17 @@ export async function GET(request: NextRequest) {
     const autoBackups = allBackups.filter(b => b.type === "automatic");
 
     return NextResponse.json({
-      enabled: settingsMap.backup_enabled === "true",
+      enabled: settingsMap.backup_enabled !== "false",
+      timeZone: backupTimezone(),
+      schedulerMode: process.env.VERCEL ? "vercel-cron" : "server",
+      cronConfigured: !!process.env.CRON_SECRET,
+      lastSchedulerCheck: settingsMap.backup_last_scheduler_check || null,
+      lastTrigger: settingsMap.backup_last_trigger || null,
+      lastCronCheck: settingsMap.backup_last_cron_check || null,
+      lastSuccess: lastSuccessful?.createdAt || null,
+      schedule: backupDue({ time: settingsMap.backup_time || "22:00", timeZone: backupTimezone(), lastSuccess: lastSuccessful?.createdAt, lastAttempt: settingsMap.backup_last_run, lastStatus: settingsMap.backup_last_status }),
       time: settingsMap.backup_time || "22:00",
-      maxCount: parseInt(settingsMap.backup_max_count || "30"),
+      maxCount: backupRetention(settingsMap.backup_max_count),
       idleTimeoutMinutes: parseSessionIdleTimeoutMinutes(settingsMap[SESSION_IDLE_TIMEOUT_KEY]),
       lastRun: settingsMap.backup_last_run || null,
       lastStatus: settingsMap.backup_last_status || null,

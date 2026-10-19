@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, boolean, timestamp, doublePrecision, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, boolean, timestamp, doublePrecision, uniqueIndex, index, uuid, primaryKey } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const users = pgTable("users", {
@@ -15,6 +15,13 @@ export const users = pgTable("users", {
   mustChangePassword: boolean("must_change_password").notNull().default(false),
   createdAt: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
 });
+
+/** Présence éphémère par onglet : exclue des exports et restaurations. */
+export const userPresence = pgTable("user_presence", {
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  clientId: uuid("client_id").notNull(),
+  lastSeen: timestamp("last_seen", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+}, (table) => [primaryKey({ name: "user_presence_pkey", columns: [table.userId, table.clientId] })]);
 
 export const agencies = pgTable("agencies", {
   id: serial("id").primaryKey(),
