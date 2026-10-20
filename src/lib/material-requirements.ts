@@ -92,3 +92,27 @@ export function parseRequirementFilters(sp: URLSearchParams): RequirementFilters
   if (sp.get("completeness") && !["missing", "complete"].includes(sp.get("completeness")!)) throw new Error("Filtre de spécifications invalide");
   return { ...Object.fromEntries(["q", "affaire", "dateFrom", "dateTo", "minQuantity", "maxQuantity", "completeness"].map(k => [k, sp.get(k) || ""])), ...Object.fromEntries(["articles", "families", "powers", "clients", "orderNumbers"].map(k => [k, sp.getAll(k)])), technical, sorts };
 }
+
+export type MaterialSummaryFilters = { materialQ?: string; materialCategory?: string; minNeed?: string; maxNeed?: string; materialSort?: string; materialDirection?: string };
+/** Filtrage des matières agrégées, sans modifier les articles sources ni les tableaux classiques. */
+export function filterMaterialSummary(summary: ReturnType<typeof requirementSummary>, filters: MaterialSummaryFilters) {
+  return summary.filter(c => !filters.materialCategory || c.key === filters.materialCategory).map(category => {
+    const materials = category.materials.filter(material =>
+      (!filters.materialQ || normalized(`${material.reference} ${material.label}`).includes(normalized(filters.materialQ))) &&
+      (!filters.minNeed || material.quantity >= Number(filters.minNeed)) &&
+      (!filters.maxNeed || material.quantity <= Number(filters.maxNeed)));
+    const field = filters.materialSort === "quantity" ? "quantity" : filters.materialSort === "label" ? "label" : "reference";
+    materials.sort((a, b) => {
+      const cmp = field === "quantity" ? a.quantity - b.quantity : a[field].localeCompare(b[field], "fr", { numeric: true, sensitivity: "base" });
+      return (filters.materialDirection === "desc" ? -cmp : cmp) || a.reference.localeCompare(b.reference, "fr");
+    });
+    return { ...category, materials, quantity: materials.reduce((sum, m) => sum + m.quantity, 0) };
+  }).filter(c => c.materials.length > 0);
+}
+export function parseMaterialSummaryFilters(sp: URLSearchParams): MaterialSummaryFilters {
+  for (const key of ["minNeed", "maxNeed"]) if (sp.get(key) && (!Number.isFinite(Number(sp.get(key))) || Number(sp.get(key)) < 0)) throw new Error("Besoin de filtre invalide");
+  if (sp.get("minNeed") && sp.get("maxNeed") && Number(sp.get("minNeed")) > Number(sp.get("maxNeed"))) throw new Error("Le besoin minimal dépasse le maximum");
+  if (sp.get("materialSort") && !["reference", "label", "quantity"].includes(sp.get("materialSort")!)) throw new Error("Tri matière invalide");
+  if (sp.get("materialDirection") && !["asc", "desc"].includes(sp.get("materialDirection")!)) throw new Error("Sens de tri matière invalide");
+  return Object.fromEntries(["materialQ", "materialCategory", "minNeed", "maxNeed", "materialSort", "materialDirection"].map(key => [key, sp.get(key) || ""]));
+}

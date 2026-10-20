@@ -393,3 +393,17 @@ html { transition: background-color 0.3s ease, color 0.3s ease; }
   .planning-cause-normal { animation: none !important; opacity: 0 !important; }
   .planning-cause-msg { animation: none !important; opacity: 1 !important; }
 }
+
+/* Le bureau occupe le viewport : seul le contenu principal (ou le menu lui-même)
+   défile. Une longue liste de tableaux ne peut plus entraîner la barre latérale. */
+.desktop-app-shell {
+  position: fixed;
+  inset: 0;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+}
+@media print {
+  .desktop-app-shell { position: static; height: auto; overflow: visible; display: block; }
+  .desktop-app-content, .desktop-app-main { height: auto; overflow: visible; }
+}

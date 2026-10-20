@@ -221,7 +221,7 @@ export default function HomePage() {
   const latestUnread = notifications.find((notification) => !notification.read);
 
   return (
-    <div className={`flex h-screen overflow-hidden ${darkMode ? "dark" : ""} bg-gray-50 dark:bg-gray-950`}>
+    <div className={`desktop-app-shell flex overflow-hidden ${darkMode ? "dark" : ""} bg-gray-50 dark:bg-gray-950`}>
       <Sidebar user={user} activeTab={activeTab} tabs={availableTabs} collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
         onTabChange={(tab) => { setActiveTab(tab as Tab); setMobileSidebarOpen(false); }}
@@ -238,7 +238,7 @@ export default function HomePage() {
         </div>
       )}
 
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="desktop-app-content flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
         <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 lg:px-6 py-3 flex items-center gap-3 shrink-0 shadow-sm">
           <button className="lg:hidden p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400" onClick={() => setMobileSidebarOpen(true)}>
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
@@ -339,7 +339,7 @@ export default function HomePage() {
             <span className="hidden sm:inline font-medium">{user.fullName}</span>
           </div>
         </header>
-        <main className="flex-1 min-w-0 overflow-y-auto p-2 sm:p-3 lg:p-6 bg-gray-50 dark:bg-gray-950">
+        <main className="desktop-app-main flex-1 min-h-0 min-w-0 overflow-auto overscroll-contain p-2 sm:p-3 lg:p-6 bg-gray-50 dark:bg-gray-950">
           {activeTab === "dashboard" && <DashboardView user={user} />}
           {activeTab === "orders" && <OrdersView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} onNavigateTab={(tab) => setActiveTab(tab as Tab)} />}
           {activeTab === "production" && <ProductionView user={user} />}

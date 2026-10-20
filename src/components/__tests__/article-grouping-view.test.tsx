@@ -16,49 +16,68 @@ it("affiche la famille du catalogue dans la colonne Famille, et pas l’origine 
 });
 
 import { fireEvent, waitFor } from "@testing-library/react";
-import { requirementSummary } from "@/lib/material-requirements";
-function materialResult(canConfigure: boolean) {
-  const groups = groupArticles([{ itemId: 1, articleName: "NETLUX 75W", quantity: 10, components: [{ categoryKey: "driver", categoryName: "Driver", materialId: 2, materialReference: "DX", materialLabel: "Driver X" }] }, { itemId: 2, articleName: "NETLUX 100W", quantity: 20, components: [] }]);
+import { filterMaterialSummary, requirementSummary } from "@/lib/material-requirements";
+function setupSeparatedTables() {
+  const groups = groupArticles([
+    { itemId: 1, articleName: "NETLUX 75W", quantity: 10, producedQty: 4, deliveredQty: 2, components: [{ categoryKey: "driver", categoryName: "Driver", materialId: 2, materialReference: "DX", materialLabel: "Driver X" }] },
+    { itemId: 2, articleName: "NETLUX 2.0 100W", quantity: 20, producedQty: 9, deliveredQty: 5, components: [{ categoryKey: "driver", categoryName: "Driver", materialId: 3, materialReference: "DY", materialLabel: "Driver Y" }] },
+  ]);
   const lines = groups.flatMap(g => g.lines.map(l => ({ ...l, components: l.components || [], groupKey: g.key })));
-  const categories = [{ key: "driver", name: "Driver", active: true }];
-  return { groups, lines, categories, selectedKeys: ["driver"], summary: requirementSummary(lines, categories), canConfigure, totals: { groups: 1, lines: 2, quantity: 30 }, options: { clients: ["A", "B"], articles: [], families: [], powers: [], orderNumbers: [] } };
-}
-it("affiche les composants et besoins, les manquants et non les livraisons", async () => {
-  vi.mocked(apiFetch).mockResolvedValue(materialResult(false));
-  render(<ArticleGroupingView filters={{ status: "", agency: "", priority: "" }} refreshKey={1} />);
-  const table = await screen.findByRole("table", { name: "Articles et besoins matières pour les lignes filtrées" });
-  expect(within(table).getByRole("columnheader", { name: "Driver" })).toBeTruthy();
-  expect(within(table).getByRole("columnheader", { name: "Total Driver" })).toBeTruthy();
-  expect(within(table).getByText("DX — Driver X")).toBeTruthy();
-  expect(within(table).getByText("Non renseigné")).toBeTruthy();
-  expect(within(table).getByText("10 + ? (1 ligne)")).toBeTruthy();
-  expect(within(table).queryByRole("columnheader", { name: "Livré" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Configurer les catégories" })).toBeNull();
-});
-it("permet à l'admin d'enregistrer une sélection vide pour tous", async () => {
-  vi.mocked(apiFetch).mockClear().mockResolvedValue(materialResult(true));
-  render(<ArticleGroupingView filters={{ status: "", agency: "", priority: "" }} refreshKey={1} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Configurer les catégories" }));
-  fireEvent.click(screen.getByRole("checkbox", { name: "Driver" }));
-  fireEvent.click(screen.getByRole("button", { name: "Enregistrer pour tous" }));
-  await waitFor(() => expect(apiFetch).toHaveBeenCalledWith("/api/orders/grouped-articles/config", expect.objectContaining({ method: "PUT", body: '{"selectedKeys":[]}' })));
-});
-it("envoie ensemble les filtres multiples, les tris et le périmètre du tableau commandes", async () => {
-  vi.mocked(apiFetch).mockClear().mockResolvedValue(materialResult(false));
-  render(<ArticleGroupingView filters={{ status: "EN_INSTANCE", agency: "7", priority: "URGENT" }} refreshKey={1} />);
-  await screen.findByRole("table", { name: "Articles et besoins matières pour les lignes filtrées" });
-  fireEvent.click(screen.getByRole("button", { name: "Filtres et tris multiples" }));
-  fireEvent.change(screen.getByLabelText("Affaire / besoin"), { target: { value: "École" } });
-  fireEvent.change(screen.getByLabelText("Champ de tri 1"), { target: { value: "quantity" } });
-  const select = screen.getByLabelText("Clients (choix multiples)") as HTMLSelectElement;
-  for (const option of select.options) option.selected = true;
-  fireEvent.change(select);
-  await waitFor(() => {
-    const url = String(vi.mocked(apiFetch).mock.calls.at(-1)?.[0]);
-    const sp = new URL(url, "http://test").searchParams;
-    expect(sp.getAll("clients")).toEqual(["A", "B"]);
-    expect(sp.get("affaire")).toBe("École");
-    expect(sp.get("agencyId")).toBe("7");
-    expect(JSON.parse(sp.get("sorts")!)[0].field).toBe("quantity");
+  const categories = [{ key: "driver", name: "Driver" }];
+  const sourceSummary = requirementSummary(lines, categories);
+  const totals = { groups: 2, lines: 2, quantity: 30, produced: 13, delivered: 7, remaining: 23 };
+  vi.mocked(apiFetch).mockClear().mockImplementation(async url => {
+    if (url.startsWith("/api/orders/grouped-articles?")) return { groups, totals } as never;
+    const params = new URL(url, "http://test").searchParams;
+    return { summary: filterMaterialSummary(sourceSummary, { materialQ: params.get("materialQ") || "", materialCategory: params.get("materialCategory") || "" }), categories, categoryOptions: categories, totals, options: { clients: ["A", "B"], articles: [], families: [], powers: [], orderNumbers: [] } } as never;
   });
+}
+it("conserve un tableau classique par groupe puis une synthèse distincte en dessous", async () => {
+  setupSeparatedTables();
+  render(<ArticleGroupingView filters={{ status: "", agency: "", priority: "" }} refreshKey={1} />);
+  const first = await screen.findByRole("table", { name: "Regroupement classique NETLUX" });
+  const second = screen.getByRole("table", { name: "Regroupement classique NETLUX 2.0" });
+  const synthesis = await screen.findByRole("table", { name: "Synthèse du besoin par catégorie et référence matière" });
+  expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(second.compareDocumentPosition(synthesis) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(within(first).getByRole("columnheader", { name: "Produit" })).toBeTruthy();
+  expect(within(first).getByRole("columnheader", { name: "Livré" })).toBeTruthy();
+  expect(within(first).queryByRole("columnheader", { name: "Driver" })).toBeNull();
+  expect(within(synthesis).getByRole("cell", { name: "Driver X" })).toBeTruthy();
+  expect(within(synthesis).getByRole("cell", { name: "Driver Y" })).toBeTruthy();
+});
+it("la recherche matière ne filtre ni ne recharge les regroupements classiques", async () => {
+  setupSeparatedTables();
+  render(<ArticleGroupingView filters={{ status: "EN_INSTANCE", agency: "7", priority: "URGENT" }} refreshKey={1} />);
+  await screen.findByRole("table", { name: "Regroupement classique NETLUX 2.0" });
+  const classicRequests = () => vi.mocked(apiFetch).mock.calls.filter(([url]) => url.startsWith("/api/orders/grouped-articles?")).length;
+  const before = classicRequests();
+  fireEvent.change(screen.getByLabelText("Recherche matière / référence"), { target: { value: "DX" } });
+  await waitFor(() => {
+    const table = screen.getByRole("table", { name: "Synthèse du besoin par catégorie et référence matière" });
+    expect(within(table).getByRole("cell", { name: "Driver X" })).toBeTruthy();
+    expect(within(table).queryByRole("cell", { name: "Driver Y" })).toBeNull();
+  });
+  expect(screen.getAllByRole("table", { name: /Regroupement classique/ })).toHaveLength(2);
+  expect(classicRequests()).toBe(before);
+  const lastUrl = String(vi.mocked(apiFetch).mock.calls.at(-1)?.[0]);
+  const sp = new URL(lastUrl, "http://test").searchParams;
+  expect(sp.get("materialQ")).toBe("DX"); expect(sp.get("agencyId")).toBe("7");
+});
+it("replier un groupe conserve les autres groupes et la synthèse", async () => {
+  setupSeparatedTables();
+  render(<ArticleGroupingView filters={{ status: "", agency: "", priority: "" }} refreshKey={1} />);
+  await screen.findByRole("table", { name: "Regroupement classique NETLUX 2.0" });
+  fireEvent.click(screen.getByRole("button", { name: /NETLUX 2\.0/ }));
+  expect(screen.queryByRole("table", { name: "Regroupement classique NETLUX 2.0" })).toBeNull();
+  expect(screen.getByRole("table", { name: "Regroupement classique NETLUX" })).toBeTruthy();
+  expect(screen.getByRole("table", { name: "Synthèse du besoin par catégorie et référence matière" })).toBeTruthy();
+});
+it("une erreur de synthèse ne masque pas les regroupements classiques", async () => {
+  setupSeparatedTables();
+  const previous = vi.mocked(apiFetch).getMockImplementation()!;
+  vi.mocked(apiFetch).mockImplementation((url, options) => url.startsWith("/api/orders/material-requirements?") ? Promise.reject(new Error("Synthèse indisponible")) : previous(url, options));
+  render(<ArticleGroupingView filters={{ status: "", agency: "", priority: "" }} refreshKey={1} />);
+  await screen.findByText("Synthèse indisponible");
+  expect(screen.getAllByRole("table", { name: /Regroupement classique/ })).toHaveLength(2);
 });

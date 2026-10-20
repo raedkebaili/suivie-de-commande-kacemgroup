@@ -34,7 +34,7 @@ export default function Sidebar({ user, activeTab, tabs, collapsed, onTabChange,
   const router = useRouter();
 
   return (
-    <aside className={`bg-gray-900 text-white flex flex-col shrink-0 transition-all duration-300 ${collapsed ? "w-[70px]" : "w-64"}`}>
+    <aside className={`bg-gray-900 text-white flex h-full min-h-0 flex-col shrink-0 overflow-hidden transition-all duration-300 ${collapsed ? "w-[70px]" : "w-64"}`}>
       {/* Logo */}
       <div className="flex items-center gap-3 px-4 h-16 border-b border-gray-700/50 shrink-0">
         <div className="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center shrink-0 font-bold text-white text-sm">KC</div>
@@ -47,7 +47,7 @@ export default function Sidebar({ user, activeTab, tabs, collapsed, onTabChange,
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto">
+      <nav className="flex-1 min-h-0 py-4 px-2 space-y-1 overflow-y-auto overscroll-contain">
         {tabs.map(tab => (
           <button key={tab.key} onClick={() => onTabChange(tab.key)}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-200 ${activeTab === tab.key ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25" : "text-gray-300 hover:bg-gray-800 hover:text-white"} ${collapsed ? "justify-center px-2" : ""}`}
@@ -59,7 +59,7 @@ export default function Sidebar({ user, activeTab, tabs, collapsed, onTabChange,
       </nav>
 
       {/* Bottom */}
-      <div className={`border-t border-gray-700/50 p-3 ${collapsed ? "px-2" : "px-4"}`}>
+      <div className={`shrink-0 border-t border-gray-700/50 p-3 ${collapsed ? "px-2" : "px-4"}`}>
         {/* Dark mode toggle */}
         <button onClick={onToggleDarkMode}
           className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm text-gray-400 hover:bg-gray-800 hover:text-yellow-400 transition-all mb-1 ${collapsed ? "justify-center px-2" : ""}`}

@@ -73,3 +73,16 @@ describe("besoin matière", () => {
     for (const query of ["sorts=oops", 'sorts={}', 'technical=[null]', "minQuantity=NaN", "dateFrom=2026-02-30", "dateFrom=2026-11-01&dateTo=2026-10-01", "minQuantity=5&maxQuantity=2", "completeness=bad"]) expect(() => parseRequirementFilters(new URLSearchParams(query))).toThrow();
   });
 });
+
+import { filterMaterialSummary, parseMaterialSummaryFilters } from "../material-requirements";
+it("filtre et trie les références après agrégation, sans changer les besoins sources", () => {
+  const source = requirementSummary([line(100, [component(1), component(2)]), line(20, [component(2)])], categories);
+  const filtered = filterMaterialSummary(source, { materialQ: "REF-2", minNeed: "110" });
+  expect(filtered).toHaveLength(1);
+  expect(filtered[0]).toMatchObject({ quantity: 120 });
+  expect(filtered[0].materials).toHaveLength(1);
+  expect(source[0].quantity).toBe(220);
+  expect(filterMaterialSummary(source, { materialSort: "quantity", materialDirection: "desc" })[0].materials.map(m => m.quantity)).toEqual([120, 100]);
+  expect(filterMaterialSummary(source, { materialCategory: "pcb" })).toEqual([]);
+  expect(() => parseMaterialSummaryFilters(new URLSearchParams("minNeed=100&maxNeed=2"))).toThrow();
+});
