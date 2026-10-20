@@ -6,6 +6,8 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { getUserFromHeaders } from "@/lib/auth";
 import { agencyScopeForUser } from "@/lib/agency-access";
 import { groupArticles, type GroupableItem } from "@/lib/article-grouping";
+import { readGroupingColumns } from "@/lib/article-grouping-columns-server";
+import { DEFAULT_GROUPING_COLUMNS, filterGroupingExportRow } from "@/lib/article-grouping-columns";
 import { catalogLabel } from "@/lib/article-family-catalog";
 
 /** Catalogue complet : les nouvelles désignations peuvent être reconnues sans affectation. */
@@ -49,6 +51,8 @@ export async function GET(request: NextRequest) {
   const where = conds.length > 0 ? and(...conds) : undefined;
 
   try {
+    const visibleColumns = format === "xlsx" ? await readGroupingColumns() : DEFAULT_GROUPING_COLUMNS;
+    if (format === "xlsx" && !visibleColumns.length) return NextResponse.json({ error: "Toutes les colonnes sont masquées par l’administrateur. Aucun tableau à exporter." }, { status: 400 });
     // Une seule requête jointe : pas de N+1
     const rows = await db
       .select({
@@ -122,12 +126,12 @@ export async function GET(request: NextRequest) {
       }));
 
       const wb = XLSX.utils.book_new();
-      const wsSum = XLSX.utils.json_to_sheet(summary);
-      wsSum["!cols"] = [{ wch: 38 }, { wch: 24 }, { wch: 50 }, { wch: 12 }, { wch: 10 }, { wch: 15 }, { wch: 10 }, { wch: 10 }, { wch: 14 }];
+      const wsSum = XLSX.utils.json_to_sheet(summary.map(row => filterGroupingExportRow(row, visibleColumns, true)));
+      wsSum["!cols"] = Array.from({ length: visibleColumns.length + 4 }, () => ({ wch: 24 }));
       XLSX.utils.book_append_sheet(wb, wsSum, "Synthèse par groupe");
 
-      const wsDet = XLSX.utils.json_to_sheet(detail);
-      wsDet["!cols"] = [{ wch: 10 }, { wch: 30 }, { wch: 38 }, { wch: 24 }, { wch: 16 }, { wch: 10 }, { wch: 22 }, { wch: 24 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 16 }];
+      const wsDet = XLSX.utils.json_to_sheet(detail.map(row => filterGroupingExportRow(row, visibleColumns)));
+      wsDet["!cols"] = Array.from({ length: visibleColumns.length + 2 }, () => ({ wch: 24 }));
       XLSX.utils.book_append_sheet(wb, wsDet, "Détail par article");
 
       const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;

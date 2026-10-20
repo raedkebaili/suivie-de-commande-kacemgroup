@@ -56,3 +56,17 @@ Le conteneur `.desktop-app-shell` est ancré au viewport (hauteur dynamique `100
 Tests de régression : tableaux distincts et ordre avant la synthèse, colonnes classiques et repli, filtres de synthèse indépendants, erreur isolée, calculs / agrégation / filtres, prise en compte de toutes les catégories malgré une ancienne configuration vide, cohérence JSON / Excel, authentification et périmètre agence.
 
 Test de défilement exécuté dans Chromium sur une fixture utilisant les vrais composants et le CSS compilé : 20 groupes, 600 lignes d'articles, 100 références matière, fenêtres de 1440×800 et 1440×480. Au bas de `main` (plus de 25 000 px défilés), la barre latérale reste entre 0 et la hauteur du viewport, la déconnexion reste visible, le document ne défile pas et le menu réduit garde sa largeur de 70 px. Cette fixture ne remplace pas une recette sur la base de production.
+
+## Colonnes classiques : réglage partagé par l’administrateur système
+
+Le bouton **Colonnes — affichage pour tous**, réservé au rôle `superadmin`, permet de cocher / décocher chacune des dix colonnes : Article, Puissance, Famille, Commandé, Affaire, Client, N° Cmd, Produit, Livré, Reste à livrer. **Tout afficher**, **Tout masquer**, **Enregistrer pour tous** et **Annuler** sont disponibles. Les changements restent un brouillon tant qu'ils ne sont pas enregistrés.
+
+- Configuration persistée dans `system_settings.article_grouping_visible_columns`, indépendante de l'ancienne sélection de catégories techniques. Aucune migration requise ; le paramètre est inclus dans les sauvegardes existantes.
+- Tous les utilisateurs authentifiés lisent la même règle ; seule l'API d'écriture Super Admin peut la modifier. Aucun réglage propre au navigateur ou à l'utilisateur ne la remplace.
+- Synchronisation légère de la configuration toutes les 30 secondes lorsque la page est visible, ainsi qu'au retour sur la page / au focus. Pas de rechargement des commandes à chaque vérification.
+- Par défaut ou si le paramètre stocké est invalide, toutes les colonnes classiques restent visibles. Une liste vide est un choix valide : les groupes restent présents avec une indication que leurs colonnes sont masquées, et l'admin peut toujours les réafficher.
+- En-têtes, cellules et sous-totaux restent alignés pour chaque combinaison. Les compteurs récapitulatifs correspondant aux colonnes masquées sont également masqués ; la répartition par puissance disparaît si Puissance est masquée.
+- L'export classique applique la même règle aux détails et aux totaux par groupe. Les métadonnées de regroupement restent présentes dans Excel ; les anciennes colonnes supplémentaires Date / État Production ne sont pas des colonnes sélectionnables et ne figurent plus dans cet export configurable. Si tout est masqué, aucun tableau vide n'est exporté.
+- La synthèse matière sous les regroupements et son export restent entièrement indépendants.
+
+Ce réglage est une préférence d'affichage partagée, **pas un mécanisme de confidentialité** : il ne retire aucun droit de lecture sur les données des commandes.

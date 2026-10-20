@@ -1,10 +1,12 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MaterialRequirementsSummary from "./MaterialRequirementsSummary";
 import { apiFetch } from "@/lib/api";
 import type { ArticleGroup, GroupedLine, PowerBreakdown } from "@/lib/article-grouping";
 import { UNCLASSIFIED_GROUP_KEY, type FamilySource } from "@/lib/article-family";
+
+import { GROUPING_COLUMNS, DEFAULT_GROUPING_COLUMNS, canonicalGroupingColumns, groupingCell, type GroupingColumnKey } from "@/lib/article-grouping-columns";
 
 const powerLabel = (power: number | null) => (power === null ? "Puissance non précisée" : `${power} W`);
 
@@ -27,7 +29,7 @@ function Metric({ label, value, tone }: { label: string; value: number; tone: st
 }
 
 /** Répartition par puissance d'un groupe : une puce par puissance */
-function PowerBreakdownBar({ breakdown }: { breakdown: PowerBreakdown[] }) {
+function PowerBreakdownBar({ breakdown, visible }: { breakdown: PowerBreakdown[]; visible: GroupingColumnKey[] }) {
   if (breakdown.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-2 px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
@@ -36,8 +38,8 @@ function PowerBreakdownBar({ breakdown }: { breakdown: PowerBreakdown[] }) {
         <span key={String(b.power)} className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-xs">
           <b className="text-gray-800 dark:text-gray-100">{powerLabel(b.power)}</b>
           <span className="text-gray-500 dark:text-gray-400">{b.lines} ligne(s)</span>
-          <Metric label="Commandé" value={b.quantity} tone="text-blue-700 dark:text-blue-400" />
-          <Metric label="Reste à livrer" value={b.remaining} tone="text-orange-600 dark:text-orange-400" />
+          {visible.includes("quantity") && <Metric label="Commandé" value={b.quantity} tone="text-blue-700 dark:text-blue-400" />}
+          {visible.includes("remaining") && <Metric label="Reste à livrer" value={b.remaining} tone="text-orange-600 dark:text-orange-400" />}
         </span>
       ))}
     </div>
@@ -76,6 +78,53 @@ function ArticleGroupingView({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
+
+  const [visibleColumns, setVisibleColumns] = useState<GroupingColumnKey[]>(DEFAULT_GROUPING_COLUMNS);
+  const [columnsReady, setColumnsReady] = useState(false);
+  const [canConfigure, setCanConfigure] = useState(false);
+  const [showColumns, setShowColumns] = useState(false);
+  const [draftColumns, setDraftColumns] = useState<GroupingColumnKey[]>(DEFAULT_GROUPING_COLUMNS);
+  const [savingColumns, setSavingColumns] = useState(false);
+  const [columnsMessage, setColumnsMessage] = useState("");
+  const [columnsError, setColumnsError] = useState("");
+  const columnsVersion = useRef(0);
+  const columns = GROUPING_COLUMNS.filter(column => visibleColumns.includes(column.key));
+  const shown = (key: GroupingColumnKey) => visibleColumns.includes(key);
+
+  // Règle commune en base : les sessions déjà ouvertes se mettent à jour aussi.
+  useEffect(() => {
+    const controller = new AbortController();
+    let running = false;
+    const refresh = async () => {
+      if (running || document.visibilityState === "hidden") return;
+      running = true;
+      const version = columnsVersion.current;
+      try {
+        const config = await apiFetch<{ visibleColumns: GroupingColumnKey[]; canConfigure: boolean }>("/api/orders/grouped-articles/columns", { signal: controller.signal });
+        if (!controller.signal.aborted && version === columnsVersion.current) {
+          setVisibleColumns(canonicalGroupingColumns(config.visibleColumns || DEFAULT_GROUPING_COLUMNS));
+          setCanConfigure(config.canConfigure === true); setColumnsReady(true); setColumnsError("");
+        }
+      } catch (err) { if (!controller.signal.aborted) setColumnsError(err instanceof Error ? err.message : "Lecture des colonnes impossible"); }
+      finally { running = false; }
+    };
+    void refresh();
+    const timer = window.setInterval(refresh, 30_000);
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => { controller.abort(); window.clearInterval(timer); document.removeEventListener("visibilitychange", refresh); window.removeEventListener("focus", refresh); };
+  }, []);
+
+  const saveColumns = async () => {
+    setSavingColumns(true); setColumnsMessage(""); columnsVersion.current++;
+    try {
+      const result = await apiFetch<{ visibleColumns: GroupingColumnKey[] }>("/api/orders/grouped-articles/columns", { method: "PUT", body: JSON.stringify({ visibleColumns: draftColumns }) });
+      columnsVersion.current++;
+      setVisibleColumns(result.visibleColumns); setShowColumns(false); setColumnsError("");
+      setColumnsMessage("Affichage enregistré pour tous les utilisateurs. Les sessions ouvertes se mettent à jour sous 30 secondes ou au retour sur la page.");
+    } catch (err) { setColumnsMessage(err instanceof Error ? err.message : "Enregistrement impossible"); }
+    finally { setSavingColumns(false); }
+  };
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSearch(searchDraft), 180);
@@ -158,14 +207,32 @@ function ArticleGroupingView({
           <input type="text" value={searchDraft} onChange={e => setSearchDraft(e.target.value)} placeholder="🔍 Filtrer article, affaire, client..."
             className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm w-56 text-gray-700 dark:text-gray-200" />
           <button onClick={load} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg text-sm hover:bg-gray-300">🔄 Actualiser</button>
-          <button onClick={exportXlsx} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">📤 Exporter</button>
+          <button onClick={exportXlsx} disabled={!columnsReady || !columns.length} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">📤 Exporter</button>
+          {canConfigure && <button onClick={() => { setDraftColumns([...visibleColumns]); setShowColumns(v => !v); setColumnsMessage(""); }} aria-expanded={showColumns} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm">Colonnes — affichage pour tous</button>}
         </>}
       </div>
+
+      {columnsMessage && <p role="status" className="mb-3 text-sm text-blue-700 dark:text-blue-300">{columnsMessage}</p>}
+      {columnsError && <p role="alert" className="mb-3 text-sm text-red-700 dark:text-red-300">{columnsError}</p>}
+      {open && showColumns && canConfigure && <div className="mb-4 p-4 rounded-xl border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-gray-900">
+        <h3 className="font-semibold text-sm">Colonnes des tableaux de regroupement — règle commune à tous</h3>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Choisissez les colonnes visibles dans tous les groupes. La synthèse matière en dessous reste indépendante.</p>
+        <fieldset disabled={savingColumns} className="flex flex-wrap gap-4 mb-3">
+          <legend className="sr-only">Colonnes visibles</legend>
+          {GROUPING_COLUMNS.map(column => <label key={column.key} className="flex gap-2 items-center text-sm"><input type="checkbox" checked={draftColumns.includes(column.key)} onChange={event => setDraftColumns(previous => event.target.checked ? canonicalGroupingColumns([...previous, column.key]) : previous.filter(key => key !== column.key))} />{column.label}</label>)}
+        </fieldset>
+        <div className="flex flex-wrap gap-2 text-sm">
+          <button disabled={savingColumns} onClick={() => setDraftColumns([...DEFAULT_GROUPING_COLUMNS])} className="border rounded-lg px-3 py-2">Tout afficher</button>
+          <button disabled={savingColumns} onClick={() => setDraftColumns([])} className="border rounded-lg px-3 py-2">Tout masquer</button>
+          <button disabled={savingColumns} onClick={saveColumns} className="bg-blue-600 text-white rounded-lg px-3 py-2">{savingColumns ? "Enregistrement…" : "Enregistrer pour tous"}</button>
+          <button disabled={savingColumns} onClick={() => setShowColumns(false)} className="border rounded-lg px-3 py-2">Annuler</button>
+        </div>
+      </div>}
 
       {open && (
         error ? (
           <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">{error}</div>
-        ) : loading ? (
+        ) : loading || !columnsReady ? (
           <div className="flex justify-center py-8"><svg className="animate-spin w-6 h-6 text-blue-600" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg></div>
         ) : visibleGroups.length === 0 ? (
           <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 py-8 text-center text-sm text-gray-400">Aucun article à regrouper</div>
@@ -184,30 +251,21 @@ function ArticleGroupingView({
                     <OriginBadge source={groupOrigin(g.lines)} />
                     <div className="flex-1" />
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                      <Metric label="Commandé" value={g.totalQuantity} tone="text-blue-700 dark:text-blue-400" />
-                      <Metric label="Produit" value={g.totalProduced} tone="text-gray-700 dark:text-gray-200" />
-                      <Metric label="Livré" value={g.totalDelivered} tone="text-gray-700 dark:text-gray-200" />
-                      <Metric label="Reste à livrer" value={g.totalRemaining} tone="text-orange-600 dark:text-orange-400" />
+                      {shown("quantity") && <Metric label="Commandé" value={g.totalQuantity} tone="text-blue-700 dark:text-blue-400" />}
+                      {shown("producedQty") && <Metric label="Produit" value={g.totalProduced} tone="text-gray-700 dark:text-gray-200" />}
+                      {shown("deliveredQty") && <Metric label="Livré" value={g.totalDelivered} tone="text-gray-700 dark:text-gray-200" />}
+                      {shown("remaining") && <Metric label="Reste à livrer" value={g.totalRemaining} tone="text-orange-600 dark:text-orange-400" />}
                     </div>
                   </button>
 
                   {!isCollapsed && (
                     <>
-                    <PowerBreakdownBar breakdown={g.powerBreakdown} />
-                    <div className="overflow-x-auto">
+                    {shown("power") && <PowerBreakdownBar breakdown={g.powerBreakdown} visible={visibleColumns} />}
+                    {!columns.length ? <p className="p-4 text-sm text-gray-500 dark:text-gray-400">Toutes les colonnes de ce regroupement sont masquées par l’administrateur.</p> : <div className="overflow-x-auto">
                       <table aria-label={`Regroupement classique ${g.key}`} className="w-full text-xs">
                         <thead>
                           <tr className="bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700 text-left">
-                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Article</th>
-                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Puissance</th>
-                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Famille</th>
-                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300 text-right" title="Quantité commandée">Commandé</th>
-                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Affaire</th>
-                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Client</th>
-                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">N° Cmd</th>
-                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300 text-right" title="Quantité produite">Produit</th>
-                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300 text-right" title="Quantité livrée">Livré</th>
-                            <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300 text-right">Reste à livrer</th>
+                            {columns.map(column => <th key={column.key} scope="col" className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">{column.label}</th>)}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -216,34 +274,20 @@ function ArticleGroupingView({
                             const newArticle = i === 0 || l.articleName !== g.lines[i - 1].articleName;
                             return (
                               <tr key={`${g.key}-${i}`} className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 ${newArticle && i > 0 ? "border-t-2 border-t-gray-300 dark:border-t-gray-600" : ""}`}>
-                                <td className={`px-3 py-1.5 ${newArticle ? "font-semibold text-gray-800 dark:text-gray-100" : "text-gray-500 dark:text-gray-400"}`}>
-                                  {l.articleName}
-                                </td>
-                                <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300 whitespace-nowrap">{l.power === null ? <span className="text-gray-400 italic">—</span> : `${l.power} W`}</td>
-                                <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300">{l.familyCategory || <span className="text-gray-400 italic">Non définie dans le catalogue</span>}</td>
-                                <td className="px-3 py-1.5 text-right font-bold text-blue-700 dark:text-blue-400">{l.quantity}</td>
-                                <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300">{l.affaire || <span className="text-gray-400 italic">—</span>}</td>
-                                <td className="px-3 py-1.5 text-gray-500 dark:text-gray-400">{l.clientName || "-"}</td>
-                                <td className="px-3 py-1.5 text-gray-500 dark:text-gray-400 font-mono text-[10px]">{l.orderNumber || "-"}</td>
-                                <td className="px-3 py-1.5 text-right text-gray-600 dark:text-gray-300">{l.producedQty}</td>
-                                <td className="px-3 py-1.5 text-right text-gray-600 dark:text-gray-300">{l.deliveredQty}</td>
-                                <td className="px-3 py-1.5 text-right font-semibold text-orange-600 dark:text-orange-400">{l.remaining}</td>
+                                {columns.map(column => <td key={column.key} className={`px-3 py-1.5 ${["quantity", "producedQty", "deliveredQty", "remaining"].includes(column.key) ? "text-right font-semibold" : ""} ${newArticle ? "text-gray-800 dark:text-gray-100" : "text-gray-500 dark:text-gray-400"}`}>{groupingCell(l, column.key)}</td>)}
                               </tr>
                             );
                           })}
-                          <tr className="bg-slate-50 dark:bg-gray-800 font-bold border-t-2 border-gray-300 dark:border-gray-600">
-                            <td className="px-3 py-1.5 text-gray-700 dark:text-gray-200">Total « {g.key} »</td>
-                            <td className="px-3 py-1.5"></td>
-                            <td className="px-3 py-1.5"></td>
-                            <td className="px-3 py-1.5 text-right text-blue-700 dark:text-blue-400">{g.totalQuantity}</td>
-                            <td className="px-3 py-1.5" colSpan={3}></td>
-                            <td className="px-3 py-1.5 text-right text-gray-700 dark:text-gray-200">{g.totalProduced}</td>
-                            <td className="px-3 py-1.5 text-right text-gray-700 dark:text-gray-200">{g.totalDelivered}</td>
-                            <td className="px-3 py-1.5 text-right text-orange-600 dark:text-orange-400">{g.totalRemaining}</td>
+                          <tr aria-label={`Total ${g.key}`} className="bg-slate-50 dark:bg-gray-800 font-bold border-t-2 border-gray-300 dark:border-gray-600">
+                            {columns.map((column, index) => {
+                              const values: Partial<Record<GroupingColumnKey, number>> = { quantity: g.totalQuantity, producedQty: g.totalProduced, deliveredQty: g.totalDelivered, remaining: g.totalRemaining };
+                              const labelColumn = columns.find(c => !["quantity", "producedQty", "deliveredQty", "remaining"].includes(c.key));
+                              return <td key={column.key} className="px-3 py-1.5 text-gray-700 dark:text-gray-200">{index === 0 && <span className="sr-only">Total du groupe </span>}{values[column.key] ?? (column.key === labelColumn?.key ? `Total « ${g.key} »` : "")}</td>;
+                            })}
                           </tr>
                         </tbody>
                       </table>
-                    </div>
+                    </div>}
                     </>
                   )}
                 </div>
@@ -256,10 +300,10 @@ function ArticleGroupingView({
                 <span className="font-bold">TOTAL GÉNÉRAL</span>
                 <span className="text-slate-300">{totals.groups} groupes · {totals.lines} lignes</span>
                 <div className="flex-1" />
-                <span>Commandé : <b className="text-blue-300">{totals.quantity}</b></span>
-                <span>Produit : <b className="text-yellow-300">{totals.produced}</b></span>
-                <span>Livré : <b className="text-green-300">{totals.delivered}</b></span>
-                <span>Reste : <b className="text-orange-300">{totals.remaining}</b></span>
+                {shown("quantity") && <span>Commandé : <b className="text-blue-300">{totals.quantity}</b></span>}
+                {shown("producedQty") && <span>Produit : <b className="text-yellow-300">{totals.produced}</b></span>}
+                {shown("deliveredQty") && <span>Livré : <b className="text-green-300">{totals.delivered}</b></span>}
+                {shown("remaining") && <span>Reste : <b className="text-orange-300">{totals.remaining}</b></span>}
               </div>
             )}
           </div>

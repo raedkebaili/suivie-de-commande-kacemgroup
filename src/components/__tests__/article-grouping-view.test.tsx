@@ -81,3 +81,67 @@ it("une erreur de synthèse ne masque pas les regroupements classiques", async (
   await screen.findByText("Synthèse indisponible");
   expect(screen.getAllByRole("table", { name: /Regroupement classique/ })).toHaveLength(2);
 });
+
+import { DEFAULT_GROUPING_COLUMNS } from "@/lib/article-grouping-columns";
+function setupColumnConfig(canConfigure = true) {
+  setupSeparatedTables();
+  const source = vi.mocked(apiFetch).getMockImplementation()!;
+  let visibleColumns = [...DEFAULT_GROUPING_COLUMNS];
+  vi.mocked(apiFetch).mockImplementation(async (url, options) => {
+    if (url === "/api/orders/grouped-articles/columns") {
+      if (options?.method === "PUT") visibleColumns = JSON.parse(String(options.body)).visibleColumns;
+      return { visibleColumns, canConfigure } as never;
+    }
+    return source(url, options);
+  });
+  return { update: (columns: typeof visibleColumns) => { visibleColumns = columns; } };
+}
+it("l’admin masque les colonnes de tous les groupes sans toucher à la synthèse", async () => {
+  setupColumnConfig();
+  render(<ArticleGroupingView filters={{ status: "", agency: "", priority: "" }} refreshKey={1} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Colonnes — affichage pour tous" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Produit" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Livré" }));
+  fireEvent.click(screen.getByRole("button", { name: "Enregistrer pour tous" }));
+  await waitFor(() => {
+    for (const table of screen.getAllByRole("table", { name: /Regroupement classique/ })) {
+      expect(within(table).queryByRole("columnheader", { name: "Produit" })).toBeNull();
+      expect(within(table).queryByRole("columnheader", { name: "Livré" })).toBeNull();
+      expect(within(table).getAllByRole("columnheader")).toHaveLength(8);
+      for (const row of within(table).getAllByRole("row").slice(1)) expect(within(row).getAllByRole("cell")).toHaveLength(8);
+    }
+  });
+  expect(screen.getByRole("table", { name: "Synthèse du besoin par catégorie et référence matière" })).toBeTruthy();
+});
+it("les autres utilisateurs reçoivent les colonnes communes sans commande d’édition", async () => {
+  const config = setupColumnConfig(false); config.update(["quantity"]);
+  render(<ArticleGroupingView filters={{ status: "", agency: "", priority: "" }} refreshKey={1} />);
+  const table = await screen.findByRole("table", { name: "Regroupement classique NETLUX" });
+  expect(within(table).getAllByRole("columnheader")).toHaveLength(1);
+  expect(within(table).getByRole("columnheader", { name: "Commandé" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Colonnes — affichage pour tous" })).toBeNull();
+});
+it("tout masquer reste réversible et laisse la synthèse visible", async () => {
+  setupColumnConfig();
+  render(<ArticleGroupingView filters={{ status: "", agency: "", priority: "" }} refreshKey={1} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Colonnes — affichage pour tous" }));
+  fireEvent.click(screen.getByRole("button", { name: "Tout masquer" }));
+  fireEvent.click(screen.getByRole("button", { name: "Enregistrer pour tous" }));
+  await waitFor(() => expect(screen.queryAllByRole("table", { name: /Regroupement classique/ })).toHaveLength(0));
+  expect(screen.getByRole("table", { name: "Synthèse du besoin par catégorie et référence matière" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Colonnes — affichage pour tous" }));
+  fireEvent.click(screen.getByRole("button", { name: "Tout afficher" }));
+  fireEvent.click(screen.getByRole("button", { name: "Enregistrer pour tous" }));
+  await waitFor(() => expect(screen.getAllByRole("table", { name: /Regroupement classique/ })).toHaveLength(2));
+});
+it("une session ouverte se synchronise au retour sur la page sans recharger les articles", async () => {
+  const config = setupColumnConfig(false);
+  render(<ArticleGroupingView filters={{ status: "", agency: "", priority: "" }} refreshKey={1} />);
+  const table = await screen.findByRole("table", { name: "Regroupement classique NETLUX" });
+  const requests = () => vi.mocked(apiFetch).mock.calls.filter(([url]) => url.startsWith("/api/orders/grouped-articles?")).length;
+  const before = requests(); config.update(["articleName"]);
+  fireEvent(window, new Event("focus"));
+  await waitFor(() => expect(within(table).getAllByRole("columnheader")).toHaveLength(1));
+  expect(within(table).getByRole("columnheader", { name: "Article" })).toBeTruthy();
+  expect(requests()).toBe(before);
+});
