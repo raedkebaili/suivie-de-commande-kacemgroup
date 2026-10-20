@@ -21,6 +21,8 @@ import { createArticleRecognizer } from "./article-recognition";
 import type { ArticleFamilyCatalogEntry } from "./article-family-catalog";
 
 export type GroupableItem = {
+  itemId?: number;
+  components?: import("./material-requirements").TechnicalSpec[];
   articleName: string;
   quantity: number;
   producedQty?: number | null;
