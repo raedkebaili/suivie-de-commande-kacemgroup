@@ -145,3 +145,28 @@ it("une session ouverte se synchronise au retour sur la page sans recharger les 
   expect(within(table).getByRole("columnheader", { name: "Article" })).toBeTruthy();
   expect(requests()).toBe(before);
 });
+
+it.each([
+  DEFAULT_GROUPING_COLUMNS,
+  ["articleName", "quantity", "orderNumber", "remaining"] as typeof DEFAULT_GROUPING_COLUMNS,
+  ["quantity", "producedQty", "deliveredQty"] as typeof DEFAULT_GROUPING_COLUMNS,
+  ["quantity"] as typeof DEFAULT_GROUPING_COLUMNS,
+])("centre chaque titre, valeur et sous-total sur la même colonne après masquage (%j)", async (...keys) => {
+  const config = setupColumnConfig(false);
+  config.update(keys as typeof DEFAULT_GROUPING_COLUMNS);
+  render(<ArticleGroupingView filters={{ status: "", agency: "", priority: "" }} refreshKey={1} />);
+  const table = await screen.findByRole("table", { name: "Regroupement classique NETLUX" });
+  const headers = within(table).getAllByRole("columnheader");
+  expect(headers.map(header => header.getAttribute("data-column"))).toEqual(keys);
+  for (const row of within(table).getAllByRole("row")) {
+    const cells = within(row).queryAllByRole("cell").length ? within(row).getAllByRole("cell") : within(row).getAllByRole("columnheader");
+    expect(cells).toHaveLength(headers.length);
+    for (const [index, cell] of cells.entries()) {
+      expect(cell.getAttribute("data-column")).toBe(headers[index].getAttribute("data-column"));
+      expect(cell.classList.contains("text-center")).toBe(true);
+      expect(cell.classList.contains("align-middle")).toBe(true);
+      expect(cell.classList.contains("text-right")).toBe(false);
+      expect(cell.getAttribute("colspan")).toBeNull();
+    }
+  }
+});

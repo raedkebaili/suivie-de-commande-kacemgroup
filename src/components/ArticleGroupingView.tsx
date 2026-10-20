@@ -262,10 +262,10 @@ function ArticleGroupingView({
                     <>
                     {shown("power") && <PowerBreakdownBar breakdown={g.powerBreakdown} visible={visibleColumns} />}
                     {!columns.length ? <p className="p-4 text-sm text-gray-500 dark:text-gray-400">Toutes les colonnes de ce regroupement sont masquées par l’administrateur.</p> : <div className="overflow-x-auto">
-                      <table aria-label={`Regroupement classique ${g.key}`} className="w-full text-xs">
+                      <table aria-label={`Regroupement classique ${g.key}`} className="w-full text-xs text-center">
                         <thead>
-                          <tr className="bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700 text-left">
-                            {columns.map(column => <th key={column.key} scope="col" className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">{column.label}</th>)}
+                          <tr className="bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700 text-center">
+                            {columns.map(column => <th key={column.key} data-column={column.key} scope="col" className="px-3 py-2 text-center align-middle font-semibold text-gray-600 dark:text-gray-300">{column.label}</th>)}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -274,7 +274,7 @@ function ArticleGroupingView({
                             const newArticle = i === 0 || l.articleName !== g.lines[i - 1].articleName;
                             return (
                               <tr key={`${g.key}-${i}`} className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 ${newArticle && i > 0 ? "border-t-2 border-t-gray-300 dark:border-t-gray-600" : ""}`}>
-                                {columns.map(column => <td key={column.key} className={`px-3 py-1.5 ${["quantity", "producedQty", "deliveredQty", "remaining"].includes(column.key) ? "text-right font-semibold" : ""} ${newArticle ? "text-gray-800 dark:text-gray-100" : "text-gray-500 dark:text-gray-400"}`}>{groupingCell(l, column.key)}</td>)}
+                                {columns.map(column => <td key={column.key} data-column={column.key} className={`px-3 py-1.5 text-center align-middle ${["quantity", "producedQty", "deliveredQty", "remaining"].includes(column.key) ? "font-semibold tabular-nums" : ""} ${newArticle ? "text-gray-800 dark:text-gray-100" : "text-gray-500 dark:text-gray-400"}`}>{groupingCell(l, column.key)}</td>)}
                               </tr>
                             );
                           })}
@@ -282,7 +282,7 @@ function ArticleGroupingView({
                             {columns.map((column, index) => {
                               const values: Partial<Record<GroupingColumnKey, number>> = { quantity: g.totalQuantity, producedQty: g.totalProduced, deliveredQty: g.totalDelivered, remaining: g.totalRemaining };
                               const labelColumn = columns.find(c => !["quantity", "producedQty", "deliveredQty", "remaining"].includes(c.key));
-                              return <td key={column.key} className="px-3 py-1.5 text-gray-700 dark:text-gray-200">{index === 0 && <span className="sr-only">Total du groupe </span>}{values[column.key] ?? (column.key === labelColumn?.key ? `Total « ${g.key} »` : "")}</td>;
+                              return <td key={column.key} data-column={column.key} className="px-3 py-1.5 text-center align-middle tabular-nums text-gray-700 dark:text-gray-200">{index === 0 && <span className="sr-only">Total du groupe </span>}{values[column.key] ?? (column.key === labelColumn?.key ? `Total « ${g.key} »` : "")}</td>;
                             })}
                           </tr>
                         </tbody>
