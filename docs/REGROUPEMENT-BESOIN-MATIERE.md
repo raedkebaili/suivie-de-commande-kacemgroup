@@ -13,14 +13,40 @@ Dans **Commandes**, les regroupements classiques sont rétablis **au-dessus**, a
 
 ## Calcul
 
-Règle confirmée : **une unité de chaque matière sélectionnée par article commandé**. Exemple : 100 articles avec driver DX et lentille LX → 100 DX et 100 LX. Deux références différentes d'une catégorie ne sont jamais confondues ; les doublons d'une même sélection sont dédupliqués sur une ligne.
+La synthèse identifie désormais les **matières à engager pour les commandes non traitées**, et non la consommation historique de toutes les commandes.
 
-- Besoin brut : pas de déduction du stock, de la production, des livraisons ou des achats.
-- Toutes les catégories ayant des matières renseignées sont couvertes, y compris les références historiques. L'ancienne configuration des colonnes techniques ne peut plus cacher une matière de la synthèse.
+### Périmètre obligatoire, appliqué côté serveur
+
+Une commande n'est éligible que si :
+
+1. Son état commercial est **PREVISION**, **BON_COMMANDE** ou **SUR_STOCK** (besoin interne).
+2. Son état de production est **EN_INSTANCE** : elle n'est ni en production, ni livrée, ni annulée. Les états inconnus / absents ne sont pas supposés non traités.
+3. Aucun de ses articles ne possède de quantité déjà produite ou livrée, même partielle. Les cumuls non nuls incohérents (négatifs) empêchent aussi de la considérer comme vierge de traitement.
+4. Aucun lot réel positif de production ou d'expédition n'existe pour cette commande, même si les cumuls n'ont pas encore été mis à jour.
+5. Aucune entrée de planning de production n'est **EN_COURS** ou **TERMINE**, et aucune n'a déjà appliqué une quantité ou une date d'application.
+
+La règle s'applique à la **commande entière**, pas seulement à l'article déjà produit. Une commande partiellement commencée et ses autres articles ne sont pas présentés comme un nouveau besoin non traité. Cette synthèse ne calcule pas le reste matière des encours ; ceux-ci relèvent du suivi de production.
+
+« Prête à livrer » étant aussi déduit des quantités dans l'application, les cumuls sont contrôlés : une commande entièrement produite ne réapparaît pas si son état est resté EN_INSTANCE. Les états commerciaux et de production étant indépendants, un Bon de commande ne suffit pas à lui seul à constituer un besoin.
+
+Un planning **EN_ATTENTE** ne prouve pas un démarrage et n'exclut pas la commande. De même, **SUSPENDU** seul peut correspondre à un blocage avant démarrage (ex. manque de matière) ; **ANNULE** seul peut être un planning annulé avant traitement. Ces états ne retirent pas le besoin si la commande reste EN_INSTANCE sans preuve de production / livraison. Dès qu'un cumul, un lot ou une application de production existe, l'exclusion s'applique aussi à ces cas.
+
+Les articles de quantité nulle ou négative sont exclus. Les droits d'accès aux agences sont conservés. Les filtres utilisateur s'ajoutent à cette règle obligatoire : aucun filtre, même un état « Livrée », ne peut réintroduire une commande exclue. Les listes de choix, compteurs, sous-totaux et exports partagent le même périmètre.
+
+### Conversion en matières
+
+Pour les seuls articles éligibles : **une unité de chaque matière sélectionnée par article commandé**. Exemple : 100 articles non traités avec driver DX et lentille LX → 100 DX et 100 LX. Deux références différentes d'une catégorie ne sont jamais confondues ; les doublons d'une même sélection sont dédupliqués sur une ligne.
+
+- Ce besoin à engager n'est pas un calcul de **stock net** : aucun stock matière disponible, achat en cours ou réservation n'est déduit sans gestion d'affectation correspondante.
+- Toutes les catégories ayant des matières renseignées sur les articles éligibles sont couvertes, y compris les références historiques. L'ancienne configuration des colonnes techniques ne peut pas masquer une matière de la synthèse.
 - Les snapshots des spécifications sont conservés même si une matière est ensuite désactivée.
 - Une ancienne saisie textuelle non vide est une sélection unique, non découpée arbitrairement aux virgules, signalée « ancienne saisie à vérifier ». Les composants dynamiques priment sur le texte ancien de la même catégorie.
 - Une catégorie non renseignée n'est pas un zéro. Les lignes sources manquantes sont indiquées sur le sous-total de la catégorie ; « + ? » signifie que le besoin reste partiel.
 - Les catégories de caractéristiques (couleur, classe électrique…) comptent des occurrences de spécification ; elles ne correspondent pas forcément à des pièces à acheter.
+
+### Actualisation
+
+Le besoin est recalculé depuis la base à chaque lecture et export, après rafraîchissement des commandes, au retour sur la page, à la réouverture de la synthèse et automatiquement toutes les **30 secondes** lorsque la page est active et la synthèse ouverte. Un changement de production fait depuis un autre poste est donc pris en compte sans modifier les tableaux classiques. Les filtres préfixés de Commandes (`comm:*`, `prod:*`, `planning:*`) sont transmis à la synthèse dans leur champ approprié.
 
 ## Recherches, filtres et tri propres à la synthèse
 
@@ -52,6 +78,8 @@ Le conteneur `.desktop-app-shell` est ancré au viewport (hauteur dynamique `100
 - La version mobile autonome n'est pas modifiée. Les règles d'impression rétablissent un flux normal, sans tronquer les tableaux.
 
 ## Validation
+
+Tests du prédicat SQL réel dans PostgreSQL embarqué (PGlite, dépendance de développement uniquement) : trois types commerciaux admis, états de production exclus, quantités partielles / complètes, fratries d’articles, lots avec cumuls non actualisés, planning en attente / en cours / terminé / suspendu, filtre utilisateur incapable de contourner la règle, transitions et droits agence. Aucune base de production n’est utilisée par ces tests.
 
 Tests de régression : tableaux distincts et ordre avant la synthèse, colonnes classiques et repli, filtres de synthèse indépendants, erreur isolée, calculs / agrégation / filtres, prise en compte de toutes les catégories malgré une ancienne configuration vide, cohérence JSON / Excel, authentification et périmètre agence.
 

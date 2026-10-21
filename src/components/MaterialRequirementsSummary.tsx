@@ -1,4 +1,5 @@
 "use client";
+import { MATERIAL_DEMAND_RULE, MATERIAL_DEMAND_CALCULATION } from "@/lib/material-demand-policy";
 import { memo, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type { RequirementCategory, RequirementFilters, MaterialSummaryFilters, requirementSummary } from "@/lib/material-requirements";
@@ -21,7 +22,10 @@ function MaterialRequirementsSummary({ filters, refreshKey }: { filters: { statu
   const [reload, setReload] = useState(0);
   const query = useMemo(() => {
     const sp = new URLSearchParams();
-    if (filters.status) sp.set("status", filters.status);
+    if (filters.status.startsWith("comm:")) sp.set("status", filters.status.slice(5));
+    else if (filters.status.startsWith("prod:")) sp.set("productionStatus", filters.status.slice(5));
+    else if (filters.status.startsWith("planning:")) sp.set("planningStatus", filters.status.slice(9));
+    else if (filters.status) sp.set("status", filters.status);
     if (filters.agency) sp.set("agencyId", filters.agency);
     if (filters.priority) sp.set("priority", filters.priority);
     for (const [key, value] of Object.entries(local)) {
@@ -42,6 +46,14 @@ function MaterialRequirementsSummary({ filters, refreshKey }: { filters: { statu
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [requestQuery, refreshKey, reload]);
+  // Les transitions faites par un autre poste doivent également retirer les besoins traités.
+  useEffect(() => {
+    const refresh = () => { if (open && document.visibilityState !== "hidden") setReload(value => value + 1); };
+    const timer = window.setInterval(refresh, 30_000);
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", refresh); window.removeEventListener("focus", refresh); };
+  }, [open]);
   const categories = data?.categories || [];
   const summary = data?.summary || [];
   const updating = loading || query !== requestQuery;
@@ -59,12 +71,16 @@ function MaterialRequirementsSummary({ filters, refreshKey }: { filters: { statu
   };
   return <section aria-label="Synthèse du besoin par catégorie et référence matière" className="mt-8 border-t-2 border-blue-200 dark:border-blue-900 pt-5 text-gray-800 dark:text-gray-100">
     <div className="flex flex-wrap gap-2 items-center mb-3">
-      <button className="font-bold text-base text-left" onClick={() => setOpen(v => !v)} aria-expanded={open}>{open ? "▾" : "▸"} Synthèse du besoin par catégorie et référence matière</button>
+      <button className="font-bold text-base text-left" onClick={() => { setOpen(v => !v); if (!open) setReload(value => value + 1); }} aria-expanded={open}>{open ? "▾" : "▸"} Synthèse du besoin par catégorie et référence matière</button>
       <div className="flex-1" />
       {open && <><button className={button} onClick={() => setShowFilters(v => !v)} aria-expanded={showFilters}>Filtrer les articles sources</button><button className={button} onClick={() => setReload(n => n + 1)} disabled={loading}>Actualiser la synthèse</button><button className={`${button} bg-emerald-600 text-white hover:bg-emerald-700`} disabled={updating || !!error || !data || exporting} onClick={exportXlsx}>{exporting ? "Export…" : "Exporter la synthèse"}</button></>}
     </div>
     {open && <>
-      <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Toutes les matières renseignées dans les détails techniques des articles sont prises en compte. Besoin brut = quantité commandée × 1 unité de chaque matière sélectionnée, sans déduction du stock ou des livraisons. Les filtres ci-dessous agissent uniquement sur cette synthèse : les tableaux classiques au-dessus sont conservés.</p>
+      <div className="text-xs text-gray-600 dark:text-gray-300 mb-3 space-y-1">
+        <p><b>Besoin matière à engager :</b> {MATERIAL_DEMAND_RULE}</p>
+        <p>{MATERIAL_DEMAND_CALCULATION}</p>
+        <p>Actualisation automatique toutes les 30 secondes lorsque la page est active et la synthèse ouverte, au retour sur la page et après rafraîchissement des commandes. Les filtres ci-dessous ne modifient pas les tableaux classiques au-dessus.</p>
+      </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 p-3 rounded-xl bg-blue-50 dark:bg-gray-900 mb-3">
         <label className="text-xs font-medium">Recherche matière / référence<input className={control} value={local.materialQ || ""} onChange={e => change("materialQ", e.target.value)} placeholder="Référence ou désignation de matière…" /></label>
         <label className="text-xs font-medium">Catégorie matière<select className={control} value={local.materialCategory || ""} onChange={e => change("materialCategory", e.target.value)}><option value="">Toutes les catégories renseignées</option>{(data?.categoryOptions || categories).map(c => <option key={c.key} value={c.key}>{c.name}</option>)}</select></label>
@@ -90,14 +106,14 @@ function MaterialRequirementsSummary({ filters, refreshKey }: { filters: { statu
       {error && <p role="alert" className="p-3 mb-3 rounded-lg bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-200">{error}</p>}
       {updating && <p role="status" className="text-sm text-blue-600 mb-2">Actualisation de la synthèse…</p>}
       {!error && data && <>
-        <p className="text-xs text-gray-500 mb-2">{summary.reduce((sum, c) => sum + c.materials.length, 0)} référence(s) affichée(s) · {data.totals?.lines || 0} ligne(s) d’articles sources · Périmètre hérité : statut / agence / priorité du tableau Commandes.</p>
+        <p className="text-xs text-gray-500 mb-2">{summary.reduce((sum, c) => sum + c.materials.length, 0)} référence(s) affichée(s) · {data.totals?.lines || 0} ligne(s) d’articles de commandes non traitées · Périmètre hérité : statut / agence / priorité du tableau Commandes.</p>
         <div className={`overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 ${updating ? "opacity-60" : ""}`} aria-busy={updating}>
           <table className="w-full text-sm text-left"><caption className="sr-only">Synthèse du besoin par catégorie et référence matière</caption>
             <thead className="bg-gray-100 dark:bg-gray-800"><tr>{["Catégorie", "Référence", "Matière", "Besoin (unités)"].map(label => <th key={label} scope="col" className="p-3">{label}</th>)}</tr></thead>
             <tbody>{summary.flatMap(category => [
               ...category.materials.map((material, index) => <tr key={`${category.key}-${index}`} className="border-b border-gray-100 dark:border-gray-800 hover:bg-blue-50 dark:hover:bg-gray-800"><td className="p-3">{category.name}</td><td className="p-3 font-mono text-xs">{material.reference || "Sans référence"}</td><td className="p-3">{material.label}{material.legacy && <span className="block text-xs text-amber-700 dark:text-amber-300">Saisie ancienne à vérifier</span>}</td><td className="p-3 font-semibold text-blue-800 dark:text-blue-200">{material.quantity.toLocaleString("fr-FR")}</td></tr>),
               <tr key={`${category.key}-total`} className="bg-blue-50 dark:bg-blue-950 font-semibold"><td colSpan={3} className="p-3">Total {category.name} — matières affichées{category.missingLines > 0 && <span className="block text-xs font-normal text-amber-700 dark:text-amber-300">{category.missingLines} ligne(s) d’articles sources sans cette catégorie : besoin non renseigné, non assimilé à zéro.</span>}</td><td className="p-3">{category.quantity.toLocaleString("fr-FR")}{category.missingLines ? " + ?" : ""}</td></tr>,
-            ])}{!summary.length && <tr><td colSpan={4} className="p-6 text-center text-gray-500">Aucune matière renseignée ne correspond aux filtres de la synthèse.</td></tr>}</tbody>
+            ])}{!summary.length && <tr><td colSpan={4} className="p-6 text-center text-gray-500">Aucun besoin matière éligible ne correspond aux filtres de la synthèse.</td></tr>}</tbody>
           </table>
         </div>
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">Les sous-totaux portent sur les références affichées après filtrage. Une spécification absente n’est jamais un zéro. Les anciennes saisies textuelles sont comptées comme une sélection unique à vérifier. Les caractéristiques (couleur, classe…) sont des occurrences de spécification, pas nécessairement des pièces à acheter.</p>

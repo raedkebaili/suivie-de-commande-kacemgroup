@@ -60,7 +60,11 @@ it("charge uniquement les composants des articles dans le périmètre autorisé"
   expect((await GET(new NextRequest("http://test/api/orders/material-requirements"))).status).toBe(200);
   const { PgDialect } = await import("drizzle-orm/pg-core");
   const dialect = new PgDialect();
-  expect(dialect.sqlToQuery(builder.where.mock.calls.at(-1)![0]).params).toEqual([7]);
+  const predicate = dialect.sqlToQuery(builder.where.mock.calls.at(-1)![0]);
+  expect(predicate.params.slice(0, 4)).toEqual(["PREVISION", "BON_COMMANDE", "SUR_STOCK", "EN_INSTANCE"]);
+  expect(predicate.params.at(-1)).toBe(7);
+  expect(predicate.sql).toContain("material_scope_item");
+  expect(predicate.sql).toContain("production_plan_entries");
   expect(dialect.sqlToQuery(componentWhere.mock.calls[0][0]).params).toEqual([12]);
 });
 it("exporte les mêmes références et totaux filtrés que le JSON", async () => {

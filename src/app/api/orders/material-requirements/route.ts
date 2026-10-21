@@ -1,12 +1,15 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { orders, orderItems, clients, agencies, articleFamilyAssignments, articleFamilyCatalog, itemTechnicalComponents } from "@/db/schema";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { orders, orderItems, clients, agencies, articleFamilyAssignments, articleFamilyCatalog, itemTechnicalComponents, productionPlanEntries } from "@/db/schema";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getUserFromHeaders } from "@/lib/auth";
 import { agencyScopeForUser } from "@/lib/agency-access";
 import { groupArticles, type GroupableItem } from "@/lib/article-grouping";
 import { catalogLabel } from "@/lib/article-family-catalog";
+import { isValidPlanningStatus } from "@/lib/production-planning-constants";
+import { materialDemandScope } from "@/lib/material-demand-scope";
+import { MATERIAL_DEMAND_RULE, MATERIAL_DEMAND_CALCULATION } from "@/lib/material-demand-policy";
 import { readGroupingConfig } from "@/lib/article-grouping-config";
 import { filterMaterialSummary, parseMaterialSummaryFilters, filterRequirementLines, parseRequirementFilters, requirementSummary, sortRequirementLines, withLegacySpecs, type RequirementLine, type TechnicalSpec } from "@/lib/material-requirements";
 
@@ -26,6 +29,7 @@ async function loadFamilyRecognition() {
 /**
  * GET /api/orders/material-requirements
  * Synthèse indépendante des matières renseignées dans les articles autorisés.
+ * Uniquement les commandes commerciales éligibles encore non traitées.
  * Les filtres de matières sont appliqués après agrégation, sans modifier les regroupements classiques.
  *
  * Query : status, agencyId, priority (mêmes filtres que /api/orders)
@@ -41,15 +45,21 @@ export async function GET(request: NextRequest) {
   let filters, materialFilters;
   try {
     if (request.url.length > 20000) throw new Error("Filtres trop longs");
+    if (sp.get("planningStatus") && !isValidPlanningStatus(sp.get("planningStatus"))) throw new Error("Filtre de planning invalide");
     filters = parseRequirementFilters(sp);
     materialFilters = parseMaterialSummaryFilters(sp);
     if (sp.get("agencyId") && (!/^[1-9]\d*$/.test(sp.get("agencyId")!) || !Number.isSafeInteger(Number(sp.get("agencyId"))) || Number(sp.get("agencyId")) > 2147483647)) throw new Error("Agence invalide");
   } catch (error) { return NextResponse.json({ error: (error as Error).message }, { status: 400 }); }
-  const conditions = [];
+  const conditions = [materialDemandScope()];
   const scope = agencyScopeForUser(user);
   if (scope) conditions.push(inArray(orders.agencyId, scope));
   if (sp.get("status")) conditions.push(eq(orders.status, sp.get("status")!));
   if (sp.get("agencyId")) conditions.push(eq(orders.agencyId, Number(sp.get("agencyId"))));
+  if (sp.get("productionStatus")) conditions.push(eq(orders.productionStatus, sp.get("productionStatus")!));
+  if (sp.get("planningStatus")) conditions.push(sql`EXISTS (
+    SELECT 1 FROM ${productionPlanEntries} WHERE ${productionPlanEntries.orderId} = ${orders.id}
+      AND ${productionPlanEntries.status} = ${sp.get("planningStatus")}
+  )`);
   if (sp.get("priority")) conditions.push(eq(orders.priority, sp.get("priority")!));
   try {
     const rows = await db.select({
@@ -93,7 +103,8 @@ export async function GET(request: NextRequest) {
       XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summary.flatMap(c => c.materials.map(m => ({ "Catégorie": c.name, "Référence": m.reference, "Matière": m.label, "Besoin (unités)": m.quantity, "Saisie ancienne": m.legacy ? "Oui, à vérifier" : "Non" }))), { header: ["Catégorie", "Référence", "Matière", "Besoin (unités)", "Saisie ancienne"] }), "Besoin par matière");
       XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summary.map(c => ({ "Catégorie": c.name, "Besoin connu (unités)": c.quantity, "Lignes non renseignées": c.missingLines })), { header: ["Catégorie", "Besoin connu (unités)", "Lignes non renseignées"] }), "Totaux catégories");
       XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
-        ["Règle", "1 unité de chaque matière sélectionnée par article commandé. Besoin brut, sans déduction du stock, de la production ou des livraisons."],
+        ["Périmètre obligatoire", MATERIAL_DEMAND_RULE],
+        ["Règle", MATERIAL_DEMAND_CALCULATION],
         ["Données manquantes", "Non renseigné ne signifie pas zéro. Les totaux connus sont partiels si des lignes restent non renseignées."],
         ["Anciennes saisies", "Les textes historiques non vides sont traités comme une sélection unique, non découpés. À vérifier par le responsable technique."],
         ["Périmètre", "Filtres des articles sources, puis filtres et tri des matières identiques à la synthèse affichée. Sans modification des regroupements classiques."],

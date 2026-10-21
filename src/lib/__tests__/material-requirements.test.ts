@@ -14,7 +14,7 @@ describe("besoin matière", () => {
     expect(categorySpecs(row, "driver")).toHaveLength(2);
     expect(categoryNeed(row, "pcb")).toBeNull();
   });
-  it("ne déduit ni production ni livraison ni stock", () => {
+  it("convertit la quantité source éligible, sans refaire un calcul de reste à livrer", () => {
     expect(categoryNeed(line(100, [component(1)], { producedQty: 90, deliveredQty: 80 }), "driver")).toBe(100);
   });
   it("sépare les références et les catégories, signale les données manquantes", () => {
