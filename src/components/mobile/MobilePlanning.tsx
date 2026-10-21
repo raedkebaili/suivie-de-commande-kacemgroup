@@ -6,10 +6,10 @@ import { PLANNING_STATUSES, planningStatusLabel, todayISO } from "@/lib/producti
 import { canManageMobilePlanning, mobilePlanningQuantity, planningTransitionWarning } from "@/lib/mobile-planning";
 import { Notice, Row, btnGhost, btnPrimary, fieldClass } from "./ui";
 
-type Plan = { planDate: string; id: number; itemId: number; orderId: number; orderNumber: string | null; articleName: string; clientName: string | null; plannedQty: number; status: string; reason?: string | null; note?: string | null; driverName?: string; factoryName?: string | null; appliedAt?: string | null; appliedQty?: number; loadedQty?: number; itemQuantity?: number; itemProducedQty?: number; itemDeliveredQty?: number };
+type Plan = { updatedAt: string; planDate: string; id: number; itemId: number; orderId: number; orderNumber: string | null; articleName: string; clientName: string | null; plannedQty: number; status: string; reason?: string | null; note?: string | null; driverName?: string; factoryName?: string | null; appliedAt?: string | null; appliedQty?: number; loadedQty?: number; itemQuantity?: number; itemProducedQty?: number; itemDeliveredQty?: number };
 const EXPEDITION_STATUSES = [{ key: "NON_TRAITE", label: "Non traité" }, { key: "EN_COURS", label: "En cours" }, { key: "LIVRE", label: "Livré" }, { key: "ANNULE", label: "Annulé" }];
 
-function PlanCard({ plan, kind, canManage, onOpen, onReload, onSessionExpired }: { plan: Plan; kind: "production" | "expedition"; canManage: boolean; onOpen: (id: number) => void; onReload: () => void; onSessionExpired: () => void }) {
+function PlanCard({ plan, kind, canManage, onOpen, onReload, onSessionExpired }: { plan: Plan; kind: "production" | "expedition"; canManage: boolean; onOpen: (id: number) => void; onReload: (message?: string) => void; onSessionExpired: () => void }) {
   const [editing, setEditing] = useState(false);
   const [status, setStatus] = useState(plan.status);
   const [qty, setQty] = useState(String(plan.plannedQty));
@@ -18,7 +18,22 @@ function PlanCard({ plan, kind, canManage, onOpen, onReload, onSessionExpired }:
   const [driverName, setDriverName] = useState(plan.driverName || "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const applied = !!plan.appliedAt || (plan.loadedQty || 0) > 0 || plan.status === "LIVRE";
+  const appliedQty = kind === "production" ? plan.appliedQty ?? 0 : plan.loadedQty ?? 0;
+  const applied = !!plan.appliedAt || appliedQty > 0 || ["LIVRE", "TERMINE"].includes(plan.status);
+  const initialStatus = kind === "production" ? "EN_ATTENTE" : "NON_TRAITE";
+  const undo = async () => {
+    if (busy || !window.confirm(`Retour en arrière pour « ${plan.articleName} » (${plan.orderNumber}), le ${plan.planDate} ?\n\n${appliedQty} unité(s) seront retirées du cumul ${kind === "production" ? "PRODUIT" : "LIVRÉ"}. La ligne reviendra à son état initial et pourra être traitée à nouveau.${kind === "production" ? " Corrigez d'abord les expéditions si ces quantités sont déjà livrées." : " Le cumul produit ne changera pas."}`)) return;
+    setBusy(true); setError("");
+    try {
+      const result = await apiFetch<{ reversedQty: number }>(`/api/${kind}-planning/${plan.id}/undo`, {
+        method: "POST", body: JSON.stringify({ confirmed: true, expectedUpdatedAt: plan.updatedAt }),
+      });
+      onReload(`Retour effectué : −${result.reversedQty} du cumul ${kind === "production" ? "produit" : "livré"}. Ligne à son état initial.${kind === "production" ? " Vérifiez les priorités si une promotion automatique avait été déclenchée." : ""}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Correction impossible";
+      if (message === "Non authentifié") onSessionExpired(); else setError(message);
+    } finally { setBusy(false); }
+  };
   const statuses = kind === "production" ? PLANNING_STATUSES : EXPEDITION_STATUSES;
   const save = async (e: React.FormEvent) => {
     e.preventDefault(); setError("");
@@ -41,11 +56,12 @@ function PlanCard({ plan, kind, canManage, onOpen, onReload, onSessionExpired }:
     <Row label={kind === "production" ? "Usine" : "Chauffeur"} value={plan.factoryName || plan.driverName} />
     <Row label="Produit / livré" value={`${plan.itemProducedQty || 0} / ${plan.itemDeliveredQty || 0}`} />
     {(plan.reason || plan.note) && <p className="text-sm break-words">{plan.reason || plan.note}</p>}
-    {applied && <Notice tone="info">Quantité déjà appliquée : {plan.appliedQty || plan.loadedQty || plan.plannedQty}. Ligne en consultation sur mobile.</Notice>}
+    {applied && <Notice tone="info">Quantité déjà appliquée : {appliedQty}. {canManage ? "Utilisez le retour en arrière pour corriger le cumul." : "Ligne en consultation."}</Notice>}
+    {error && <Notice tone="error">{error}</Notice>}
+    {canManage && <button type="button" className={btnGhost} disabled={busy || (!applied && plan.status === initialStatus)} onClick={() => void undo()}>↶ Retour en arrière</button>}
     <button type="button" className={btnGhost} onClick={() => onOpen(plan.orderId)}>Voir la commande</button>
-    {canManage && !applied && !editing && <button type="button" className={btnGhost} onClick={() => { setStatus(plan.status); setQty(String(plan.plannedQty)); setReason(plan.reason || plan.note || ""); setPlanDate(plan.planDate); setDriverName(plan.driverName || ""); setEditing(true); }}>Modifier la ligne</button>}
+    {canManage && !applied && !editing && <button disabled={busy} type="button" className={btnGhost} onClick={() => { setStatus(plan.status); setQty(String(plan.plannedQty)); setReason(plan.reason || plan.note || ""); setPlanDate(plan.planDate); setDriverName(plan.driverName || ""); setEditing(true); }}>Modifier la ligne</button>}
     {editing && <form onSubmit={save} className="space-y-3">
-      {error && <Notice tone="error">{error}</Notice>}
       <fieldset disabled={busy} className="space-y-3">
         <label className="block text-sm">État<select className={fieldClass} value={status} onChange={(e) => setStatus(e.target.value)}>{statuses.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></label>
         {kind === "expedition" && <>
@@ -67,6 +83,7 @@ export default function MobilePlanning({ kind, user, onOpenOrder, onSessionExpir
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [revision, setRevision] = useState(0);
   const [visible, setVisible] = useState(30);
   useEffect(() => {
@@ -87,9 +104,10 @@ export default function MobilePlanning({ kind, user, onOpenOrder, onSessionExpir
     <input type="search" aria-label="Rechercher dans le planning" placeholder="Article, commande, client, usine, chauffeur…" className={fieldClass} value={query} onChange={(e) => { setQuery(e.target.value); setVisible(30); }} />
     <button className={btnGhost} disabled={loading} onClick={() => setRevision((n) => n + 1)}>Actualiser</button>
     {error && <Notice tone="error">{error}</Notice>}
+    {notice && <Notice tone="success">{notice}</Notice>}
     {loading && <p role="status">Chargement…</p>}
     {!loading && !error && filtered.length === 0 && <Notice tone="info">Aucune ligne pour cette journée et ces critères.</Notice>}
-    <ul className="space-y-3">{filtered.slice(0, visible).map((plan) => <PlanCard key={`${plan.id}-${revision}`} plan={plan} kind={kind} canManage={canManageMobilePlanning(user.role)} onOpen={onOpenOrder} onReload={() => setRevision((n) => n + 1)} onSessionExpired={onSessionExpired} />)}</ul>
+    <ul className="space-y-3">{filtered.slice(0, visible).map((plan) => <PlanCard key={`${plan.id}-${revision}`} plan={plan} kind={kind} canManage={canManageMobilePlanning(user.role)} onOpen={onOpenOrder} onReload={(message) => { setNotice(message || ""); setRevision((n) => n + 1); }} onSessionExpired={onSessionExpired} />)}</ul>
     {filtered.length > visible && <button className={`${btnGhost} w-full`} onClick={() => setVisible((n) => n + 30)}>Afficher plus</button>}
   </div>;
 }

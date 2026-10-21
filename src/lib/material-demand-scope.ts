@@ -10,6 +10,8 @@ import { MATERIAL_DEMAND_COMMERCIAL_STATUSES, MATERIAL_DEMAND_PRODUCTION_STATUS 
  * articles quand une partie est déjà engagée. Aucun calcul quantité - livré.
  * SUSPENDU seul peut signifier une attente de matière avant démarrage : sans
  * preuve de traitement, il ne faut pas faire disparaître ce besoin.
+ * Les lots sont évalués en solde par article : un retour arrière compensatoire
+ * conserve l’historique mais annule son effet, sans compensation entre articles.
  */
 export function materialDemandScope() {
   return and(
@@ -23,11 +25,13 @@ export function materialDemandScope() {
     )`,
     sql`NOT EXISTS (
       SELECT 1 FROM ${productionBatches}
-      WHERE ${productionBatches.orderId} = ${orders.id} AND ${productionBatches.quantity} > 0
+      WHERE ${productionBatches.orderId} = ${orders.id}
+      GROUP BY ${productionBatches.itemId} HAVING sum(${productionBatches.quantity}) <> 0
     )`,
     sql`NOT EXISTS (
       SELECT 1 FROM ${expeditionBatches}
-      WHERE ${expeditionBatches.orderId} = ${orders.id} AND ${expeditionBatches.quantity} > 0
+      WHERE ${expeditionBatches.orderId} = ${orders.id}
+      GROUP BY ${expeditionBatches.itemId} HAVING sum(${expeditionBatches.quantity}) <> 0
     )`,
     sql`NOT EXISTS (
       SELECT 1 FROM ${productionPlanEntries}

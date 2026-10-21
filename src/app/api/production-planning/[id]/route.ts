@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { orderItems, orders, productionPlanEntries } from "@/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
 import { applyProductionQuantity } from "@/lib/production-apply";
@@ -48,11 +48,14 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     const updates: Record<string, unknown> = { updatedAt: now, updatedByName: user.fullName };
     let meaningfulChange = false;
 
+    if ((entry.appliedAt || entry.appliedQty > 0 || entry.status === "TERMINE") && body.status !== undefined && body.status !== entry.status) {
+      return NextResponse.json({ error: "Utilisez Retour en arrière pour annuler aussi le cumul produit" }, { status: 409 });
+    }
     // ── Quantité planifiée ──
     if (body.plannedQty !== undefined) {
       const q = parseInt(String(body.plannedQty));
       if (!Number.isFinite(q) || q <= 0) return NextResponse.json({ error: "Quantité invalide" }, { status: 400 });
-      if (entry.appliedAt) {
+      if (entry.appliedAt || entry.appliedQty > 0 || entry.status === "TERMINE") {
         return NextResponse.json({ error: "Quantité non modifiable : la production a déjà été appliquée" }, { status: 400 });
       }
       if (q !== entry.plannedQty) meaningfulChange = true;
@@ -92,6 +95,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
           qty,
           productionDate: entry.planDate,
           user,
+          planning: { id: entry.id, expectedUpdatedAt: entry.updatedAt, updates: { ...updates, status: "TERMINE" } },
           logSuffix: `[planning ${entry.planDate}]`,
         });
         if (!applied.ok) {
@@ -107,8 +111,17 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       updates.status = body.status;
     }
 
-    const [updated] = await db.update(productionPlanEntries)
-      .set(updates).where(eq(productionPlanEntries.id, entryId)).returning();
+    // L'application termine déjà la ligne dans la même transaction que le lot.
+    // Les autres modifications utilisent une comparaison de version pour ne pas
+    // écraser un traitement / retour arrière effectué depuis un autre poste.
+    const [updated] = applied?.ok
+      ? await db.select().from(productionPlanEntries).where(eq(productionPlanEntries.id, entryId)).limit(1)
+      : await db.update(productionPlanEntries).set({ ...updates, updatedAt: sql`clock_timestamp()` }).where(and(
+          eq(productionPlanEntries.id, entryId), eq(productionPlanEntries.updatedAt, entry.updatedAt),
+          eq(productionPlanEntries.status, entry.status), eq(productionPlanEntries.appliedQty, entry.appliedQty),
+          entry.appliedAt ? eq(productionPlanEntries.appliedAt, entry.appliedAt) : isNull(productionPlanEntries.appliedAt),
+        )).returning();
+    if (!updated) return NextResponse.json({ error: "La ligne a changé. Actualisez le planning." }, { status: 409 });
 
     if (body.status !== undefined && body.status !== entry.status) {
       await logActivity(user.id, user.username, "PLANNING_STATUS",
@@ -194,13 +207,15 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   try {
     const [entry] = await db.select().from(productionPlanEntries).where(eq(productionPlanEntries.id, entryId)).limit(1);
     if (!entry) return NextResponse.json({ error: "Ligne non trouvée" }, { status: 404 });
-    if (entry.appliedAt) {
+    if (entry.appliedAt || entry.appliedQty > 0 || entry.status === "TERMINE") {
       return NextResponse.json({
         error: "Impossible de supprimer : la production de cette ligne a déjà été enregistrée",
       }, { status: 400 });
     }
 
-    await db.delete(productionPlanEntries).where(eq(productionPlanEntries.id, entryId));
+    const removed = await db.delete(productionPlanEntries).where(and(eq(productionPlanEntries.id, entryId),
+      eq(productionPlanEntries.updatedAt, entry.updatedAt), isNull(productionPlanEntries.appliedAt), eq(productionPlanEntries.appliedQty, 0))).returning({ id: productionPlanEntries.id });
+    if (!removed.length) return NextResponse.json({ error: "La ligne a changé. Actualisez le planning." }, { status: 409 });
     await logActivity(user.id, user.username, "PLANNING_DELETE", `Planning ${entry.planDate} : ${entry.articleName} retiré`);
     await notifyRoles(["consultant_prod"], {
       eventKey: NOTIFICATION_EVENTS.PLANNING_UPDATED,

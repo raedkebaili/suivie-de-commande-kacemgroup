@@ -1,8 +1,9 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { expeditionBatches, expeditionPlanEntries, orderItems } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { expeditionBatches, expeditionPlanEntries, orderItems, orders } from "@/db/schema";
+import { and, eq, sql } from "drizzle-orm";
+import { lockQuantityItem, reservedExpeditionQty } from "@/lib/quantity-transaction";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 
 const MANAGER_ROLES = ["superadmin", "planification"];
@@ -84,19 +85,20 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (requestedStatus === "LIVRE" && currentStatus !== "LIVRE") {
       const deliveryDate = new Date().toISOString().split("T")[0];
       const result = await db.transaction(async (tx) => {
+        const locked = await lockQuantityItem(tx, entry.itemId);
+        if (!locked) return { error: "Article introuvable" as const };
+        const { item, order } = locked;
         const [lockedEntry] = await tx.select().from(expeditionPlanEntries)
           .where(eq(expeditionPlanEntries.id, id)).for("update").limit(1);
         if (!lockedEntry) return { error: "Planning d'expédition introuvable" as const };
-        if (normalizeStatus(lockedEntry.status) === "LIVRE") {
-          return { alreadyDelivered: true as const };
-        }
-        const [item] = await tx.select().from(orderItems)
-          .where(eq(orderItems.id, lockedEntry.itemId)).for("update").limit(1);
-        if (!item) return { error: "Article introuvable" as const };
+        if (normalizeStatus(lockedEntry.status) === "LIVRE") return { alreadyDelivered: true as const };
+        if (lockedEntry.updatedAt !== entry.updatedAt) return { error: "La ligne a changé. Actualisez le planning." as const };
+        if (order.productionStatus === "ANNULEE") return { error: "Impossible d'expédier une commande annulée" as const };
         const available = Math.max(0, (item.producedQty || 0) - (item.deliveredQty || 0));
         const plannedQty = typeof updates.plannedQty === "number" ? updates.plannedQty : lockedEntry.plannedQty;
         const qtyToApply = plannedQty - lockedEntry.loadedQty;
         if (qtyToApply < 0) return { error: "La quantité déjà livrée dépasse la quantité planifiée" as const };
+        if (qtyToApply > available - await reservedExpeditionQty(tx, item.id, id)) return { error: "Quantité réservée par un autre planning d’expédition : ajustez les lignes concernées" as const };
         if (qtyToApply > available) return { error: `Quantité produite disponible à livrer : ${available}` as const };
         if (plannedQty <= 0) return { error: "La quantité à livrer doit être supérieure à zéro" as const };
         const cumulativeTotal = (item.deliveredQty || 0) + qtyToApply;
@@ -116,17 +118,35 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         }
         await tx.update(expeditionPlanEntries).set({
           ...updates,
+          updatedAt: sql`clock_timestamp()`,
           plannedQty,
           loadedQty: plannedQty,
           status: "LIVRE",
         }).where(eq(expeditionPlanEntries.id, id));
+        const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, item.orderId));
+        if (items.every(row => row.deliveredQty >= row.quantity)) {
+          await tx.update(orders).set({ productionStatus: "LIVREE", updatedAt: new Date().toISOString() }).where(eq(orders.id, item.orderId));
+        }
         return { applied: true as const };
       });
       if ("error" in result) return NextResponse.json({ error: result.error }, { status: result.error === "Article introuvable" ? 404 : 400 });
       if ("alreadyDelivered" in result) return NextResponse.json({ error: "Cette ligne a déjà été livrée" }, { status: 409 });
     } else {
       updates.status = requestedStatus;
-      await db.update(expeditionPlanEntries).set(updates).where(eq(expeditionPlanEntries.id, id));
+      const result = await db.transaction(async tx => {
+        const locked = await lockQuantityItem(tx, entry.itemId);
+        if (!locked) return "Article introuvable";
+        const [current] = await tx.select().from(expeditionPlanEntries).where(eq(expeditionPlanEntries.id, id)).for("update").limit(1);
+        if (!current || current.updatedAt !== entry.updatedAt || current.loadedQty !== entry.loadedQty || current.status !== entry.status) return "La ligne a changé. Actualisez le planning.";
+        const active = ["NON_TRAITE", "EN_COURS"].includes(requestedStatus);
+        const remainingPlanned = (typeof updates.plannedQty === "number" ? updates.plannedQty : current.plannedQty) - current.loadedQty;
+        if (active && remainingPlanned > locked.item.producedQty - locked.item.deliveredQty - await reservedExpeditionQty(tx, locked.item.id, id)) {
+          return "Quantité produite disponible insuffisante après prise en compte des autres plannings";
+        }
+        await tx.update(expeditionPlanEntries).set({ ...updates, updatedAt: sql`clock_timestamp()` }).where(eq(expeditionPlanEntries.id, id));
+        return null;
+      });
+      if (result) return NextResponse.json({ error: result }, { status: 409 });
     }
 
     if (changed || requestedStatus === "LIVRE") {
@@ -153,7 +173,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (!entry) return NextResponse.json({ error: "Planning d'expédition introuvable" }, { status: 404 });
   if (entry.loadedQty > 0 || normalizeStatus(entry.status) === "LIVRE") return NextResponse.json({ error: "Impossible de retirer une ligne déjà livrée" }, { status: 400 });
 
-  await db.delete(expeditionPlanEntries).where(eq(expeditionPlanEntries.id, id));
+  const removed = await db.delete(expeditionPlanEntries).where(and(eq(expeditionPlanEntries.id, id),
+    eq(expeditionPlanEntries.updatedAt, entry.updatedAt), eq(expeditionPlanEntries.loadedQty, 0), eq(expeditionPlanEntries.status, entry.status))).returning({ id: expeditionPlanEntries.id });
+  if (!removed.length) return NextResponse.json({ error: "La ligne a changé. Actualisez le planning." }, { status: 409 });
   await logActivity(user.id, user.username, "EXPEDITION_PLANNING_DELETE",
     `${entry.articleName} — planning du ${entry.planDate} supprimé`);
   return NextResponse.json({ ok: true });

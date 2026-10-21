@@ -22,7 +22,7 @@ Une commande n'est éligible que si :
 1. Son état commercial est **PREVISION**, **BON_COMMANDE** ou **SUR_STOCK** (besoin interne).
 2. Son état de production est **EN_INSTANCE** : elle n'est ni en production, ni livrée, ni annulée. Les états inconnus / absents ne sont pas supposés non traités.
 3. Aucun de ses articles ne possède de quantité déjà produite ou livrée, même partielle. Les cumuls non nuls incohérents (négatifs) empêchent aussi de la considérer comme vierge de traitement.
-4. Aucun lot réel positif de production ou d'expédition n'existe pour cette commande, même si les cumuls n'ont pas encore été mis à jour.
+4. Aucun solde net de lots de production ou d’expédition n’est non nul pour un article de cette commande, même si les cumuls n’ont pas encore été mis à jour. Les corrections de retour arrière sont des lots négatifs : elles compensent l’opération erronée sans effacer l’historique. Le solde est contrôlé par article pour éviter une compensation entre articles distincts.
 5. Aucune entrée de planning de production n'est **EN_COURS** ou **TERMINE**, et aucune n'a déjà appliqué une quantité ou une date d'application.
 
 La règle s'applique à la **commande entière**, pas seulement à l'article déjà produit. Une commande partiellement commencée et ses autres articles ne sont pas présentés comme un nouveau besoin non traité. Cette synthèse ne calcule pas le reste matière des encours ; ceux-ci relèvent du suivi de production.

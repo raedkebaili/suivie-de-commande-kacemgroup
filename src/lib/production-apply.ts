@@ -7,11 +7,12 @@
  * effets : lot de production, cumul sur l'article, passage éventuel en
  * LIVREE, journalisation et promotion automatique des priorités.
  *
- * Le comportement est strictement identique à celui d'origine.
+ * Écriture atomique lot / cumul / planning, avec verrou partagé par les retours.
  */
 import { db } from "@/db";
-import { orderItems, orders, productionBatches } from "@/db/schema";
+import { orderItems, orders, productionBatches, productionPlanEntries, activityLogs } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
+import { lockQuantityItem } from "./quantity-transaction";
 import { logActivity } from "@/lib/auth";
 import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
 import { isOrderFullyProduced, promotePrioritiesAfterCompletion } from "@/lib/priority-promotion";
@@ -28,6 +29,7 @@ export async function applyProductionQuantity(params: {
   user: { id: number; username: string; fullName: string };
   /** Suffixe ajouté au journal d'activité (ex. origine « planning ») */
   logSuffix?: string;
+  planning?: { id: number; expectedUpdatedAt: string; updates: Record<string, unknown> };
 }): Promise<ApplyProductionResult> {
   const { itemId, qty, productionDate, user, logSuffix } = params;
 
@@ -35,66 +37,47 @@ export async function applyProductionQuantity(params: {
     return { ok: false, status: 400, error: "Quantité doit être > 0" };
   }
 
-  const [item] = await db.select().from(orderItems).where(eq(orderItems.id, itemId)).limit(1);
-  if (!item) return { ok: false, status: 404, error: "Article non trouvé" };
-
-  const [order] = await db
-    .select({ productionStatus: orders.productionStatus, orderNumber: orders.orderNumber })
-    .from(orders).where(eq(orders.id, item.orderId)).limit(1);
-  if (order?.productionStatus === "ANNULEE") {
-    return { ok: false, status: 400, error: "Impossible de produire une commande annulée" };
-  }
-
-  // Contrôle : produit ne peut pas dépasser commandé
-  const currentProduced = item.producedQty || 0;
-  const remaining = item.quantity - currentProduced;
-  if (remaining <= 0) {
-    return { ok: false, status: 400, error: "Cet article est déjà entièrement produit" };
-  }
-
-  const actualQty = Math.min(qty, remaining);
-  const newCumulative = currentProduced + actualQty;
-
-  await db.insert(productionBatches).values({
-    itemId: item.id,
-    orderId: item.orderId,
-    quantity: actualQty,
-    cumulativeTotal: newCumulative,
-    producedBy: user.fullName,
-    productionDate: productionDate || new Date().toISOString().split("T")[0],
-  });
-
-  await db.update(orderItems).set({ producedQty: newCumulative }).where(eq(orderItems.id, item.id));
-
-  // Passage en LIVREE si tout est livré (logique d'origine conservée)
-  const [all] = await db.select({
-    tc: sql<number>`sum(${orderItems.quantity})`,
-    td: sql<number>`sum(${orderItems.deliveredQty})`,
-  }).from(orderItems).where(eq(orderItems.orderId, item.orderId));
-  const fullyDelivered = Boolean(all && Number(all.td) >= Number(all.tc));
-  if (fullyDelivered) {
-    const [full] = await db.select().from(orders).where(eq(orders.id, item.orderId)).limit(1);
-    if (full && full.productionStatus !== "LIVREE") {
-      await db.update(orders)
-        .set({ productionStatus: "LIVREE", updatedAt: new Date().toISOString() })
-        .where(eq(orders.id, item.orderId));
-      try {
-        await notifyRoles(["commercial"], {
-          eventKey: NOTIFICATION_EVENTS.ORDER_DELIVERED,
-          type: "success",
-          title: `Commande livrée #${full.orderNumber}`,
-          message: `La commande ${full.orderNumber} a été entièrement livrée`,
-          orderId: item.orderId,
-          targetTab: "orders",
-        });
-      } catch (notificationError) {
-        console.error("Notification de livraison:", notificationError);
+  const result = await db.transaction(async tx => {
+    const locked = await lockQuantityItem(tx, itemId);
+    if (!locked) return { ok: false as const, status: 404, error: "Article non trouvé" };
+    const { item, order } = locked;
+    if (order.productionStatus === "ANNULEE") return { ok: false as const, status: 400, error: "Impossible de produire une commande annulée" };
+    if (params.planning) {
+      const [entry] = await tx.select().from(productionPlanEntries).where(eq(productionPlanEntries.id, params.planning.id)).for("update").limit(1);
+      if (!entry || entry.itemId !== item.id || entry.orderId !== item.orderId) return { ok: false as const, status: 404, error: "Planning introuvable" };
+      if (entry.appliedAt || entry.appliedQty > 0 || entry.updatedAt !== params.planning.expectedUpdatedAt) {
+        return { ok: false as const, status: 409, error: "La ligne a changé ou a déjà été appliquée. Actualisez le planning." };
       }
     }
+    const remaining = item.quantity - item.producedQty;
+    if (remaining <= 0) return { ok: false as const, status: 400, error: "Cet article est déjà entièrement produit" };
+    const actualQty = Math.min(qty, remaining);
+    const newCumulative = item.producedQty + actualQty;
+    await tx.insert(productionBatches).values({ itemId: item.id, orderId: item.orderId, quantity: actualQty,
+      cumulativeTotal: newCumulative, producedBy: user.fullName,
+      productionDate: productionDate || new Date().toISOString().split("T")[0] });
+    await tx.update(orderItems).set({ producedQty: newCumulative }).where(eq(orderItems.id, item.id));
+    if (params.planning) {
+      await tx.update(productionPlanEntries).set({ ...params.planning.updates, updatedAt: sql`clock_timestamp()`, status: "TERMINE", appliedQty: actualQty,
+        appliedAt: new Date().toISOString() }).where(eq(productionPlanEntries.id, params.planning.id));
+    }
+    await tx.insert(activityLogs).values({ userId: user.id, username: user.username, action: "PRODUCTION",
+      details: `+${actualQty} de ${item.articleName} (total: ${newCumulative}/${item.quantity})${logSuffix ? ` ${logSuffix}` : ""}` });
+    const allItems = await tx.select().from(orderItems).where(eq(orderItems.orderId, item.orderId));
+    const fullyDelivered = allItems.every(row => row.deliveredQty >= row.quantity);
+    const becameDelivered = fullyDelivered && order.productionStatus !== "LIVREE";
+    if (becameDelivered) await tx.update(orders).set({ productionStatus: "LIVREE", updatedAt: new Date().toISOString() }).where(eq(orders.id, item.orderId));
+    return { ok: true as const, item, order, actualQty, newCumulative, fullyDelivered, becameDelivered };
+  });
+  if (!result.ok) return result;
+  const { item, order, actualQty, newCumulative, fullyDelivered } = result;
+  if (result.becameDelivered) {
+    try {
+      await notifyRoles(["commercial"], { eventKey: NOTIFICATION_EVENTS.ORDER_DELIVERED, type: "success",
+        title: `Commande livrée #${order.orderNumber}`, message: `La commande ${order.orderNumber} a été entièrement livrée`,
+        orderId: item.orderId, targetTab: "orders" });
+    } catch (error) { console.error("Notification livraison:", error); }
   }
-
-  await logActivity(user.id, user.username, "PRODUCTION",
-    `+${actualQty} de ${item.articleName} (total: ${newCumulative}/${item.quantity})${logSuffix ? ` ${logSuffix}` : ""}`);
 
   // Une commande devient « prête » lorsque tous ses articles sont produits,
   // avant la livraison. Cette vérification est faite après chaque lot mais

@@ -11,8 +11,8 @@ beforeAll(async () => {
   await database.exec(`
     CREATE TABLE orders (id integer PRIMARY KEY, status text, production_status text, agency_id integer DEFAULT 7);
     CREATE TABLE order_items (id integer PRIMARY KEY, order_id integer REFERENCES orders(id), quantity integer DEFAULT 100, produced_qty integer DEFAULT 0, delivered_qty integer DEFAULT 0);
-    CREATE TABLE production_batches (order_id integer REFERENCES orders(id), quantity integer);
-    CREATE TABLE expedition_batches (order_id integer REFERENCES orders(id), quantity integer);
+    CREATE TABLE production_batches (item_id integer DEFAULT 11, order_id integer REFERENCES orders(id), quantity integer);
+    CREATE TABLE expedition_batches (item_id integer DEFAULT 11, order_id integer REFERENCES orders(id), quantity integer);
     CREATE TABLE production_plan_entries (order_id integer REFERENCES orders(id), status text DEFAULT 'EN_ATTENTE', applied_qty integer DEFAULT 0, applied_at text);
   `);
 }, 30_000);
@@ -91,4 +91,11 @@ describe("besoin matière : commandes non traitées uniquement", () => {
     expect(await eligible()).toEqual([21]);
     expect(await eligible(eq(orders.agencyId, 7))).toEqual([]);
   });
+});
+
+it.each(["production_batches", "expedition_batches"])("un retour arrière compensatoire dans %s rétablit l’éligibilité sans effacer les lots", async table => {
+  await database.exec(`INSERT INTO ${table} (order_id, quantity) VALUES (1,100),(1,-100)`);
+  expect(await eligible()).toEqual([11]);
+  await database.exec(`INSERT INTO ${table} (order_id,item_id,quantity) VALUES (1,12,10),(1,13,-10)`);
+  expect(await eligible()).toEqual([]);
 });

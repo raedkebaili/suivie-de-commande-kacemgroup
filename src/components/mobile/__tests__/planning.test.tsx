@@ -51,3 +51,24 @@ describe("plannings mobiles", () => {
     expect(screen.queryByText("Article ajouté au planning. Retrouvez-le dans Plus → Plannings.")).toBeNull();
   });
 });
+
+it.each(["production", "expedition"] as const)("permet aussi le retour arrière mobile après confirmation (%s)", async kind => {
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  let undone = false;
+  api.mockImplementation(async (url) => {
+    if (url.endsWith("/undo")) { undone = true; return { reversedQty: 10 }; }
+    const plan = { ...entry, updatedAt: "v1", status: undone ? (kind === "production" ? "EN_ATTENTE" : "NON_TRAITE") : (kind === "production" ? "TERMINE" : "LIVRE"), appliedAt: kind === "production" && !undone ? "2026-10-15" : null, appliedQty: undone ? 0 : 10, loadedQty: undone ? 0 : 10 };
+    return kind === "production" ? { entries: [plan] } : { plans: [plan] };
+  });
+  const actions = userEvent.setup();
+  render(<MobilePlanning kind={kind} user={user} onOpenOrder={vi.fn()} onSessionExpired={vi.fn()} />);
+  await actions.click(await screen.findByRole("button", { name: /Retour en arrière/ }));
+  expect(api.mock.calls.some(([url]) => url.endsWith("/undo"))).toBe(false);
+  confirm.mockReturnValue(true);
+  await actions.click(screen.getByRole("button", { name: /Retour en arrière/ }));
+  await screen.findByText(/Retour effectué/);
+  const call = api.mock.calls.find(([url]) => url.endsWith("/undo"));
+  expect(call?.[0]).toBe(`/api/${kind}-planning/8/undo`);
+  expect(JSON.parse(String(call?.[1]?.body))).toEqual({ confirmed: true, expectedUpdatedAt: "v1" });
+  expect((await screen.findByRole("button", { name: /Retour en arrière/ }) as HTMLButtonElement).disabled).toBe(true);
+});

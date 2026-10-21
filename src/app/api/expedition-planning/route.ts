@@ -1,9 +1,10 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { clients, expeditionPlanEntries, orderItems, orders } from "@/db/schema";
+import { clients, expeditionPlanEntries, orderItems, orders, activityLogs } from "@/db/schema";
 import { and, asc, eq, ne } from "drizzle-orm";
-import { getUserFromHeaders, logActivity } from "@/lib/auth";
+import { lockQuantityItem, reservedExpeditionQty } from "@/lib/quantity-transaction";
+import { getUserFromHeaders } from "@/lib/auth";
 
 const MANAGER_ROLES = ["superadmin", "planification"];
 
@@ -103,69 +104,72 @@ export async function POST(request: NextRequest) {
     if (!Number.isInteger(plannedQty) || plannedQty <= 0) return NextResponse.json({ error: "La quantité à livrer doit être supérieure à zéro" }, { status: 400 });
     if (!driverName) return NextResponse.json({ error: "Le chauffeur/porteur est requis" }, { status: 400 });
 
-    const [row] = await db.select({
-      itemId: orderItems.id,
-      orderId: orderItems.orderId,
-      articleName: orderItems.articleName,
-      quantity: orderItems.quantity,
-      deliveredQty: orderItems.deliveredQty,
-      producedQty: orderItems.producedQty,
-      orderNumber: orders.orderNumber,
-      productionStatus: orders.productionStatus,
-      affaire: orders.affaire,
-      priority: orders.priority,
-      clientName: clients.name,
-    })
-      .from(orderItems)
-      .leftJoin(orders, eq(orderItems.orderId, orders.id))
-      .leftJoin(clients, eq(orders.clientId, clients.id))
-      .where(eq(orderItems.id, itemId))
-      .limit(1);
+    return await db.transaction(async tx => {
+      if (!await lockQuantityItem(tx, itemId)) return NextResponse.json({ error: "Article introuvable" }, { status: 404 });
+      const [row] = await tx.select({
+        itemId: orderItems.id,
+        orderId: orderItems.orderId,
+        articleName: orderItems.articleName,
+        quantity: orderItems.quantity,
+        deliveredQty: orderItems.deliveredQty,
+        producedQty: orderItems.producedQty,
+        orderNumber: orders.orderNumber,
+        productionStatus: orders.productionStatus,
+        affaire: orders.affaire,
+        priority: orders.priority,
+        clientName: clients.name,
+      })
+        .from(orderItems)
+        .leftJoin(orders, eq(orderItems.orderId, orders.id))
+        .leftJoin(clients, eq(orders.clientId, clients.id))
+        .where(eq(orderItems.id, itemId))
+        .limit(1);
 
-    if (!row) return NextResponse.json({ error: "Article introuvable" }, { status: 404 });
-    if (row.productionStatus === "ANNULEE") return NextResponse.json({ error: "Impossible de planifier une commande annulée" }, { status: 400 });
+      if (!row) return NextResponse.json({ error: "Article introuvable" }, { status: 404 });
+      if (row.productionStatus === "ANNULEE") return NextResponse.json({ error: "Impossible de planifier une commande annulée" }, { status: 400 });
 
-    // Le planning d'expédition ne peut travailler que sur le stock produit,
-    // jamais sur la quantité totale commandée.
-    const availableToDeliver = Math.max(0, (row.producedQty || 0) - (row.deliveredQty || 0));
-    if (availableToDeliver <= 0) return NextResponse.json({ error: "Aucune quantité produite disponible à livrer pour cet article" }, { status: 400 });
-    if (plannedQty > availableToDeliver) {
-      return NextResponse.json({ error: `Quantité maximale à livrer : ${availableToDeliver}` }, { status: 400 });
-    }
+      // Le planning d'expédition ne peut travailler que sur le stock produit,
+      // jamais sur la quantité totale commandée.
+      const availableToDeliver = Math.max(0, row.producedQty - row.deliveredQty - await reservedExpeditionQty(tx, itemId));
+      if (availableToDeliver <= 0) return NextResponse.json({ error: "Aucune quantité produite non réservée disponible pour cet article" }, { status: 400 });
+      if (plannedQty > availableToDeliver) {
+        return NextResponse.json({ error: `Quantité maximale à livrer : ${availableToDeliver}` }, { status: 400 });
+      }
 
-    const [duplicate] = await db.select({ id: expeditionPlanEntries.id })
-      .from(expeditionPlanEntries)
-      .where(and(
-        eq(expeditionPlanEntries.planDate, planDate),
-        eq(expeditionPlanEntries.itemId, itemId),
-        eq(expeditionPlanEntries.driverName, driverName),
-        ne(expeditionPlanEntries.status, "ANNULE"),
-        ne(expeditionPlanEntries.status, "LIVRE"),
-        ne(expeditionPlanEntries.status, "TERMINE"),
-      ))
-      .limit(1);
-    if (duplicate) return NextResponse.json({ error: "Cet article est déjà planifié pour ce chauffeur à cette date" }, { status: 409 });
+      const [duplicate] = await tx.select({ id: expeditionPlanEntries.id })
+        .from(expeditionPlanEntries)
+        .where(and(
+          eq(expeditionPlanEntries.planDate, planDate),
+          eq(expeditionPlanEntries.itemId, itemId),
+          eq(expeditionPlanEntries.driverName, driverName),
+          ne(expeditionPlanEntries.status, "ANNULE"),
+          ne(expeditionPlanEntries.status, "LIVRE"),
+          ne(expeditionPlanEntries.status, "TERMINE"),
+        ))
+        .limit(1);
+      if (duplicate) return NextResponse.json({ error: "Cet article est déjà planifié pour ce chauffeur à cette date" }, { status: 409 });
 
-    const [created] = await db.insert(expeditionPlanEntries).values({
-      planDate,
-      itemId: row.itemId,
-      orderId: row.orderId,
-      articleName: row.articleName,
-      orderNumber: row.orderNumber,
-      clientName: row.clientName,
-      plannedQty,
-      loadedQty: 0,
-      driverName,
-      status: "NON_TRAITE",
-      note,
-      createdById: user.id,
-      createdByName: user.fullName,
-      updatedByName: user.fullName,
-    }).returning();
+      const [created] = await tx.insert(expeditionPlanEntries).values({
+        planDate,
+        itemId: row.itemId,
+        orderId: row.orderId,
+        articleName: row.articleName,
+        orderNumber: row.orderNumber,
+        clientName: row.clientName,
+        plannedQty,
+        loadedQty: 0,
+        driverName,
+        status: "NON_TRAITE",
+        note,
+        createdById: user.id,
+        createdByName: user.fullName,
+        updatedByName: user.fullName,
+      }).returning();
 
-    await logActivity(user.id, user.username, "EXPEDITION_PLANNING_ADD",
-      `${row.articleName} — ${plannedQty} unité(s) à livrer, ${driverName}, le ${planDate}`);
-    return NextResponse.json({ plan: { ...created, status: "NON_TRAITE" } }, { status: 201 });
+      await tx.insert(activityLogs).values({ userId: user.id, username: user.username, action: "EXPEDITION_PLANNING_ADD",
+        details: `${row.articleName} — ${plannedQty} unité(s) à livrer, ${driverName}, le ${planDate}` });
+      return NextResponse.json({ plan: { ...created, status: "NON_TRAITE" } }, { status: 201 });
+    });
   } catch (error) {
     console.error("Erreur création planning expédition:", error);
     return NextResponse.json({ error: "Erreur lors de la création du planning d'expédition" }, { status: 500 });

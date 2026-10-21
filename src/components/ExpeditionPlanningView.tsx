@@ -14,6 +14,7 @@ type Plan = {
   id: number; planDate: string; itemId: number; orderId: number;
   articleName: string; orderNumber: string | null; clientName: string | null;
   plannedQty: number; loadedQty: number; driverName: string; status: string;
+  updatedAt: string;
   note: string | null; itemQuantity: number | null; itemDeliveredQty: number | null;
   itemProducedQty: number | null; productionStatus: string | null;
   affaire: string | null; priority: string | null;
@@ -44,6 +45,7 @@ export default function ExpeditionPlanningView({ user, pendingAction, onPendingA
   const [drivers, setDrivers] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [undoing, setUndoing] = useState<number | null>(null);
   const [notice, setNotice] = useState("");
   const [planningNotice, setPlanningNotice] = useState("");
   useEffect(() => { const n = takePlanningNotice(); if (n) setPlanningNotice(n); }, []);
@@ -146,6 +148,18 @@ export default function ExpeditionPlanningView({ user, pendingAction, onPendingA
     catch (err) { setError(err instanceof Error ? err.message : "Erreur de modification"); }
   };
 
+  const undoPlan = async (plan: Plan) => {
+    if (undoing !== null || !window.confirm(`Retour en arrière pour « ${plan.articleName} » (${plan.orderNumber || plan.orderId}), planning du ${plan.planDate}, ${plan.driverName} ?\n\n${plan.loadedQty} unité(s) seront retirées du cumul LIVRÉ. Le cumul produit ne changera pas. La ligne reviendra à « Non traité » et pourra être livrée à nouveau.`)) return;
+    setUndoing(plan.id); setError("");
+    try {
+      const result = await apiFetch<{ reversedQty: number }>(`/api/expedition-planning/${plan.id}/undo`, {
+        method: "POST", body: JSON.stringify({ confirmed: true, expectedUpdatedAt: plan.updatedAt }),
+      });
+      await loadPlans(); flash(`Retour effectué : −${result.reversedQty} du cumul livré. Ligne remise à « Non traité ».`);
+    } catch (err) { setError(err instanceof Error ? err.message : "Erreur de correction"); }
+    finally { setUndoing(null); }
+  };
+
   const deletePlan = async (plan: Plan) => {
     if (!window.confirm(`Retirer « ${plan.articleName} » du planning du ${plan.planDate} ?`)) return;
     try { await apiFetch(`/api/expedition-planning/${plan.id}`, { method: "DELETE" }); flash("Ligne retirée du planning"); await loadPlans(); }
@@ -205,13 +219,19 @@ export default function ExpeditionPlanningView({ user, pendingAction, onPendingA
                 <td className="px-3 py-2 font-semibold">{plan.articleName}</td>
                 <td className="px-3 py-2"><span className="font-mono">#{plan.orderNumber || plan.orderId}</span><span className="block text-[10px] text-gray-500">{plan.clientName || "—"}{plan.affaire ? ` · ${plan.affaire}` : ""}</span></td>
                 <td className="px-3 py-2">{plan.priority && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold" style={{ backgroundColor: getColor(priorityColorKey(plan.priority)), color: getContrastTextColor(getColor(priorityColorKey(plan.priority))) }}>{priorityLabel(plan.priority)}</span>}</td>
-                <td className="px-3 py-2">{canManage && !isLocked ? <input type="date" defaultValue={plan.planDate} onBlur={(event) => { if (event.target.value !== plan.planDate) void updatePlan(plan, { planDate: event.target.value }); }} className="px-2 py-1 border rounded" /> : plan.planDate}</td>
-                <td className="px-3 py-2">{canManage && !isLocked ? <input defaultValue={plan.driverName} onBlur={(event) => { const value = event.target.value.trim(); if (value && value !== plan.driverName) void updatePlan(plan, { driverName: value }); }} className="w-36 px-2 py-1 border rounded" /> : plan.driverName}</td>
-                <td className="px-3 py-2 text-right font-bold">{canManage && !isLocked ? <input type="number" min={1} max={available} defaultValue={plan.plannedQty} onBlur={(event) => { const value = Number(event.target.value); if (value > 0 && value !== plan.plannedQty) void updatePlan(plan, { plannedQty: value }); }} className="w-20 px-2 py-1 border rounded text-right" /> : plan.plannedQty}</td>
+                <td className="px-3 py-2">{canManage && !isLocked ? <input disabled={undoing !== null} type="date" defaultValue={plan.planDate} onBlur={(event) => { if (event.target.value !== plan.planDate) void updatePlan(plan, { planDate: event.target.value }); }} className="px-2 py-1 border rounded" /> : plan.planDate}</td>
+                <td className="px-3 py-2">{canManage && !isLocked ? <input disabled={undoing !== null} defaultValue={plan.driverName} onBlur={(event) => { const value = event.target.value.trim(); if (value && value !== plan.driverName) void updatePlan(plan, { driverName: value }); }} className="w-36 px-2 py-1 border rounded" /> : plan.driverName}</td>
+                <td className="px-3 py-2 text-right font-bold">{canManage && !isLocked ? <input disabled={undoing !== null} type="number" min={1} max={available} defaultValue={plan.plannedQty} onBlur={(event) => { const value = Number(event.target.value); if (value > 0 && value !== plan.plannedQty) void updatePlan(plan, { plannedQty: value }); }} className="w-20 px-2 py-1 border rounded text-right" /> : plan.plannedQty}</td>
                 <td className="px-3 py-2 text-right">{plan.loadedQty}</td>
-                <td className="px-3 py-2">{canManage && !isLocked ? <select value={plan.status} onChange={(event) => void updatePlan(plan, { status: event.target.value })} className="px-2 py-1 border rounded font-semibold">{STATUS_OPTIONS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select> : STATUS_LABELS[plan.status] || plan.status}</td>
-                <td className="px-3 py-2 max-w-[200px]">{canManage && !isLocked ? <input defaultValue={plan.note || ""} onBlur={(event) => { const value = event.target.value.trim() || null; if (value !== plan.note) void updatePlan(plan, { note: value }); }} className="w-full px-2 py-1 border rounded" /> : plan.note || "—"}</td>
-                <td className="px-3 py-2">{canManage && !isLocked && <button onClick={() => void deletePlan(plan)} className="px-2 py-1 bg-red-50 text-red-700 rounded">Retirer</button>}</td>
+                <td className="px-3 py-2">{canManage && !isLocked ? <select value={plan.status} disabled={undoing !== null} onChange={(event) => void updatePlan(plan, { status: event.target.value })} className="px-2 py-1 border rounded font-semibold">{STATUS_OPTIONS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select> : STATUS_LABELS[plan.status] || plan.status}</td>
+                <td className="px-3 py-2 max-w-[200px]">{canManage && !isLocked ? <input disabled={undoing !== null} defaultValue={plan.note || ""} onBlur={(event) => { const value = event.target.value.trim() || null; if (value !== plan.note) void updatePlan(plan, { note: value }); }} className="w-full px-2 py-1 border rounded" /> : plan.note || "—"}</td>
+                <td className="px-3 py-2">{canManage && !isLocked && <button disabled={undoing !== null} onClick={() => void deletePlan(plan)} className="px-2 py-1 bg-red-50 text-red-700 rounded">Retirer</button>}
+                  {canManage && <button disabled={undoing !== null || (plan.status === "NON_TRAITE" && plan.loadedQty === 0)}
+                    onClick={() => void undoPlan(plan)} title="Annuler le traitement et son effet sur le cumul livré"
+                    className="ml-2 px-2 py-1 text-xs bg-amber-100 text-amber-900 rounded disabled:opacity-40">
+                    {undoing === plan.id ? "Correction…" : "↶ Retour en arrière"}
+                  </button>}
+                </td>
               </tr>;
             })}
           </tbody></table>

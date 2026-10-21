@@ -54,6 +54,7 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [undoing, setUndoing] = useState<number | null>(null);
   const [notice, setNotice] = useState("");
 
   // Sélection d'articles (issus de l'onglet Production)
@@ -158,6 +159,19 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
       await apiFetch(`/api/production-planning/${entry.id}`, { method: "PUT", body: JSON.stringify({ reason: value }) });
       await load();
     } catch (err) { setError(err instanceof Error ? err.message : "Erreur"); }
+  };
+
+  const undoEntry = async (entry: Entry) => {
+    if (undoing !== null || !window.confirm(`Retour en arrière pour « ${entry.articleName} » (${entry.orderNumber || entry.orderId}), planning du ${entry.planDate} ?\n\n${entry.appliedQty} unité(s) seront retirées du cumul PRODUIT, sans modifier les autres traitements. La ligne reviendra à « En attente » et pourra être traitée à nouveau.\n\nSi ces quantités sont déjà livrées, corrigez d'abord l'expédition.`)) return;
+    setUndoing(entry.id); setError("");
+    try {
+      const result = await apiFetch<{ reversedQty: number }>(`/api/production-planning/${entry.id}/undo`, {
+        method: "POST", body: JSON.stringify({ confirmed: true, expectedUpdatedAt: entry.updatedAt }),
+      });
+      await load();
+      flash(`Retour effectué : −${result.reversedQty} du cumul produit. Ligne remise en attente. Vérifiez les priorités si une promotion automatique avait été déclenchée.`);
+    } catch (err) { setError(err instanceof Error ? err.message : "Erreur de correction"); }
+    finally { setUndoing(null); }
   };
 
   const removeEntry = async (entry: Entry) => {
@@ -358,7 +372,7 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
                       </td>
                       <td className="px-3 py-2">
                         {canManage ? (
-                          <select value={e.status} onChange={ev => changeStatus(e, ev.target.value)}
+                          <select value={e.status} disabled={Boolean(e.appliedAt) || e.appliedQty > 0 || e.status === "TERMINE" || undoing !== null} onChange={ev => changeStatus(e, ev.target.value)}
                             className={`text-[11px] font-bold px-2 py-1 rounded border border-black/20 ${blinking ? "planning-blink" : ""}`}
                             style={statusStyle(e.status, e.planDate)}>
                             {PLANNING_STATUSES.map(s => <option key={s.key} value={s.key} style={{ backgroundColor: "#fff", color: "#000" }}>{s.label}</option>)}
@@ -379,9 +393,14 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
                         )}
                       </td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">
-                        {canManage && !e.appliedAt && (
-                          <button onClick={() => removeEntry(e)} className="px-2 py-1 text-[10px] bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-100">Retirer</button>
+                        {canManage && !e.appliedAt && e.appliedQty === 0 && e.status !== "TERMINE" && (
+                          <button disabled={undoing !== null} onClick={() => removeEntry(e)} className="px-2 py-1 text-[10px] bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-100">Retirer</button>
                         )}
+                        {canManage && <button disabled={undoing !== null || (e.status === "EN_ATTENTE" && !e.appliedAt && e.appliedQty === 0)}
+                          onClick={() => void undoEntry(e)} title="Annuler le traitement et son effet sur le cumul produit"
+                          className="ml-2 px-2 py-1 text-[10px] bg-amber-100 text-amber-900 rounded disabled:opacity-40">
+                          {undoing === e.id ? "Correction…" : "↶ Retour en arrière"}
+                        </button>}
                         {e.appliedAt && <span className="text-[10px] text-gray-400" title={`Production appliquée le ${e.appliedAt}`}>🔒 appliqué</span>}
                       </td>
                     </tr>

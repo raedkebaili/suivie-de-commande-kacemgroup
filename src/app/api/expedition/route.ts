@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { orderItems, orders, clients, agencies, expeditionBatches, expeditionPlanEntries } from "@/db/schema";
 import { and, eq, desc, ne, sql } from "drizzle-orm";
+import { lockQuantityItem, reservedExpeditionQty } from "@/lib/quantity-transaction";
 import { todayISO } from "@/lib/production-planning-constants";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
@@ -63,11 +64,9 @@ export async function POST(request: NextRequest) {
   // L'article et, si besoin, sa ligne de planning sont verrouillés ensemble :
   // une double validation concurrente ne peut donc pas doubler le cumul livré.
   const result = await db.transaction(async (tx) => {
-    const [item] = await tx.select().from(orderItems)
-      .where(eq(orderItems.id, parsedItemId)).for("update").limit(1);
-    if (!item) return { ok: false as const, status: 404, error: "Article non trouvé" };
-    const [order] = await tx.select({ productionStatus: orders.productionStatus, orderNumber: orders.orderNumber })
-      .from(orders).where(eq(orders.id, item.orderId)).limit(1);
+    const locked = await lockQuantityItem(tx, parsedItemId);
+    if (!locked) return { ok: false as const, status: 404, error: "Article non trouvé" };
+    const { item, order } = locked;
     if (order?.productionStatus === "ANNULEE") {
       return { ok: false as const, status: 400, error: "Impossible d'expédier une commande annulée" };
     }
@@ -96,6 +95,9 @@ export async function POST(request: NextRequest) {
     if (selectedPlan && actualQty > selectedPlan.plannedQty - selectedPlan.loadedQty) {
       return { ok: false as const, status: 400, error: `Quantité restante sur le planning : ${selectedPlan.plannedQty - selectedPlan.loadedQty}` };
     }
+    if (actualQty > remaining - await reservedExpeditionQty(tx, item.id, selectedPlan?.id)) {
+      return { ok: false as const, status: 409, error: "Quantité réservée par un autre planning d'expédition : ajustez les lignes concernées" };
+    }
     const newCumulative = currentDelivered + actualQty;
     await tx.insert(expeditionBatches).values({
       itemId: item.id, orderId: item.orderId,
@@ -112,34 +114,26 @@ export async function POST(request: NextRequest) {
       await tx.update(expeditionPlanEntries).set({
         loadedQty,
         status: loadedQty >= selectedPlan.plannedQty ? "LIVRE" : "EN_COURS",
-        updatedAt: new Date().toISOString(),
+        updatedAt: sql`clock_timestamp()`,
         updatedByName: user.fullName,
       }).where(eq(expeditionPlanEntries.id, selectedPlan.id));
     }
-    return { ok: true as const, item, actualQty, newCumulative };
+    const allItems = await tx.select().from(orderItems).where(eq(orderItems.orderId, item.orderId));
+    const fullyDelivered = allItems.every(row => row.deliveredQty >= row.quantity);
+    const becameDelivered = fullyDelivered && order.productionStatus !== "LIVREE";
+    if (becameDelivered) await tx.update(orders).set({ productionStatus: "LIVREE", updatedAt: new Date().toISOString() }).where(eq(orders.id, item.orderId));
+    return { ok: true as const, item, actualQty, newCumulative, becameDelivered, orderNumber: order.orderNumber };
   });
 
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
   const { item, actualQty, newCumulative } = result;
 
-  // Check LIVREE
-  const [all] = await db.select({
-    tc: sql<number>`sum(${orderItems.quantity})`,
-    td: sql<number>`sum(${orderItems.deliveredQty})`,
-  }).from(orderItems).where(eq(orderItems.orderId, item.orderId));
-  if (all && Number(all.td) >= Number(all.tc)) {
-    const [order] = await db.select().from(orders).where(eq(orders.id, item.orderId)).limit(1);
-    if (order && order.productionStatus !== "LIVREE") {
-      await db.update(orders).set({ productionStatus: "LIVREE", updatedAt: new Date().toISOString() }).where(eq(orders.id, item.orderId));
-      await notifyRoles(["commercial"], {
-        eventKey: NOTIFICATION_EVENTS.ORDER_DELIVERED,
-        type: "success",
-        title: `Commande livrée #${order.orderNumber}`,
-        message: `La commande ${order.orderNumber} a été entièrement livrée`,
-        orderId: item.orderId,
-        targetTab: "orders",
-      });
-    }
+  if (result.becameDelivered) {
+    try {
+      await notifyRoles(["commercial"], { eventKey: NOTIFICATION_EVENTS.ORDER_DELIVERED, type: "success",
+        title: `Commande livrée #${result.orderNumber}`, message: `La commande ${result.orderNumber} a été entièrement livrée`,
+        orderId: item.orderId, targetTab: "orders" });
+    } catch (error) { console.error("Notification livraison:", error); }
   }
 
   await logActivity(user.id, user.username, "EXPEDITION", `+${actualQty} de ${item.articleName} (total livré: ${newCumulative}/${item.quantity})`);

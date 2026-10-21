@@ -229,7 +229,7 @@ export default function ExpeditionView({ user }: { user: User }) {
                             <span className="text-[9px] text-black">Historique :</span>
                             {batches.filter(batch => batch.itemId === item.itemId).map(batch => (
                               <span key={batch.id} className="text-[9px] bg-white/70 border border-black/20 px-1.5 py-0.5 rounded text-black" title={`${batch.deliveryDate} par ${batch.deliveredBy}`}>
-                                {batch.deliveryDate}: +{batch.quantity}→{batch.cumulativeTotal}{batch.driverName ? ` • ${batch.driverName}` : ""}
+                                {batch.deliveryDate}: {batch.quantity > 0 ? "+" : ""}{batch.quantity}{batch.quantity < 0 ? " (correction)" : ""}→{batch.cumulativeTotal}{batch.driverName ? ` • ${batch.driverName}` : ""}
                               </span>
                             ))}
                           </div>
