@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ARCHIVE_STATE_BY_KEY,
   detectResteColumnIndex,
   detectStateColumnIndex,
   parseArchiveStateFromText,
@@ -57,5 +58,23 @@ describe("archive — règle « cellule vide ≠ 0 » (invariant métier critiqu
     expect(detectResteColumnIndex(cols)).toBe(2);
     expect(detectStateColumnIndex(cols)).toBe(3);
     expect(detectResteColumnIndex(["A", "B"])).toBeNull();
+  });
+});
+
+describe("archive — bon de commande neutre", () => {
+  it("définit un état distinct, blanc par défaut", () => {
+    expect(ARCHIVE_STATE_BY_KEY.BON_COMMANDE).toMatchObject({ label: "Bon de commande", colorKey: "ARCHIVE_STATE_BON_COMMANDE", defaultColor: "#ffffff" });
+  });
+  it("reste prioritaire sur Livré et sur un reste à livrer égal à zéro", () => {
+    expect(resolveArchiveRowState("BON_COMMANDE", "0", "LIVRE")).toBe("BON_COMMANDE");
+    expect(resolveArchiveStateSource("BON_COMMANDE", "0", "LIVRE")).toBe("manuel");
+    expect(resolveArchiveRowState(null, "0", "BON_COMMANDE")).toBe("BON_COMMANDE");
+    expect(resolveArchiveRowState(null, "0", "LIVRE")).toBe("LIVRE");
+  });
+  it.each(["Bon de commande", "BON_COMMANDE", "bon commande", " BC "])("reconnaît %s à l'import", value => {
+    expect(parseArchiveStateFromText(value)).toBe("BON_COMMANDE");
+  });
+  it("ne confond pas bon de commande et bon de livraison", () => {
+    expect(parseArchiveStateFromText("Bon de livraison")).toBeNull();
   });
 });

@@ -14,7 +14,7 @@ import { archiveRightsFor, changedCellIndexes } from "@/lib/archive-rights";
  * - cellules : superadmin, planification, technique et commercial.
  * Une cellule modifiée par un commercial est marquée (archive_cell_modifications)
  * pour être affichée dans la couleur « Champs Modifiés » du gestionnaire.
- * Body: { state?: "LIVRE" | "PREVISION" | "PRET_A_LIVRE" | "ANNULE" | null, cells?: string[] }
+ * Body: { state?: "LIVRE" | "PREVISION" | "PRET_A_LIVRE" | "ANNULE" | "BON_COMMANDE" | null, cells?: string[] }
  *
  * IMPORTANT : changer l'état ne touche JAMAIS aux couleurs personnalisées
  * des cellules (table archive_cell_colors distincte, aucune suppression ici).

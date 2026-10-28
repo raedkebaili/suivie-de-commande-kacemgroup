@@ -11,7 +11,7 @@
 
 export const ARCHIVE_COLOR_CATEGORY = "archive";
 
-export type ArchiveStateKey = "LIVRE" | "PREVISION" | "PRET_A_LIVRE" | "ANNULE";
+export type ArchiveStateKey = "LIVRE" | "PREVISION" | "PRET_A_LIVRE" | "ANNULE" | "BON_COMMANDE";
 
 export type ArchiveStateDef = {
   key: ArchiveStateKey;
@@ -28,6 +28,7 @@ export const ARCHIVE_STATES: ArchiveStateDef[] = [
   { key: "PREVISION",    label: "Prévision",    colorKey: "ARCHIVE_STATE_PREVISION",    defaultColor: "#f97316", description: "Archive — ligne en prévision (orangé)",   sortOrder: 410 },
   { key: "PRET_A_LIVRE", label: "Prêt à livré", colorKey: "ARCHIVE_STATE_PRET_A_LIVRE", defaultColor: "#facc15", description: "Archive — ligne prête à livrer (jaune)",  sortOrder: 420 },
   { key: "ANNULE",       label: "Annulé",       colorKey: "ARCHIVE_STATE_ANNULE",       defaultColor: "#ef4444", description: "Archive — ligne annulée (rouge)",         sortOrder: 430 },
+  { key: "BON_COMMANDE", label: "Bon de commande", colorKey: "ARCHIVE_STATE_BON_COMMANDE", defaultColor: "#ffffff", description: "Archive — bon de commande (blanc neutre)", sortOrder: 440 },
 ];
 
 /** Palette proposée pour la couleur personnalisée d'une cellule d'archive */
@@ -171,6 +172,8 @@ export function parseArchiveStateFromText(raw: string | null | undefined): Archi
   const c = normHeader(String(raw ?? ""));
   if (!c) return null;
 
+  // Libellé Excel ou clé canonique, sans confondre un bon de livraison.
+  if (c === "bondecommande" || c === "boncommande" || c === "bc") return "BON_COMMANDE";
   // Annulé / annulee / annule
   if (c.startsWith("annul")) return "ANNULE";
   // Prêt à livrer / pret a livre / preta...

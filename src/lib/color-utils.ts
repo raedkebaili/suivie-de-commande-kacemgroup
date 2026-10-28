@@ -54,6 +54,10 @@ export const DEFAULT_COLORS: Array<{
   // Études photométriques
   { key: "ETUDE_PHOTOMETRIQUE", category: "etude", label: "Étude Photométrique", color: "#0ea5e9", description: "Couleur des lignes d'étude photométrique dans le tableau", sortOrder: 160 },
 
+  // Archive : fond neutre disponible avant même le seed / chargement des couleurs.
+  // Clé distincte du statut des commandes actives ; les cellules gardent leur priorité.
+  { key: "ARCHIVE_STATE_BON_COMMANDE", category: "archive", label: "Archive — Bon de commande", color: "#ffffff", description: "Archive — bon de commande (blanc neutre)", sortOrder: 440 },
+
   // Télégestion — reprend le bleu ciel déjà utilisé par les spécifications
   // techniques de télégestion (composants 📡), désormais administrable.
   { key: "TELEGESTION_ITEM", category: "technique", label: "Article Télégestion", color: "#bae6fd", description: "Surbrillance des articles de la famille télégestion", sortOrder: 170 },
