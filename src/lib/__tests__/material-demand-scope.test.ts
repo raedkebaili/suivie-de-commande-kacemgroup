@@ -13,7 +13,7 @@ beforeAll(async () => {
     CREATE TABLE order_items (id integer PRIMARY KEY, order_id integer REFERENCES orders(id), quantity integer DEFAULT 100, produced_qty integer DEFAULT 0, delivered_qty integer DEFAULT 0);
     CREATE TABLE production_batches (item_id integer DEFAULT 11, order_id integer REFERENCES orders(id), quantity integer);
     CREATE TABLE expedition_batches (item_id integer DEFAULT 11, order_id integer REFERENCES orders(id), quantity integer);
-    CREATE TABLE production_plan_entries (order_id integer REFERENCES orders(id), status text DEFAULT 'EN_ATTENTE', applied_qty integer DEFAULT 0, applied_at text);
+    CREATE TABLE production_plan_entries (plan_date text DEFAULT '2000-01-01', order_id integer REFERENCES orders(id), status text DEFAULT 'EN_ATTENTE', applied_qty integer DEFAULT 0, applied_at text);
   `);
 }, 30_000);
 afterAll(async () => { await database?.close(); });
@@ -98,4 +98,9 @@ it.each(["production_batches", "expedition_batches"])("un retour arrière compen
   expect(await eligible()).toEqual([11]);
   await database.exec(`INSERT INTO ${table} (order_id,item_id,quantity) VALUES (1,12,10),(1,13,-10)`);
   expect(await eligible()).toEqual([]);
+});
+
+it("un démarrage prévu dans le futur sans quantité appliquée reste un besoin non traité", async () => {
+  await database.exec("INSERT INTO production_plan_entries (order_id,status,plan_date) VALUES (1,'EN_COURS','2999-01-01')");
+  expect(await eligible()).toEqual([11]);
 });

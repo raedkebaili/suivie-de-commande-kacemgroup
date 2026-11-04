@@ -1,8 +1,10 @@
+import { isWorkflowFilter } from "@/lib/workflow-filters";
+import { workflowFilterSQL } from "@/lib/workflow-filter-sql";
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { orders, orderItems, clients, agencies, itemTechnicalComponents, matieres, materialCategories, photometricStudies, photometricStudyItems } from "@/db/schema";
-import { eq, desc, and, inArray, isNull } from "drizzle-orm";
+import { eq, desc, and, inArray, isNull, sql } from "drizzle-orm";
 import { getUserFromHeaders } from "@/lib/auth";
 import { agencyScopeForUser } from "@/lib/agency-access";
 
@@ -11,14 +13,21 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
   const sp = new URL(request.url).searchParams;
+  if (!isWorkflowFilter(sp.get("workflow"))) return NextResponse.json({ error: "Filtre d’avancement invalide" }, { status: 400 });
   const status = sp.get("status");
   const agencyId = sp.get("agencyId");
   const photometricOnly = sp.get("photometric") === "1";
   const conds = [];
+  const workflow = workflowFilterSQL(sp.get("workflow"));
+  if (workflow) conds.push(workflow);
   const agencyScope = agencyScopeForUser(user);
   if (agencyScope) conds.push(inArray(orders.agencyId, agencyScope));
+  if (sp.get("productionStatus")) conds.push(eq(orders.productionStatus, sp.get("productionStatus")!));
   if (status) conds.push(eq(orders.status, status));
+  if (sp.get("priority")) conds.push(eq(orders.priority, sp.get("priority")!));
   if (agencyId) conds.push(eq(orders.agencyId, parseInt(agencyId)));
+  if (sp.get("factory")) conds.push(sql`EXISTS (SELECT 1 FROM order_items export_i WHERE export_i.order_id = ${orders.id} AND export_i.production_unit = ${sp.get("factory")})`);
+  if (sp.get("telegestion") === "1") conds.push(sql`EXISTS (SELECT 1 FROM order_items export_i WHERE export_i.order_id = ${orders.id} AND export_i.is_telegestion = true)`);
   if (photometricOnly) {
     const matching = await db.selectDistinct({ orderId: photometricStudies.orderId }).from(photometricStudies);
     const ids = matching.map((row) => row.orderId).filter((id): id is number => id !== null);

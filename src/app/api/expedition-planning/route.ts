@@ -1,3 +1,4 @@
+import { filterPlanningRows } from "@/lib/planning-list";
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
@@ -71,10 +72,7 @@ export async function GET(request: NextRequest) {
     .orderBy(asc(expeditionPlanEntries.planDate), asc(expeditionPlanEntries.driverName), asc(expeditionPlanEntries.id));
 
   const plans = rows.map((row) => ({ ...row, status: normalizeStatus(row.status) }));
-  const filteredPlans = search
-    ? plans.filter((plan) => [plan.articleName, plan.orderNumber, plan.clientName, plan.affaire, plan.driverName]
-      .some((value) => String(value || "").toLowerCase().includes(search)))
-    : plans;
+  const filteredPlans = filterPlanningRows(plans, search || "");
 
   const driverRows = await db.selectDistinct({ driverName: expeditionPlanEntries.driverName })
     .from(expeditionPlanEntries)

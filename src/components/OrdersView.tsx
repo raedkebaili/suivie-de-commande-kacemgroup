@@ -1,4 +1,5 @@
 "use client";
+import { WORKFLOW_FILTERS, appendOrderStateFilter } from "@/lib/workflow-filters";
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { apiFetch } from "@/lib/api";
 import type { Order, OrderItem, Agency, Client, User, ExpeditionBatch, MaterialCategory, Material, ClientRecouvrementAssignment } from "@/lib/types";
@@ -362,21 +363,27 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
     void saveColumnVisibility({ hiddenProductionStates: next });
   };
 
+  const orderRequestVersion = useRef(0);
   const fetchOrders = useCallback(async()=>{
+    const version = ++orderRequestVersion.current;
     void fetchColumnVisibility();
     const p=new URLSearchParams();
     // Le filtre d'états est préfixé pour viser la bonne colonne :
     //   comm:*     → état commercial (orders.status)
     //   prod:*     → état de production (orders.productionStatus)
     //   planning:* → filtre côté client sur le planning de production
-    if(fs.startsWith("comm:"))p.set("status",fs.slice(5));
-    else if(fs.startsWith("prod:"))p.set("productionStatus",fs.slice(5));
+    appendOrderStateFilter(p, fs);
     if(fa)p.set("agencyId",fa);
     if(fp)p.set("priority",fp);
     if(ff)p.set("factory",ff);
     if(ftel)p.set("telegestion","1");
     if(fphoto)p.set("photometric","1");
-    setOrders((await apiFetch<{orders:FullOrder[]}>(`/api/orders?${p}`)).orders);
+    const payload = await apiFetch<{orders:FullOrder[]}>(`/api/orders?${p}`);
+    if (version !== orderRequestVersion.current) return;
+    setOrders(payload.orders);
+    void apiFetch<{itemIds:number[]}>("/api/production-planning/active").then(data => {
+      if (version === orderRequestVersion.current) setPlanningActiveItems(new Set(data.itemIds || []));
+    }).catch(()=>{});
     setDataVersion(v=>v+1)
   },[fs,fa,fp,ff,ftel,fphoto,fetchColumnVisibility]);
   useEffect(()=>{setLoading(true);Promise.all([
@@ -386,7 +393,6 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
     apiFetch<{categories:MaterialCategory[]}>("/api/material-categories").then(d=>setMaterialCategories(d.categories.filter(category=>category.active))).catch(()=>{}),
     apiFetch<{matieres:Material[]}>("/api/matieres").then(d=>setMaterials(d.matieres)).catch(()=>{}),
     apiFetch<{assignments:ClientRecouvrementAssignment[]}>("/api/recouvrement/client-states").then(d=>setRecouvByClient(new Map(d.assignments.map(a=>[a.clientId,a])))).catch(()=>{}),
-    apiFetch<{itemIds:number[]}>("/api/production-planning/active").then(d=>setPlanningActiveItems(new Set(d.itemIds||[]))).catch(()=>{}),
     apiFetch<{factories:{id:number;code:string;name:string;active:boolean}[]}>("/api/factories").then(d=>setFactoryList(d.factories)).catch(()=>{}),
   ]).finally(()=>setLoading(false))},[fetchOrders]);
 
@@ -508,11 +514,6 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
     let arr = query.length >= 2
       ? orders.filter((order) => orderMatchesSearch(order, query))
       : [...orders];
-    if (fs === "planning:EN_COURS") {
-      arr = arr.filter(o => (o.items || []).some(i => !!i.id && planningActiveItems.has(i.id)));
-    } else if (fs === "planning:NONE") {
-      arr = arr.filter(o => !(o.items || []).some(i => !!i.id && planningActiveItems.has(i.id)));
-    }
     const dir = sortDir === "asc" ? 1 : -1;
     arr.sort((a, b) => {
       if (sortField === "alpha") {
@@ -527,7 +528,7 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
       return dir * (da - db);
     });
     return arr;
-  }, [orders, sortField, sortDir, fs, planningActiveItems, searchTerm]);
+  }, [orders, sortField, sortDir, searchTerm]);
 
   // Empiler / Dépiler toutes les commandes en un clic.
   const allExpanded = sortedOrders.length > 0 && sortedOrders.every(o => expandedOrders.has(o.id));
@@ -632,7 +633,7 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
     setShowExpHistory(true);
   }, []);
   const showModifications=async(orderId:number)=>{setModOrderId(orderId);const d=await apiFetch<{logs:typeof modLogs}>(`/api/order-modifications/${orderId}`);setModLogs(d.logs);setShowModHistory(true)};
-  const ee=async()=>{const p=new URLSearchParams();if(fs.startsWith("comm:"))p.set("status",fs.slice(5));if(fa)p.set("agencyId",fa);if(fphoto)p.set("photometric","1");const res=await fetch(`/api/orders/export?${p}`,{credentials:"same-origin"});if(!res.ok){alert("Erreur export");return}const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`commandes_${new Date().toISOString().split("T")[0]}.xlsx`;a.click();URL.revokeObjectURL(url)};
+  const ee=async()=>{const p=new URLSearchParams();appendOrderStateFilter(p,fs);if(ff)p.set("factory",ff);if(ftel)p.set("telegestion","1");if(fp)p.set("priority",fp);if(fa)p.set("agencyId",fa);if(fphoto)p.set("photometric","1");const res=await fetch(`/api/orders/export?${p}`,{credentials:"same-origin"});if(!res.ok){alert("Erreur export");return}const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`commandes_${new Date().toISOString().split("T")[0]}.xlsx`;a.click();URL.revokeObjectURL(url)};
   const ai=()=>setFormItems([...formItems,{articleName:"",quantity:1,unitPrice:"",description:""}]);
   const ri=(i:number)=>{if(formItems.length<=1)return;setFormItems(formItems.filter((_,x)=>x!==i))};
   const ui=(i:number,f:keyof OrderItem,v:string|number)=>{const u=[...formItems];(u[i]as Record<string,unknown>)[f]=v;setFormItems(u)};
@@ -1155,16 +1156,9 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
           <option value="comm:BON_COMMANDE">📋 Bon de commande</option>
           <option value="comm:PREVISION">🟠 Prévision</option>
         </optgroup>
-        <optgroup label="État de production">
-          <option value="prod:EN_INSTANCE">🟣 En instance</option>
-          <option value="prod:EN_PRODUCTION">🟡 En production</option>
-          <option value="prod:LIVREE">🟢 Livrée</option>
-          <option value="prod:ANNULEE">🔴 Annulée</option>
-        </optgroup>
-        <optgroup label="Planning de production">
-          <option value="planning:EN_COURS">🏭 En cours de production (planning)</option>
-          <option value="planning:NONE">⚪ Hors planning</option>
-        </optgroup>
+        {[...new Set(WORKFLOW_FILTERS.map(filter => filter.group))].map(group => <optgroup key={group} label={group}>
+          {WORKFLOW_FILTERS.filter(filter => filter.group === group).map(filter => <option key={filter.key} value={`workflow:${filter.key}`}>{filter.label}</option>)}
+        </optgroup>)}
       </select>
       <select value={fa} onChange={e=>setFa(e.target.value)} className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"><option value="">Agences</option>{accessibleAgencies().map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select>
       <select value={ff} onChange={e=>setFf(e.target.value)} title="Filtrer par usine (unité de production)"

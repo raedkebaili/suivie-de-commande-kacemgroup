@@ -1,8 +1,9 @@
+import { agencyScopeForUser } from "@/lib/agency-scope";
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { clients, factories, orderItems, orders, productionPlanEntries } from "@/db/schema";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
 import { ensurePlanningColors } from "@/lib/production-planning";
@@ -24,8 +25,11 @@ export async function GET(request: NextRequest) {
 
   const sp = new URL(request.url).searchParams;
   const date = sp.get("date") || todayISO();
+  const scope = agencyScopeForUser(user);
   const factoryId = sp.get("factoryId"); // chaque usine a son propre planning
 
+  if (date !== "all" && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return NextResponse.json({ error: "Date invalide" }, { status: 400 });
+  if (factoryId && (!/^[1-9]\d*$/.test(factoryId) || !Number.isSafeInteger(Number(factoryId)))) return NextResponse.json({ error: "Usine invalide" }, { status: 400 });
   try {
     await ensurePlanningColors();
 
@@ -57,10 +61,9 @@ export async function GET(request: NextRequest) {
       .from(productionPlanEntries)
       .leftJoin(orderItems, eq(productionPlanEntries.itemId, orderItems.id))
       .leftJoin(orders, eq(productionPlanEntries.orderId, orders.id))
-      .where(factoryId
-        ? and(eq(productionPlanEntries.planDate, date), eq(productionPlanEntries.factoryId, parseInt(factoryId)))
-        : eq(productionPlanEntries.planDate, date))
-      .orderBy(asc(productionPlanEntries.id));
+      .where(and(scope ? inArray(orders.agencyId, scope) : undefined, date === "all" ? undefined : eq(productionPlanEntries.planDate, date),
+        factoryId ? eq(productionPlanEntries.factoryId, parseInt(factoryId)) : undefined))
+      .orderBy(asc(productionPlanEntries.planDate), asc(productionPlanEntries.id));
 
     return NextResponse.json({ date, factoryId: factoryId ? parseInt(factoryId) : null, entries: rows });
   } catch (error) {

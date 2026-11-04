@@ -1,4 +1,5 @@
 "use client";
+import { appendOrderStateFilter } from "@/lib/workflow-filters";
 import { MATERIAL_DEMAND_RULE, MATERIAL_DEMAND_CALCULATION } from "@/lib/material-demand-policy";
 import { memo, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -22,10 +23,7 @@ function MaterialRequirementsSummary({ filters, refreshKey }: { filters: { statu
   const [reload, setReload] = useState(0);
   const query = useMemo(() => {
     const sp = new URLSearchParams();
-    if (filters.status.startsWith("comm:")) sp.set("status", filters.status.slice(5));
-    else if (filters.status.startsWith("prod:")) sp.set("productionStatus", filters.status.slice(5));
-    else if (filters.status.startsWith("planning:")) sp.set("planningStatus", filters.status.slice(9));
-    else if (filters.status) sp.set("status", filters.status);
+    appendOrderStateFilter(sp, filters.status);
     if (filters.agency) sp.set("agencyId", filters.agency);
     if (filters.priority) sp.set("priority", filters.priority);
     for (const [key, value] of Object.entries(local)) {

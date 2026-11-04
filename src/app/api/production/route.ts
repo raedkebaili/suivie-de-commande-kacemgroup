@@ -1,3 +1,5 @@
+import { isWorkflowFilter } from "@/lib/workflow-filters";
+import { workflowFilterSQL } from "@/lib/workflow-filter-sql";
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
@@ -11,29 +13,38 @@ export async function GET(request: NextRequest) {
   if (!user || !["superadmin", "planification"].includes(user.role))
     return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
 
-  const items = await db.select({
-    itemId: orderItems.id, orderId: orderItems.orderId,
-    articleName: orderItems.articleName, quantity: orderItems.quantity,
-    producedQty: orderItems.producedQty, deliveredQty: orderItems.deliveredQty,
-    orderNumber: orders.orderNumber, clientName: clients.name,
-    agencyName: agencies.name, priority: orders.priority, status: orders.status,
-    productionStatus: orders.productionStatus, affaire: orders.affaire,
-  }).from(orderItems).leftJoin(orders, eq(orderItems.orderId, orders.id))
-    .leftJoin(clients, eq(orders.clientId, clients.id))
-    .leftJoin(agencies, eq(orders.agencyId, agencies.id))
-    .orderBy(desc(orderItems.id)).limit(300);
+  const sp = new URL(request.url).searchParams;
+  if (!isWorkflowFilter(sp.get("workflow"))) return NextResponse.json({ error: "Filtre d’avancement invalide" }, { status: 400 });
+  return db.transaction(async tx => {
+    const items = await tx.select({
+      itemId: orderItems.id, orderId: orderItems.orderId,
+      articleName: orderItems.articleName, quantity: orderItems.quantity,
+      producedQty: orderItems.producedQty, deliveredQty: orderItems.deliveredQty,
+      orderNumber: orders.orderNumber, clientName: clients.name,
+      agencyName: agencies.name, priority: orders.priority, status: orders.status,
+      productionStatus: orders.productionStatus, affaire: orders.affaire,
+    }).from(orderItems).leftJoin(orders, eq(orderItems.orderId, orders.id))
+      .leftJoin(clients, eq(orders.clientId, clients.id))
+      .leftJoin(agencies, eq(orders.agencyId, agencies.id))
+      .orderBy(desc(orderItems.id));
 
-  // Get all batches for these items with article name
-  const rawBatches = await db.select({
-    id: productionBatches.id, itemId: productionBatches.itemId, orderId: productionBatches.orderId,
-    quantity: productionBatches.quantity, cumulativeTotal: productionBatches.cumulativeTotal,
-    producedBy: productionBatches.producedBy, productionDate: productionBatches.productionDate,
-    createdAt: productionBatches.createdAt,
-    article_name: orderItems.articleName,
-  }).from(productionBatches).innerJoin(orderItems, eq(orderItems.id, productionBatches.itemId))
-    .orderBy(desc(productionBatches.createdAt)).limit(500);
+    const matchingItemIds = sp.get("workflow")
+      ? (await tx.select({ id: orderItems.id }).from(orderItems).leftJoin(orders, eq(orderItems.orderId, orders.id))
+        .where(workflowFilterSQL(sp.get("workflow"), true))).map(row => row.id)
+      : null;
 
-  return NextResponse.json({ items, batches: rawBatches });
+    // Get all batches for these items with article name
+    const rawBatches = await tx.select({
+      id: productionBatches.id, itemId: productionBatches.itemId, orderId: productionBatches.orderId,
+      quantity: productionBatches.quantity, cumulativeTotal: productionBatches.cumulativeTotal,
+      producedBy: productionBatches.producedBy, productionDate: productionBatches.productionDate,
+      createdAt: productionBatches.createdAt,
+      article_name: orderItems.articleName,
+    }).from(productionBatches).innerJoin(orderItems, eq(orderItems.id, productionBatches.itemId))
+      .orderBy(desc(productionBatches.createdAt)).limit(500);
+
+    return NextResponse.json({ items, matchingItemIds, batches: rawBatches });
+  }, { isolationLevel: "repeatable read", accessMode: "read only" });
 }
 
 export async function POST(request: NextRequest) {

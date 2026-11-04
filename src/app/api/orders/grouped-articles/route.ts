@@ -1,3 +1,5 @@
+import { isWorkflowFilter } from "@/lib/workflow-filters";
+import { workflowFilterSQL } from "@/lib/workflow-filter-sql";
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
@@ -37,14 +39,18 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
   const sp = new URL(request.url).searchParams;
+  if (!isWorkflowFilter(sp.get("workflow"))) return NextResponse.json({ error: "Filtre d’avancement invalide" }, { status: 400 });
   const status = sp.get("status");
   const agencyId = sp.get("agencyId");
   const priority = sp.get("priority");
   const format = sp.get("format");
 
   const conds = [];
+  const workflow = workflowFilterSQL(sp.get("workflow"));
+  if (workflow) conds.push(workflow);
   const agencyScope = agencyScopeForUser(user);
   if (agencyScope) conds.push(inArray(orders.agencyId, agencyScope));
+  if (sp.get("productionStatus")) conds.push(eq(orders.productionStatus, sp.get("productionStatus")!));
   if (status) conds.push(eq(orders.status, status));
   if (agencyId) conds.push(eq(orders.agencyId, parseInt(agencyId)));
   if (priority) conds.push(eq(orders.priority, priority));

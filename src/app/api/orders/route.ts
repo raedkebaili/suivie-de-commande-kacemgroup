@@ -1,3 +1,5 @@
+import { isWorkflowFilter } from "@/lib/workflow-filters";
+import { workflowFilterSQL } from "@/lib/workflow-filter-sql";
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
@@ -19,6 +21,7 @@ async function auth(r: Request, roles?: string[]) {
 export async function GET(request: NextRequest) {
   const a = await auth(request); if (!a.ok) return NextResponse.json({ error: a.error }, { status: a.status });
   const sp = new URL(request.url).searchParams;
+  if (!isWorkflowFilter(sp.get("workflow"))) return NextResponse.json({ error: "Filtre d’avancement invalide" }, { status: 400 });
   const status = sp.get("status"); const agencyId = sp.get("agencyId"); const priority = sp.get("priority");
   const photometricOnly = sp.get("photometric") === "1";
   // Filtre sur l'état de PRODUCTION (colonne distincte de l'état commercial).
@@ -28,6 +31,8 @@ export async function GET(request: NextRequest) {
   // l'unité de production correspond au nom de l'usine (alimenté par le planning).
   const factory = sp.get("factory");
   const conds = [];
+  const workflow = workflowFilterSQL(sp.get("workflow"));
+  if (workflow) conds.push(workflow);
   const agencyScope = agencyScopeForUser(a.user);
   if (agencyScope) conds.push(inArray(orders.agencyId, agencyScope));
   if (status) conds.push(eq(orders.status, status));

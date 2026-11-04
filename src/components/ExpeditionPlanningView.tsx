@@ -1,7 +1,8 @@
 "use client";
 
 import { type ShortcutRequest } from "@/lib/keyboard-shortcuts";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, useRef } from "react";
+import { EXPEDITION_PLANNING_FILTERS, filterPlanningRows } from "@/lib/planning-list";
 import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
 import { todayISO } from "@/lib/production-planning-constants";
@@ -38,6 +39,8 @@ const availableQty = (item: Pick<ProdItem, "producedQty" | "deliveredQty">) => M
 export default function ExpeditionPlanningView({ user, pendingAction, onPendingActionHandled }: { user: User; pendingAction?: ShortcutRequest | null; onPendingActionHandled?: () => void }) {
   const canManage = user.role === "superadmin" || user.role === "planification";
   const { getColor } = useColors();
+  const [allDates, setAllDates] = useState(false);
+  const [listState, setListState] = useState("");
   const [date, setDate] = useState(todayISO());
   const [driverFilter, setDriverFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -62,20 +65,25 @@ export default function ExpeditionPlanningView({ user, pendingAction, onPendingA
     window.setTimeout(() => setNotice(""), 4500);
   };
 
-  const loadPlans = useCallback(async () => {
+  const requestVersion = useRef(0), activeScope = useRef("");
+  const loadPlans = useCallback(async (activate = false) => {
+    const scope = `${date}|${driverFilter}|${allDates}`;
+    if (activate) activeScope.current = scope;
+    else if (activeScope.current !== scope) return;
+    const version = ++requestVersion.current;
     setLoading(true);
     try {
-      const query = new URLSearchParams({ date });
+      const query = new URLSearchParams({ date: allDates ? "all" : date });
       if (driverFilter !== "all") query.set("driver", driverFilter);
-      if (search.trim()) query.set("search", search.trim());
       const data = await apiFetch<{ plans: Plan[]; drivers: string[] }>(`/api/expedition-planning?${query}`);
+      if (version !== requestVersion.current) return;
       setPlans(data.plans); setDrivers(data.drivers); setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erreur de chargement");
-    } finally { setLoading(false); }
-  }, [date, driverFilter, search]);
+      if (version === requestVersion.current) { setPlans([]); setError(err instanceof Error ? err.message : "Erreur de chargement"); }
+    } finally { if (version === requestVersion.current) setLoading(false); }
+  }, [date, driverFilter, allDates]);
 
-  useEffect(() => { void loadPlans(); }, [loadPlans]);
+  useEffect(() => { void loadPlans(true); return () => { requestVersion.current += 1; }; }, [loadPlans]);
 
   const openPicker = async () => {
     setError(""); setShowPicker(true); setSelection({}); setPickerSearch(""); setDriverName(""); setNote("");
@@ -169,7 +177,9 @@ export default function ExpeditionPlanningView({ user, pendingAction, onPendingA
   const shiftDay = (delta: number) => {
     const next = new Date(`${date}T12:00:00`); next.setDate(next.getDate() + delta); setDate(next.toISOString().slice(0, 10));
   };
-  const stats = useMemo(() => ({ count: plans.length, quantity: plans.reduce((sum, plan) => sum + plan.plannedQty, 0), loaded: plans.reduce((sum, plan) => sum + plan.loadedQty, 0) }), [plans]);
+  const searchedPlans = useMemo(() => filterPlanningRows(plans, search), [plans, search]);
+  const visiblePlans = filterPlanningRows(searchedPlans, "", listState);
+  const stats = useMemo(() => ({ count: searchedPlans.length, quantity: searchedPlans.reduce((sum, plan) => sum + plan.plannedQty, 0), loaded: searchedPlans.reduce((sum, plan) => sum + plan.loadedQty, 0) }), [searchedPlans]);
 
   // Raccourci clavier demandé par la page — voir src/lib/keyboard-shortcuts.ts
   useEffect(() => {
@@ -191,28 +201,30 @@ export default function ExpeditionPlanningView({ user, pendingAction, onPendingA
       <div className="flex flex-wrap items-center gap-2">
         <div><h3 className="text-lg font-semibold">🚚 Planning d&apos;expédition</h3><p className="text-xs text-gray-500">Les articles proposés proviennent uniquement de la production disponible.</p></div>
         <div className="flex-1" />
-        <button onClick={() => shiftDay(-1)} className="px-2.5 py-1.5 bg-gray-200 rounded-lg text-sm">←</button>
-        <input type="date" value={date} onChange={(event) => setDate(event.target.value)} className="px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-sm" />
-        <button onClick={() => shiftDay(1)} className="px-2.5 py-1.5 bg-gray-200 rounded-lg text-sm">→</button>
-        <button onClick={() => setDate(todayISO())} className="px-3 py-1.5 bg-gray-100 border border-gray-300 rounded-lg text-sm">Aujourd&apos;hui</button>
-        {canManage && <button onClick={openPicker} title="Planifier une expédition (Alt+X)" className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-semibold">+ Planifier une expédition</button>}
+        <button onClick={() => { setAllDates(false); shiftDay(-1); }} className="px-2.5 py-1.5 bg-gray-200 rounded-lg text-sm">←</button>
+        <input type="date" value={date} onChange={(event) => { setAllDates(false); setDate(event.target.value); }} className="px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-sm" />
+        <button onClick={() => { setAllDates(false); shiftDay(1); }} className="px-2.5 py-1.5 bg-gray-200 rounded-lg text-sm">→</button>
+        <button onClick={() => { setAllDates(false); setDate(todayISO()); }} className="px-3 py-1.5 bg-gray-100 border border-gray-300 rounded-lg text-sm">Aujourd&apos;hui</button>
+        {canManage && <button onClick={() => { setAllDates(false); void openPicker(); }} title="Planifier une expédition (Alt+X)" className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-semibold">+ Planifier une expédition</button>}
         <button onClick={() => void loadPlans()} className="px-3 py-1.5 bg-gray-200 border border-gray-400 rounded-lg text-sm">🔄</button>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 bg-white border border-gray-200 rounded-xl p-3">
+        <label className="text-sm"><input type="checkbox" checked={allDates} onChange={event => setAllDates(event.target.checked)} /> Bilan global — toutes les dates</label>
+        <select aria-label="Filtrer l’état du planning expédition" value={listState} onChange={event => setListState(event.target.value)} className="border rounded px-2 py-2 text-sm"><option value="">Tous les états</option>{EXPEDITION_PLANNING_FILTERS.map(state => <option key={state.key} value={state.key}>{state.label}</option>)}</select>
         <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Rechercher article, commande, client, affaire…" className="min-w-[220px] flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm" />
         <select value={driverFilter} onChange={(event) => setDriverFilter(event.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm"><option value="all">Tous les chauffeurs / porteurs</option>{drivers.map((driver) => <option key={driver} value={driver}>{driver}</option>)}</select>
-        <span className="text-xs text-gray-500">{stats.count} article(s) · {stats.loaded}/{stats.quantity} livré(s)</span>
+        <span className="text-xs text-gray-500">{visiblePlans.length} ligne(s) affichée(s) / {stats.count} · {stats.loaded}/{stats.quantity} livré(s) dans le périmètre</span>
       </div>
       {error && <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}
       {notice && <div className="p-3 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm">{notice}</div>}
 
-      {loading ? <div className="flex justify-center py-12">Chargement...</div> : plans.length === 0 ? <div className="bg-white rounded-2xl border border-gray-200 py-12 text-center text-sm text-gray-500">Aucun article planifié pour ces critères.</div> : (
+      {loading ? <div className="flex justify-center py-12">Chargement...</div> : visiblePlans.length === 0 ? <div className="bg-white rounded-2xl border border-gray-200 py-12 text-center text-sm text-gray-500">Aucun article planifié pour ces critères.</div> : (
         <div className="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
           <table className="w-full text-xs min-w-[1120px]"><thead><tr className="bg-gray-50 border-b text-left">
             <th className="px-3 py-2">Article</th><th className="px-3 py-2">Commande / détail</th><th className="px-3 py-2">Priorité</th><th className="px-3 py-2">Date de chargement</th><th className="px-3 py-2">Chauffeur / porteur</th><th className="px-3 py-2 text-right">Qté à livrer</th><th className="px-3 py-2 text-right">Livré</th><th className="px-3 py-2">État</th><th className="px-3 py-2">Note</th><th className="px-3 py-2">Actions</th>
           </tr></thead><tbody className="divide-y">
-            {plans.map((plan) => {
+            {visiblePlans.map((plan) => {
               const isLocked = plan.loadedQty > 0 || plan.status === "LIVRE";
               const available = Math.max(0, (plan.itemProducedQty || 0) - (plan.itemDeliveredQty || 0));
               return <tr key={plan.id} className={`align-middle hover:bg-gray-50 ${plan.status === "ANNULE" ? "bg-red-100" : plan.status === "LIVRE" ? "bg-green-100" : ""}`}>

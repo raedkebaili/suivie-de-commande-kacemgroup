@@ -1,3 +1,4 @@
+import { todayISO } from "./production-planning-constants";
 import { and, eq, gt, inArray, sql } from "drizzle-orm";
 import { orders, orderItems, productionBatches, expeditionBatches, productionPlanEntries } from "@/db/schema";
 import { MATERIAL_DEMAND_COMMERCIAL_STATUSES, MATERIAL_DEMAND_PRODUCTION_STATUS } from "./material-demand-policy";
@@ -36,7 +37,7 @@ export function materialDemandScope() {
     sql`NOT EXISTS (
       SELECT 1 FROM ${productionPlanEntries}
       WHERE ${productionPlanEntries.orderId} = ${orders.id}
-        AND (${productionPlanEntries.status} IN ('EN_COURS', 'TERMINE')
+        AND ((${productionPlanEntries.status} = 'TERMINE' OR (${productionPlanEntries.status} = 'EN_COURS' AND ${productionPlanEntries.planDate} <= ${todayISO()}))
           OR ${productionPlanEntries.appliedQty} <> 0 OR ${productionPlanEntries.appliedAt} IS NOT NULL)
     )`,
   )!;

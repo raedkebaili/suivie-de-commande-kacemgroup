@@ -1,4 +1,5 @@
 "use client";
+import { appendOrderStateFilter } from "@/lib/workflow-filters";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MaterialRequirementsSummary from "./MaterialRequirementsSummary";
@@ -133,7 +134,7 @@ function ArticleGroupingView({
 
   const query = useMemo(() => {
     const p = new URLSearchParams();
-    if (filters.status) p.set("status", filters.status);
+    appendOrderStateFilter(p, filters.status);
     if (filters.agency) p.set("agencyId", filters.agency);
     if (filters.priority) p.set("priority", filters.priority);
     return p.toString();

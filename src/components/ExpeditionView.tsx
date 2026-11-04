@@ -1,5 +1,8 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { normalizePlanningSearch } from "@/lib/planning-list";
+import PlanningOverview from "@/components/PlanningOverview";
+import { WORKFLOW_FILTERS } from "@/lib/workflow-filters";
 import { apiFetch } from "@/lib/api";
 import type { User, ExpeditionBatch } from "@/lib/types";
 import {
@@ -39,6 +42,7 @@ type Plan = {
 
 export default function ExpeditionView({ user }: { user: User }) {
   const canManage = user.role === "superadmin" || user.role === "planification";
+  const [matchingItemIds, setMatchingItemIds] = useState<number[] | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [batches, setBatches] = useState<ExpeditionBatch[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -53,17 +57,28 @@ export default function ExpeditionView({ user }: { user: User }) {
   const [loadingDates, setLoadingDates] = useState<Record<number, string>>({});
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
+  const activeFilter = useRef(stateFilter), requestVersion = useRef(0);
+  const [loadError, setLoadError] = useState("");
   const fetchData = useCallback(async () => {
-    const data = await apiFetch<{ items: Item[]; batches: ExpeditionBatch[]; plans: Plan[] }>("/api/expedition");
+    const version = ++requestVersion.current;
+    const selected = activeFilter.current;
+    setLoading(true); setLoadError("");
+    try {
+    const data = await apiFetch<{ items: Item[]; matchingItemIds?: number[] | null; batches: ExpeditionBatch[]; plans: Plan[] }>(`/api/expedition${selected.startsWith("workflow:") ? `?workflow=${encodeURIComponent(selected.slice(9))}` : ""}`);
+    if (version !== requestVersion.current) return;
     setItems(data.items);
+    setMatchingItemIds(data.matchingItemIds ?? null);
     setBatches(data.batches || []);
     setPlans(data.plans || []);
+    } catch (error) { if (version === requestVersion.current) setLoadError(error instanceof Error ? error.message : "Chargement impossible"); }
+    finally { if (version === requestVersion.current) setLoading(false); }
   }, []);
 
   useEffect(() => {
-    setLoading(true);
-    fetchData().finally(() => setLoading(false));
-  }, [fetchData]);
+    activeFilter.current = stateFilter;
+    void fetchData();
+    return () => { requestVersion.current += 1; };
+  }, [fetchData, stateFilter]);
 
   const toggle = (orderId: number) => {
     const next = new Set(expanded);
@@ -125,15 +140,17 @@ export default function ExpeditionView({ user }: { user: User }) {
     };
   });
 
-  const visibleOrders = orders.filter((order) => {
-    const query = search.trim().toLowerCase();
-    const orderPlanDrivers = plans.filter((plan) => order.items.some((item) => item.itemId === plan.itemId)).map((plan) => plan.driverName);
-    const orderBatchDrivers = batches.filter((batch) => order.items.some((item) => item.itemId === batch.itemId)).map((batch) => batch.driverName || "");
-    const matchesSearch = !query || [order.orderNumber, order.clientName, order.affaire, ...order.items.map((item) => item.articleName), ...orderPlanDrivers, ...orderBatchDrivers]
-      .some((value) => String(value || "").toLowerCase().includes(query));
-    const matchesState = stateFilter === "all" || order.visualState === stateFilter;
-    return matchesSearch && matchesState;
-  });
+  const matchingIds = matchingItemIds === null ? null : new Set(matchingItemIds);
+  const queryWords = normalizePlanningSearch(search).split(/\s+/).filter(Boolean);
+  const selectedOrders = orders.map(order => ({ ...order, items: order.items.filter(item => {
+    if (matchingIds && !matchingIds.has(item.itemId)) return false;
+    const text = normalizePlanningSearch([order.orderNumber, order.clientName, order.affaire, item.articleName,
+      ...plans.filter(plan => plan.itemId === item.itemId).map(plan => plan.driverName),
+      ...batches.filter(batch => batch.itemId === item.itemId).map(batch => batch.driverName || ""),
+    ].join(" "));
+    return queryWords.every(word => text.includes(word));
+  }) }));
+  const visibleOrders = (loadError ? [] : selectedOrders).filter(order => order.items.length > 0);
 
   return (
     <div className="space-y-3 text-black operational-content">
@@ -145,14 +162,15 @@ export default function ExpeditionView({ user }: { user: User }) {
         <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Rechercher commande, client, affaire, article ou chauffeur…" className="min-w-[220px] flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm text-black" />
         <select value={stateFilter} onChange={(event) => setStateFilter(event.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-black">
           <option value="all">Tous les états</option>
-          <option value="neutral">À expédier</option>
-          <option value="awaiting-delivery">En attente de livraison</option>
-          <option value="delivered">Livrée</option>
-          <option value="cancelled">Annulée</option>
+          {WORKFLOW_FILTERS.map(filter => <option key={filter.key} value={`workflow:${filter.key}`}>{filter.group} — {filter.label}</option>)}
         </select>
-        <span className="text-xs text-gray-500">{visibleOrders.length} commande(s)</span>
+        <span className="text-xs text-gray-500">{visibleOrders.length} commande(s) · {visibleOrders.reduce((total, order) => total + order.items.length, 0)} article(s) affiché(s)</span>
       </div>
 
+      <p className="text-xs text-gray-600">Le filtre affiche les articles concernés. Les totaux et l’état d’en-tête restent ceux de la commande complète ; les lignes de planning et leurs dates sont consultables dans le bilan global ci-dessous.</p>
+      <PlanningOverview kind="expedition" />
+
+      {loadError && <p role="alert" className="text-red-700">{loadError}</p>}
       {loading ? (
         <div className="flex justify-center py-12 text-black">Chargement...</div>
       ) : (
@@ -206,7 +224,7 @@ export default function ExpeditionView({ user }: { user: User }) {
                         <span className="text-black font-bold">Reste: <b>{remaining}</b></span>
                         {canManage && !cancelled && itemPlans.length > 0 && <select value={defaultPlanId} onChange={(event) => setSelectedPlans(current => ({ ...current, [item.itemId]: event.target.value }))} className="max-w-48 px-1 py-1 border border-blue-400 rounded text-xs bg-white text-black" title="Planning d'expédition à imputer">
                           <option value="">Sans planning</option>
-                          {itemPlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.driverName} · {plan.loadedQty}/{plan.plannedQty}</option>)}
+                          {itemPlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.planDate} · {plan.driverName} · {plan.loadedQty}/{plan.plannedQty}</option>)}
                         </select>}
 
                         {canManage && !delivered && !cancelled && (

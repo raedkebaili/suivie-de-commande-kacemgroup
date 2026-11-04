@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { filterPlanningRows, summarizePlanning } from "@/lib/planning-list";
 import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
 import { PLANNING_STATUSES, planningStatusLabel, todayISO } from "@/lib/production-planning-constants";
@@ -51,6 +52,7 @@ function PlanCard({ plan, kind, canManage, onOpen, onReload, onSessionExpired }:
   return <li className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4 space-y-2">
     <h2 className="text-sm font-bold break-words">{plan.articleName}</h2>
     <p className="text-sm">{plan.orderNumber} · {plan.clientName}</p>
+    <Row label="Date du planning" value={plan.planDate} />
     <Row label="État" value={kind === "production" ? planningStatusLabel(plan.status) : EXPEDITION_STATUSES.find((s) => s.key === plan.status)?.label || plan.status} />
     <Row label="Quantité planifiée" value={plan.plannedQty} />
     <Row label={kind === "production" ? "Usine" : "Chauffeur"} value={plan.factoryName || plan.driverName} />
@@ -79,6 +81,7 @@ function PlanCard({ plan, kind, canManage, onOpen, onReload, onSessionExpired }:
 
 export default function MobilePlanning({ kind, user, onOpenOrder, onSessionExpired }: { kind: "production" | "expedition"; user: User; onOpenOrder: (id: number) => void; onSessionExpired: () => void }) {
   const [date, setDate] = useState(todayISO);
+  const [allDates, setAllDates] = useState(false), [stateFilter, setStateFilter] = useState("");
   const [plans, setPlans] = useState<Plan[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -88,19 +91,23 @@ export default function MobilePlanning({ kind, user, onOpenOrder, onSessionExpir
   const [visible, setVisible] = useState(30);
   useEffect(() => {
     let active = true; setLoading(true); setError(""); setPlans([]);
-    apiFetch<{ entries?: Plan[]; plans?: Plan[] }>(`/api/${kind}-planning?date=${encodeURIComponent(date)}`).then((data) => { if (active) setPlans(data.entries || data.plans || []); }).catch((err: unknown) => {
+    apiFetch<{ entries?: Plan[]; plans?: Plan[] }>(`/api/${kind}-planning?date=${encodeURIComponent(allDates ? "all" : date)}`).then((data) => { if (active) setPlans(data.entries || data.plans || []); }).catch((err: unknown) => {
       if (!active) return;
       const message = err instanceof Error ? err.message : "Chargement impossible";
       if (message === "Non authentifié") onSessionExpired(); else setError(message);
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [kind, date, revision, onSessionExpired]);
-  const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  const filtered = plans.filter((p) => normalize([p.articleName, p.orderNumber, p.clientName, p.factoryName, p.driverName].join(" ")).includes(normalize(query.trim())));
+  }, [kind, date, revision, onSessionExpired, allDates]);
+  const filtered = filterPlanningRows(plans, query, stateFilter);
+  const summary = summarizePlanning(filtered);
+  const states = kind === "production" ? PLANNING_STATUSES : EXPEDITION_STATUSES;
   return <div className="space-y-4">
     <h1 className="text-lg font-bold">Planning {kind === "production" ? "production" : "d’expédition"}</h1>
     <Notice tone="info">Ajoutez des articles au planning depuis leur fiche commande. Les quantités réelles sont appliquées lors de la validation de fin de production ou de livraison.</Notice>
-    <label className="block text-sm">Journée<input type="date" required className={fieldClass} value={date} onChange={(e) => { if (e.target.value) { setDate(e.target.value); setVisible(30); } }} /></label>
+    <label className="block text-sm">Journée<input type="date" required className={fieldClass} value={date} onChange={(e) => { if (e.target.value) { setAllDates(false); setDate(e.target.value); setVisible(30); } }} /></label>
+    <label className="block text-sm"><input type="checkbox" checked={allDates} onChange={event => setAllDates(event.target.checked)} /> Bilan global — toutes les dates</label>
+    <select aria-label="Filtrer l’état du planning" className={fieldClass} value={stateFilter} onChange={event => { setStateFilter(event.target.value); setVisible(30); }}><option value="">Tous les états</option>{states.map(state => <option key={state.key} value={state.key}>{state.label}</option>)}</select>
+    <p className="text-xs">{summary.lines} ligne(s) · {summary.articles} article(s) distinct(s) · {summary.orders} commande(s)</p>
     <input type="search" aria-label="Rechercher dans le planning" placeholder="Article, commande, client, usine, chauffeur…" className={fieldClass} value={query} onChange={(e) => { setQuery(e.target.value); setVisible(30); }} />
     <button className={btnGhost} disabled={loading} onClick={() => setRevision((n) => n + 1)}>Actualiser</button>
     {error && <Notice tone="error">{error}</Notice>}

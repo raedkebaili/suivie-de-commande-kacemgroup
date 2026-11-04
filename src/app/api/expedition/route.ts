@@ -1,10 +1,11 @@
+import { isWorkflowFilter } from "@/lib/workflow-filters";
+import { workflowFilterSQL } from "@/lib/workflow-filter-sql";
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { orderItems, orders, clients, agencies, expeditionBatches, expeditionPlanEntries } from "@/db/schema";
 import { and, eq, desc, ne, sql } from "drizzle-orm";
 import { lockQuantityItem, reservedExpeditionQty } from "@/lib/quantity-transaction";
-import { todayISO } from "@/lib/production-planning-constants";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 import { NOTIFICATION_EVENTS, notifyRoles } from "@/lib/notifications";
 
@@ -13,37 +14,46 @@ export async function GET(request: NextRequest) {
   if (!user || !["superadmin", "planification", "gerant"].includes(user.role))
     return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
 
-  const items = await db.select({
-    itemId: orderItems.id, orderId: orderItems.orderId,
-    articleName: orderItems.articleName, quantity: orderItems.quantity,
-    producedQty: orderItems.producedQty, deliveredQty: orderItems.deliveredQty,
-    deliveryDate: orderItems.deliveryDate,
-    orderNumber: orders.orderNumber, clientName: clients.name,
-    agencyName: agencies.name, priority: orders.priority, status: orders.status,
-    productionStatus: orders.productionStatus, affaire: orders.affaire,
-  }).from(orderItems).leftJoin(orders, eq(orderItems.orderId, orders.id))
-    .leftJoin(clients, eq(orders.clientId, clients.id))
-    .leftJoin(agencies, eq(orders.agencyId, agencies.id))
-    .orderBy(desc(orderItems.id)).limit(300);
+  const sp = new URL(request.url).searchParams;
+  if (!isWorkflowFilter(sp.get("workflow"))) return NextResponse.json({ error: "Filtre d’avancement invalide" }, { status: 400 });
+  return db.transaction(async tx => {
+    const items = await tx.select({
+      itemId: orderItems.id, orderId: orderItems.orderId,
+      articleName: orderItems.articleName, quantity: orderItems.quantity,
+      producedQty: orderItems.producedQty, deliveredQty: orderItems.deliveredQty,
+      deliveryDate: orderItems.deliveryDate,
+      orderNumber: orders.orderNumber, clientName: clients.name,
+      agencyName: agencies.name, priority: orders.priority, status: orders.status,
+      productionStatus: orders.productionStatus, affaire: orders.affaire,
+    }).from(orderItems).leftJoin(orders, eq(orderItems.orderId, orders.id))
+      .leftJoin(clients, eq(orders.clientId, clients.id))
+      .leftJoin(agencies, eq(orders.agencyId, agencies.id))
+      .orderBy(desc(orderItems.id));
 
-  // Get batches with article name
-  const rawBatches = await db.select({
-    id: expeditionBatches.id, itemId: expeditionBatches.itemId, orderId: expeditionBatches.orderId,
-    quantity: expeditionBatches.quantity, cumulativeTotal: expeditionBatches.cumulativeTotal,
-    driverName: expeditionBatches.driverName, plannedLoadingDate: expeditionBatches.plannedLoadingDate,
-    deliveredBy: expeditionBatches.deliveredBy, deliveryDate: expeditionBatches.deliveryDate,
-    note: expeditionBatches.note, createdAt: expeditionBatches.createdAt,
-    article_name: orderItems.articleName,
-  }).from(expeditionBatches).innerJoin(orderItems, eq(orderItems.id, expeditionBatches.itemId))
-    .orderBy(desc(expeditionBatches.createdAt)).limit(500);
+    const matchingItemIds = sp.get("workflow")
+      ? (await tx.select({ id: orderItems.id }).from(orderItems).leftJoin(orders, eq(orderItems.orderId, orders.id))
+        .where(workflowFilterSQL(sp.get("workflow"), true))).map(row => row.id)
+      : null;
 
-  const date = new URL(request.url).searchParams.get("date") || todayISO();
-  const plans = await db.select().from(expeditionPlanEntries)
-    .where(and(eq(expeditionPlanEntries.planDate, date), ne(expeditionPlanEntries.status, "ANNULE"), ne(expeditionPlanEntries.status, "LIVRE"), ne(expeditionPlanEntries.status, "TERMINE")))
-    .orderBy(desc(expeditionPlanEntries.id));
-  const batches = rawBatches.map(r => ({ ...r, driverName: r.driverName || null, plannedLoadingDate: r.plannedLoadingDate || null, note: r.note || null }));
+    // Get batches with article name
+    const rawBatches = await tx.select({
+      id: expeditionBatches.id, itemId: expeditionBatches.itemId, orderId: expeditionBatches.orderId,
+      quantity: expeditionBatches.quantity, cumulativeTotal: expeditionBatches.cumulativeTotal,
+      driverName: expeditionBatches.driverName, plannedLoadingDate: expeditionBatches.plannedLoadingDate,
+      deliveredBy: expeditionBatches.deliveredBy, deliveryDate: expeditionBatches.deliveryDate,
+      note: expeditionBatches.note, createdAt: expeditionBatches.createdAt,
+      article_name: orderItems.articleName,
+    }).from(expeditionBatches).innerJoin(orderItems, eq(orderItems.id, expeditionBatches.itemId))
+      .orderBy(desc(expeditionBatches.createdAt)).limit(500);
 
-  return NextResponse.json({ items, batches, plans, planDate: date });
+    const date = new URL(request.url).searchParams.get("date") || "all";
+    const plans = await tx.select().from(expeditionPlanEntries)
+      .where(and((date === "all" ? undefined : eq(expeditionPlanEntries.planDate, date)), ne(expeditionPlanEntries.status, "ANNULE"), ne(expeditionPlanEntries.status, "LIVRE"), ne(expeditionPlanEntries.status, "TERMINE")))
+      .orderBy(desc(expeditionPlanEntries.id));
+    const batches = rawBatches.map(r => ({ ...r, driverName: r.driverName || null, plannedLoadingDate: r.plannedLoadingDate || null, note: r.note || null }));
+
+    return NextResponse.json({ items, matchingItemIds, batches, plans, planDate: date });
+  }, { isolationLevel: "repeatable read", accessMode: "read only" });
 }
 
 export async function POST(request: NextRequest) {

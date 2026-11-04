@@ -1,7 +1,8 @@
 "use client";
 
 import { type ShortcutRequest } from "@/lib/keyboard-shortcuts";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import { filterPlanningRows, summarizePlanning } from "@/lib/planning-list";
 import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
 import { useColors } from "@/lib/color-context";
@@ -45,6 +46,9 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
   const canManage = user.role === "superadmin" || user.role === "planification";
   const { getColor } = useColors();
 
+  const [allDates, setAllDates] = useState(false);
+  const [listSearch, setListSearch] = useState("");
+  const [listState, setListState] = useState("");
   const [date, setDate] = useState(todayISO());
   const [factories, setFactories] = useState<Factory[]>([]);
   // Par défaut « Toutes les usines » à chaque ouverture de l'onglet (le composant est remonté à chaque fois)
@@ -69,21 +73,27 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
 
   const flash = (m: string) => { setNotice(m); setTimeout(() => setNotice(""), 5000); };
 
-  const load = useCallback(async () => {
+  const requestVersion = useRef(0), activeScope = useRef("");
+  const load = useCallback(async (activate = false) => {
+    const scope = `${date}|${factoryId}|${allDates}`;
+    if (activate) activeScope.current = scope;
+    else if (activeScope.current !== scope) return;
+    const version = ++requestVersion.current;
     try {
-      const q = new URLSearchParams({ date });
+      const q = new URLSearchParams({ date: allDates ? "all" : date });
       if (factoryId) q.set("factoryId", factoryId);
       const d = await apiFetch<{ entries: Entry[] }>(`/api/production-planning?${q}`);
+      if (version !== requestVersion.current) return;
       setEntries(d.entries);
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erreur de chargement");
+      if (version === requestVersion.current) { setEntries([]); setError(err instanceof Error ? err.message : "Erreur de chargement"); }
     } finally {
-      setLoading(false);
+      if (version === requestVersion.current) setLoading(false);
     }
-  }, [date, factoryId]);
+  }, [date, factoryId, allDates]);
 
-  useEffect(() => { setLoading(true); load(); }, [load]);
+  useEffect(() => { setLoading(true); void load(true); return () => { requestVersion.current += 1; }; }, [load]);
 
   // Liste des usines (chaque usine a son propre planning)
   useEffect(() => {
@@ -234,11 +244,10 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
     setSelection(next);
   };
 
-  const stats = useMemo(() => {
-    const by: Record<string, number> = {};
-    for (const e of entries) by[e.status] = (by[e.status] || 0) + 1;
-    return by;
-  }, [entries]);
+  const searchedEntries = useMemo(() => filterPlanningRows(entries, listSearch), [entries, listSearch]);
+  const visibleEntries = useMemo(() => filterPlanningRows(searchedEntries, "", listState), [searchedEntries, listState]);
+  const summary = summarizePlanning(visibleEntries);
+  const stats = summarizePlanning(searchedEntries).states;
 
   const shiftDay = (delta: number) => {
     const d = new Date(date + "T12:00:00");
@@ -273,19 +282,25 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
           {!canManage && <span className="mt-1 inline-block rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">Consultation seule</span>}
         </div>
         {canManage && (
-          <button onClick={openPicker} title="Planifier des articles (Alt+P)" className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+          <button onClick={() => { setAllDates(false); void openPicker(); }} title="Planifier des articles (Alt+P)" className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
             + Planifier des articles
           </button>
         )}
       </div>
 
+      <div className="flex gap-2 flex-wrap">
+        <label className="text-sm"><input type="checkbox" checked={allDates} onChange={event => setAllDates(event.target.checked)} /> Bilan global — toutes les dates</label>
+        <input aria-label="Rechercher dans le planning production" value={listSearch} onChange={event => setListSearch(event.target.value)} placeholder="Article, commande, client, usine, date…" className="px-3 py-2 border rounded text-sm" />
+        <select aria-label="Filtrer l’état du planning production" value={listState} onChange={event => setListState(event.target.value)} className="border rounded px-2 text-sm"><option value="">Tous les états</option>{PLANNING_STATUSES.map(state => <option key={state.key} value={state.key}>{state.label}</option>)}</select>
+        <span className="text-xs">{summary.lines} ligne(s) · {summary.articles} article(s) distinct(s) · {summary.orders} commande(s)</span>
+      </div>
       {/* Barre de date + compteurs */}
       <div className="bg-white dark:bg-gray-900 rounded-xl p-3 border border-gray-200 dark:border-gray-800 flex items-center gap-2 flex-wrap">
-        <button onClick={() => shiftDay(-1)} className="px-2.5 py-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg text-sm">←</button>
-        <input type="date" value={date} onChange={e => setDate(e.target.value)}
+        <button onClick={() => { setAllDates(false); shiftDay(-1); }} className="px-2.5 py-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg text-sm">←</button>
+        <input type="date" value={date} onChange={e => { setAllDates(false); setDate(e.target.value); }}
           className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200" />
-        <button onClick={() => shiftDay(1)} className="px-2.5 py-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg text-sm">→</button>
-        <button onClick={() => setDate(todayISO())} className="px-3 py-1.5 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">Aujourd&apos;hui</button>
+        <button onClick={() => { setAllDates(false); shiftDay(1); }} className="px-2.5 py-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg text-sm">→</button>
+        <button onClick={() => { setAllDates(false); setDate(todayISO()); }} className="px-3 py-1.5 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-200">Aujourd&apos;hui</button>
         {/* Chaque usine possède son propre planning journalier */}
         <span className="text-xs font-medium text-gray-600 dark:text-gray-400 ml-2">🏭 Usine</span>
         <select value={factoryId} onChange={e => setFactoryId(e.target.value)}
@@ -310,7 +325,7 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
             </span>
           );
         })}
-        <button onClick={load} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg text-sm text-gray-700 dark:text-gray-200">🔄</button>
+        <button onClick={() => void load()} className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg text-sm text-gray-700 dark:text-gray-200">🔄</button>
       </div>
 
       {error && <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">{error}</div>}
@@ -319,9 +334,9 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
       {/* Tableau du planning */}
       {loading ? (
         <div className="flex justify-center py-12"><svg className="animate-spin w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg></div>
-      ) : entries.length === 0 ? (
+      ) : visibleEntries.length === 0 ? (
         <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 py-12 text-center">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Aucun article planifié pour le {date}.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Aucun article ne correspond au périmètre et aux filtres sélectionnés.</p>
           {canManage && <p className="text-xs text-gray-400 mt-1">Utilisez « + Planifier des articles » pour composer la journée.</p>}
         </div>
       ) : (
@@ -330,7 +345,7 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-left">
-                  <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Article</th>
+                  <th className="px-3 py-2">Date du planning</th><th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Article</th>
                   <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Commande</th>
                   <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Client</th>
                   <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Usine</th>
@@ -342,7 +357,7 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {entries.map(e => {
+                {visibleEntries.map(e => {
                   // Clignote seulement si EN_COURS ET date atteinte (pas de prévision)
                   const blinking = planningEntryBlinks(e.status, e.planDate);
                   const isFuture = e.planDate > todayISO();
@@ -350,6 +365,7 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
                   const requiresReason = def?.requiresReason;
                   return (
                     <tr key={e.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 align-middle">
+                      <td className="px-3 py-2 whitespace-nowrap">{e.planDate}</td>
                       <td className="px-3 py-2">
                         <span className={blinking ? "planning-blink inline-block px-1.5 py-0.5 font-semibold" : "font-semibold text-gray-800 dark:text-gray-100"}
                           style={blinking ? statusStyle(e.status, e.planDate) : undefined}>

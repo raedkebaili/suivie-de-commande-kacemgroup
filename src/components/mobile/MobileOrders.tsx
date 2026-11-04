@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import { WORKFLOW_FILTERS, appendOrderStateFilter } from "@/lib/workflow-filters";
+import { getOrderVisualState } from "@/lib/order-visual-state";
 import { apiFetch } from "@/lib/api";
 import { useColors } from "@/lib/color-context";
 import { priorityLabel, PRIORITY_OPTIONS } from "@/lib/priority";
@@ -18,6 +20,8 @@ type OrderCard = {
   affaire: string | null;
   clientName: string | null;
   agencyName: string | null;
+  items?: { expeditionPlanStatus?: string | null }[];
+  totalProduced?: number;
   totalQty?: number;
   totalDelivered?: number;
 };
@@ -35,27 +39,31 @@ export default function MobileOrders({ user, onCreate, onOpen, onSessionExpired 
   const [priority, setPriority] = useState("");
   const [visible, setVisible] = useState(PAGE_SIZE);
 
+  const requestVersion = useRef(0);
   const load = useCallback(async () => {
+    const version = ++requestVersion.current;
     setLoading(true);
     try {
-      const d = await apiFetch<{ orders: OrderCard[] }>("/api/orders");
+      const params = new URLSearchParams(); appendOrderStateFilter(params, productionStatus);
+      const d = await apiFetch<{ orders: OrderCard[] }>(`/api/orders${params.size ? `?${params}` : ""}`);
+      if (version !== requestVersion.current) return;
       setOrders(d.orders);
       setError("");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur de chargement";
       if (message === "Non authentifié") { onSessionExpired(); return; }
-      setError(message);
+      if (version === requestVersion.current) { setOrders([]); setError(message); }
     } finally {
-      setLoading(false);
+      if (version === requestVersion.current) setLoading(false);
     }
-  }, [onSessionExpired]);
+  }, [onSessionExpired, productionStatus]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); return () => { requestVersion.current += 1; }; }, [load]);
   useEffect(() => { setVisible(PAGE_SIZE); }, [query, productionStatus, priority]);
 
   const filtered = useMemo(
-    () => filterMobileOrders(orders, { query, productionStatus, priority }),
-    [orders, query, productionStatus, priority],
+    () => filterMobileOrders(orders, { query, productionStatus: "", priority }),
+    [orders, query, priority],
   );
   const shown = filtered.slice(0, visible);
 
@@ -78,22 +86,11 @@ export default function MobileOrders({ user, onCreate, onOpen, onSessionExpired 
         enterKeyHint="search"
       />
 
-      {/* Filtres tactiles : défilement horizontal */}
-      <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-1" role="group" aria-label="Filtrer par état">
-        {[{ value: "", label: "Tous" }, ...MOBILE_PRODUCTION_STATES].map((s) => {
-          const active = productionStatus === s.value;
-          return (
-            <button
-              key={s.value || "all"}
-              onClick={() => setProductionStatus(s.value)}
-              aria-pressed={active}
-              className={`min-h-[44px] shrink-0 rounded-full px-4 text-sm font-medium border ${active ? "bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900" : "bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600"}`}
-            >
-              {s.label}
-            </button>
-          );
-        })}
-      </div>
+      <select aria-label="Filtrer par état" value={productionStatus} onChange={event => setProductionStatus(event.target.value)} className={fieldClass}>
+        <option value="">Tous les états</option>
+        <optgroup label="État commercial"><option value="comm:PREVISION">Prévision</option><option value="comm:BON_COMMANDE">Bon de commande</option><option value="comm:SUR_STOCK">Sur stock / besoin interne</option></optgroup>
+        {[...new Set(WORKFLOW_FILTERS.map(filter => filter.group))].map(group => <optgroup key={group} label={group}>{WORKFLOW_FILTERS.filter(filter => filter.group === group).map(filter => <option key={filter.key} value={`workflow:${filter.key}`}>{filter.label}</option>)}</optgroup>)}
+      </select>
 
       <select value={priority} onChange={(e) => setPriority(e.target.value)} aria-label="Filtrer par priorité" className={fieldClass}>
         <option value="">Toutes les priorités</option>
@@ -105,7 +102,10 @@ export default function MobileOrders({ user, onCreate, onOpen, onSessionExpired 
 
       <ul className="space-y-3">
         {shown.map((o) => {
-          const state = o.productionStatus || "EN_INSTANCE";
+          const visual = getOrderVisualState({ productionStatus: o.productionStatus, ordered: o.totalQty || 0, produced: o.totalProduced || 0, delivered: o.totalDelivered || 0 });
+          const shipping = visual !== "cancelled" && visual !== "delivered" && (Boolean(o.items?.some(item => item.expeditionPlanStatus === "EN_COURS")) || (o.totalDelivered || 0) > 0);
+          const state = visual === "awaiting-delivery" || shipping ? "VISUAL_AWAITING" : o.productionStatus || "EN_INSTANCE";
+          const stateLabel = shipping ? "En cours de livraison" : visual === "awaiting-delivery" ? "Prête à livrer" : MOBILE_PRODUCTION_STATES.find(value => value.value === state)?.label || state;
           return (
             <li key={o.id}>
               <button
@@ -117,7 +117,7 @@ export default function MobileOrders({ user, onCreate, onOpen, onSessionExpired 
                     <div className="font-mono text-sm font-bold">{o.orderNumber}</div>
                     <div className="text-sm text-slate-700 dark:text-slate-200 truncate">{o.clientName || "Client inconnu"}</div>
                   </div>
-                  <StatePill style={getBadgeStyle(state)}>{MOBILE_PRODUCTION_STATES.find((s) => s.value === state)?.label || state}</StatePill>
+                  <StatePill style={getBadgeStyle(state)}>{stateLabel}</StatePill>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
                   <span>📅 {fmtDay(o.orderDate)}</span>

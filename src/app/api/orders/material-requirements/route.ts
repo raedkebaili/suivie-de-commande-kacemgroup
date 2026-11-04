@@ -1,3 +1,5 @@
+import { isWorkflowFilter } from "@/lib/workflow-filters";
+import { workflowFilterSQL } from "@/lib/workflow-filter-sql";
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
@@ -42,6 +44,7 @@ export async function GET(request: NextRequest) {
   const user = await getUserFromHeaders(request);
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   const sp = new URL(request.url).searchParams;
+  if (!isWorkflowFilter(sp.get("workflow"))) return NextResponse.json({ error: "Filtre d’avancement invalide" }, { status: 400 });
   let filters, materialFilters;
   try {
     if (request.url.length > 20000) throw new Error("Filtres trop longs");
@@ -51,6 +54,8 @@ export async function GET(request: NextRequest) {
     if (sp.get("agencyId") && (!/^[1-9]\d*$/.test(sp.get("agencyId")!) || !Number.isSafeInteger(Number(sp.get("agencyId"))) || Number(sp.get("agencyId")) > 2147483647)) throw new Error("Agence invalide");
   } catch (error) { return NextResponse.json({ error: (error as Error).message }, { status: 400 }); }
   const conditions = [materialDemandScope()];
+  const workflow = workflowFilterSQL(sp.get("workflow"));
+  if (workflow) conditions.push(workflow);
   const scope = agencyScopeForUser(user);
   if (scope) conditions.push(inArray(orders.agencyId, scope));
   if (sp.get("status")) conditions.push(eq(orders.status, sp.get("status")!));
