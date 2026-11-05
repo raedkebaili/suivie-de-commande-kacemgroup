@@ -1,16 +1,16 @@
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
-import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
+import { getTableConfig, PgDialect, type PgTable } from "drizzle-orm/pg-core";
 import { SQL } from "drizzle-orm";
 import { orders, orderItems, productionBatches, expeditionBatches, productionPlanEntries, expeditionPlanEntries, activityLogs } from "@/db/schema";
 
 // Même colonnes, types, NOT NULL et défauts que le schéma applicatif, sans les
 // tables de comptes / catalogues hors périmètre. PostgreSQL réel, pas de mock SQL.
 export const planningTables = [orders, orderItems, productionBatches, expeditionBatches, productionPlanEntries, expeditionPlanEntries, activityLogs];
-export async function createPlanningDatabase() {
+export async function createPlanningDatabase(extraTables: PgTable[] = []) {
   const client = new PGlite();
   const dialect = new PgDialect();
-  for (const table of planningTables) {
+  for (const table of [...planningTables, ...extraTables]) {
     const config = getTableConfig(table);
     const columns = config.columns.map(column => {
       let definition = `"${column.name}" ${column.getSQLType()}${column.primary ? " PRIMARY KEY" : ""}${column.notNull ? " NOT NULL" : ""}`;

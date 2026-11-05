@@ -2,7 +2,8 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { normalizePlanningSearch } from "@/lib/planning-list";
 import PlanningOverview from "@/components/PlanningOverview";
-import { WORKFLOW_FILTERS } from "@/lib/workflow-filters";
+import OrderArticleMarkers from "@/components/OrderArticleMarkers";
+import { WORKFLOW_FILTERS, appendOrderStateFilter } from "@/lib/workflow-filters";
 import { apiFetch } from "@/lib/api";
 import type { User, ExpeditionBatch } from "@/lib/types";
 import {
@@ -12,6 +13,7 @@ import {
 } from "@/lib/order-visual-state";
 
 type Item = {
+  workflowReady?: boolean;
   itemId: number;
   orderId: number;
   articleName: string;
@@ -64,13 +66,14 @@ export default function ExpeditionView({ user }: { user: User }) {
     const selected = activeFilter.current;
     setLoading(true); setLoadError("");
     try {
-    const data = await apiFetch<{ items: Item[]; matchingItemIds?: number[] | null; batches: ExpeditionBatch[]; plans: Plan[] }>(`/api/expedition${selected.startsWith("workflow:") ? `?workflow=${encodeURIComponent(selected.slice(9))}` : ""}`);
+    const params = new URLSearchParams(); if (selected !== "all") appendOrderStateFilter(params, selected);
+    const data = await apiFetch<{ items: Item[]; matchingItemIds?: number[] | null; batches: ExpeditionBatch[]; plans: Plan[] }>(`/api/expedition${params.size ? `?${params}` : ""}`);
     if (version !== requestVersion.current) return;
     setItems(data.items);
     setMatchingItemIds(data.matchingItemIds ?? null);
     setBatches(data.batches || []);
     setPlans(data.plans || []);
-    } catch (error) { if (version === requestVersion.current) setLoadError(error instanceof Error ? error.message : "Chargement impossible"); }
+    } catch (error) { if (version === requestVersion.current) { setItems([]); setMatchingItemIds(null); setLoadError(error instanceof Error ? error.message : "Chargement impossible"); } }
     finally { if (version === requestVersion.current) setLoading(false); }
   }, []);
 
@@ -133,6 +136,7 @@ export default function ExpeditionView({ user }: { user: User }) {
       clientName: first.clientName,
       affaire: first.affaire,
       items: orderItems,
+      progressItems: orderItems,
       totalOrdered,
       totalProduced,
       totalDelivered,
@@ -162,12 +166,15 @@ export default function ExpeditionView({ user }: { user: User }) {
         <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Rechercher commande, client, affaire, article ou chauffeur…" className="min-w-[220px] flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm text-black" />
         <select value={stateFilter} onChange={(event) => setStateFilter(event.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-black">
           <option value="all">Tous les états</option>
-          {WORKFLOW_FILTERS.map(filter => <option key={filter.key} value={`workflow:${filter.key}`}>{filter.group} — {filter.label}</option>)}
+          <option value="comm:PREVISION">Commercial — Prévision</option>
+          <option value="comm:BON_COMMANDE">Commercial — Bon de commande</option>
+          <option value="comm:SUR_STOCK">Commercial — Sur stock / besoin interne</option>
+          {WORKFLOW_FILTERS.filter(filter => filter.key.startsWith("ship-")).map(filter => <option key={filter.key} value={`workflow:${filter.key}`}>{filter.group} — {filter.label}</option>)}
         </select>
         <span className="text-xs text-gray-500">{visibleOrders.length} commande(s) · {visibleOrders.reduce((total, order) => total + order.items.length, 0)} article(s) affiché(s)</span>
       </div>
 
-      <p className="text-xs text-gray-600">Le filtre affiche les articles concernés. Les totaux et l’état d’en-tête restent ceux de la commande complète ; les lignes de planning et leurs dates sont consultables dans le bilan global ci-dessous.</p>
+      <p className="text-xs text-gray-600">Les filtres « commande entière » exigent tous les articles ; les filtres « articles » affichent uniquement les articles correspondants. Les totaux et l’état d’en-tête restent ceux de la commande complète ; les lignes de planning et leurs dates sont consultables dans le bilan global ci-dessous.</p>
       <PlanningOverview kind="expedition" />
 
       {loadError && <p role="alert" className="text-red-700">{loadError}</p>}
@@ -183,7 +190,7 @@ export default function ExpeditionView({ user }: { user: User }) {
             >
               <div className="flex items-center gap-3 px-4 py-3 cursor-pointer text-black" onClick={() => toggle(order.orderId)}>
                 <span className="font-bold text-black">{expanded.has(order.orderId) ? "▾" : "▸"}</span>
-                <span className="font-semibold text-black">#{order.orderNumber}</span>
+                <span className="font-semibold text-black">#{order.orderNumber}</span><OrderArticleMarkers items={order.progressItems} cancelled={order.visualState === "cancelled"} />
                 <span className="text-sm text-black">{order.clientName}</span>
                 {order.affaire && <span className="text-xs text-black">Aff: {order.affaire}</span>}
                 <span className="px-2 py-1 rounded-md bg-white/70 border border-black/20 text-xs font-bold text-black">

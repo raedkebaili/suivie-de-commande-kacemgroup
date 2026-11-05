@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { orderItems, orders, clients, agencies, productionBatches } from "@/db/schema";
-import { eq, desc, sql } from "drizzle-orm";
+import { and, eq, desc, sql } from "drizzle-orm";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
 import { applyProductionQuantity } from "@/lib/production-apply";
 
@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
       itemId: orderItems.id, orderId: orderItems.orderId,
       articleName: orderItems.articleName, quantity: orderItems.quantity,
       producedQty: orderItems.producedQty, deliveredQty: orderItems.deliveredQty,
+      workflowReady: sql<boolean>`${workflowFilterSQL("prod-item:READY", true)}`,
       orderNumber: orders.orderNumber, clientName: clients.name,
       agencyName: agencies.name, priority: orders.priority, status: orders.status,
       productionStatus: orders.productionStatus, affaire: orders.affaire,
@@ -28,9 +29,9 @@ export async function GET(request: NextRequest) {
       .leftJoin(agencies, eq(orders.agencyId, agencies.id))
       .orderBy(desc(orderItems.id));
 
-    const matchingItemIds = sp.get("workflow")
+    const matchingItemIds = sp.get("workflow") || sp.get("status")
       ? (await tx.select({ id: orderItems.id }).from(orderItems).leftJoin(orders, eq(orderItems.orderId, orders.id))
-        .where(workflowFilterSQL(sp.get("workflow"), true))).map(row => row.id)
+        .where(and(workflowFilterSQL(sp.get("workflow"), true), sp.get("status") ? eq(orders.status, sp.get("status")!) : undefined))).map(row => row.id)
       : null;
 
     // Get all batches for these items with article name

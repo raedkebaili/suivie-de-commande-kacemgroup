@@ -1,4 +1,4 @@
-import { isWorkflowFilter } from "@/lib/workflow-filters";
+import { isWorkflowFilter, isArticleWorkflow } from "@/lib/workflow-filters";
 import { workflowFilterSQL } from "@/lib/workflow-filter-sql";
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
@@ -53,7 +53,12 @@ export async function GET(request: NextRequest) {
   
   // Récupérer tous les articles
   let allItems: typeof orderItems.$inferSelect[] = [];
-  if (oids.length > 0) allItems = await db.select().from(orderItems).where(inArray(orderItems.orderId, oids));
+  if (oids.length > 0) {
+    allItems = isArticleWorkflow(sp.get("workflow"))
+      ? (await db.select({ item: orderItems }).from(orderItems).innerJoin(orders, eq(orderItems.orderId, orders.id))
+        .where(and(inArray(orders.id, oids), workflowFilterSQL(sp.get("workflow"), true)))).map(row => row.item)
+      : await db.select().from(orderItems).where(inArray(orderItems.orderId, oids));
+  }
 
   // Récupérer tous les composants techniques
   const itemIds = allItems.map(item => item.id);

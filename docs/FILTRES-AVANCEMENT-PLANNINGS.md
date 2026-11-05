@@ -1,30 +1,63 @@
-# Filtres d’avancement et bilan des plannings
+# Filtres des commandes — version à portée explicite
 
-## Utilisation
+## Choix disponibles
 
-Le filtre des commandes distingue désormais l’état commercial de l’avancement réel : prêt à livrer, en cours de livraison, livré, annulé, sans planning actif, ainsi que les états des plannings de production et d’expédition. Les anciennes valeurs d’API restent compatibles ; les anciens choix manuels de production ne pilotent plus ce nouveau filtre.
+Les anciens filtres d’avancement sont remplacés par ces seuls groupes dans Commandes (ordinateur et mobile) :
 
-Les écrans Production et Expédition recherchent et filtrent les articles individuellement, y compris dans une commande contenant plusieurs articles à des stades différents. Les totaux et l’état de l’en-tête restent ceux de la commande complète : ils ne sont pas recalculés sur les seuls articles affichés. Les compteurs indiquent les commandes et articles affichés. La recherche ignore les accents et combine les mots saisis, sur les informations de commande et de produit disponibles (et le chauffeur en expédition).
+- **Commercial** : Prévision, Bon de commande, Sur stock / besoin interne.
+- **Production — commande entière** : En attente de livraison, Non planifiée, Annulée.
+- **Production — articles** : En cours de production, En attente de livraison, Annulés, Articles planifiés pour production.
+- **Expédition — commande entière** : Totalement livrée, Partiellement livrée, Non planifiée, Annulée.
+- **Expédition — articles** : En attente de livraison, Livrés, Annulés, Articles planifiés pour production, Articles non encore planifiés.
 
-Les commandes, exports et regroupements utilisent en revanche une portée commande : une commande peut correspondre à plusieurs états selon ses articles. « Prêt à livrer » exige que chaque article de quantité positive soit entièrement produit, sans livraison commencée ni expédition active ; un excédent sur un article ne compense pas un manque sur un autre.
+Les listes opérationnelles Production et Expédition exposent les états commerciaux et uniquement les groupes de leur section. Les filtres des journaux de planning et du bilan global restent les états des lignes de planning : ils servent à consulter les lignes exactes, y compris les historiques suspendus et terminés.
 
-## Bilan global
+## Conditions de correspondance
 
-Le bilan intégré aux écrans opérationnels est en lecture seule et parcourt toutes les dates. Recherche, état et dates permettent de retrouver les lignes sans ouvrir chaque journée. Il distingue le nombre de lignes de planning, les articles distincts et les commandes distinctes, sans additionner plusieurs fois les cumuls d’un même article.
+La logique SQL est partagée entre commandes, listes opérationnelles, exports et regroupements. Les articles de quantité nulle ne participent pas aux conditions. Une commande vide ne satisfait pas artificiellement une condition « tous les articles ».
 
-Les plannings de production et d’expédition, sur ordinateur et mobile, proposent également un mode toutes dates, la recherche et le filtre d’état. La recherche d’expédition s’effectue localement, sans requête HTTP à chaque frappe. Le bilan ouvert et visible se rafraîchit toutes les 30 secondes et au retour sur la fenêtre ; les réponses obsolètes sont ignorées.
+### Production
 
-## Règles et garanties
+- **Commande en attente de livraison** : chaque article de quantité positive est entièrement produit, aucun n’a commencé à être livré et aucun n’est annulé. Le planning d’expédition ne vaut pas livraison réelle.
+- **Commande non planifiée** : chaque article reste à produire et à livrer, n’est pas annulé et n’a aucun planning de production non annulé. Une production manuelle partielle sans planning ne crée pas artificiellement un planning.
+- **Commande annulée** : annulation explicite de la commande ou annulation de production de tous ses articles.
+- **Article en cours** : planning `EN_COURS` pour le même article **et** la même commande, à une date atteinte, avec quantité restant à produire et à livrer. Un cumul produit sans planning ne suffit jamais. Une autre ligne de la commande ne peut pas servir de preuve.
+- **Article en attente de livraison** : entièrement produit, pas entièrement livré, non annulé. Peut appartenir à une commande dont les autres articles ne sont pas prêts.
+- **Article planifié pour production** : planning `EN_ATTENTE`, `EN_COURS` ou `SUSPENDU`, avec quantité restant à produire et à livrer. Ce filtre indique une affectation de production ; il peut donc recouper « en cours ». Un planning futur est planifié, mais pas encore en cours.
 
-- Un planning de production `EN_COURS` daté dans le futur, sans activité réelle, reste en attente de démarrage. Le bilan précise que sa date n’est pas atteinte.
-- Une date atteinte ou des quantités réellement produites permettent d’identifier la production en cours. Une suspension empêche la déduction par simple progression, sauf autre planning actif.
-- Les quantités livrées et les affectations d’expédition actives participent à l’état de livraison, toutes dates confondues par défaut.
-- Le besoin matière conserve ses conditions commerciales et la règle « une unité par article commandé ». Un planning futur seul ne rend pas la commande traitée ; une activité réelle, une application de planning ou un mouvement net de production l’exclut du besoin non traité.
-- Les filtres s’ajoutent aux périmètres de droits existants ; le mode global ne supprime pas les restrictions agence/usine applicables.
-- Les lectures opérationnelles des articles, identifiants correspondants et données associées utilisent une transaction en lecture seule, à instantané répétable.
-- Les écritures de quantités, annulations et retours arrière ne sont pas modifiés par cette fonctionnalité. Aucune migration de schéma n’est nécessaire pour ces filtres.
-- L’ancienne limite de 300 articles des vues opérationnelles est supprimée. L’historique de lots y conserve sa limite de 500 entrées : ce n’est pas un export exhaustif du journal historique.
+### Expédition
 
-## Vérification
+- **Totalement livrée** : chaque article de quantité positive est entièrement livré selon ses propres quantités. L’ancien drapeau manuel `LIVREE` ne remplace pas ces quantités.
+- **Partiellement livrée** : au moins un article a une quantité livrée positive et au moins un article n’est pas entièrement livré. Une simple affectation à un chauffeur ne suffit pas.
+- **Commande non planifiée** : aucun article n’a de planning d’expédition non annulé, aucun n’a commencé à être livré et aucun n’est annulé. Le planning de production est distinct.
+- **Commande annulée** : annulation explicite ou tous les articles annulés pour la production ou l’expédition.
+- **Article livré** : quantité livrée de cet article supérieure ou égale à sa quantité commandée, pas simplement statut d’une ligne historique.
+- **Article en attente de livraison** : même disponibilité réelle que dans la production.
+- **Articles planifiés pour production** : volontairement lié au planning de **production**, conformément à la demande, pas à l’affectation chauffeur.
+- **Articles non encore planifiés** : articles restant à produire et à livrer, sans planning de production non annulé et sans annulation.
 
-Les tests couvrent notamment les prédicats SQL sur PostgreSQL embarqué (PGlite), les portées commande/article, plus de 300 articles, les droits du planning global, les dates futures, la recherche, le bilan en lecture seule et les réponses asynchrones obsolètes. Les tests embarqués ne remplacent pas une validation de concurrence multi-connexion sur la base de production.
+Une annulation d’article est déduite du dernier planning créé (identifiant décroissant), sans autre planning actif de la même section. Une ancienne annulation ne contamine donc pas une replanification. Une annulation de production empêche aussi l’article d’être considéré disponible pour l’expédition. Une annulation de commande est prioritaire sur tous les filtres actifs.
+
+## Portée commande / article
+
+- Les filtres **commande entière** vérifient tous les articles ; en vue opérationnelle ils sélectionnent toute la commande ou aucun de ses articles.
+- Les filtres **articles** retiennent les commandes contenant au moins un article correspondant. Le détail développé du tableau n’affiche que les articles concernés. Les regroupements et exports Excel ne réintroduisent pas les autres articles de ces commandes.
+- Les données complètes de commande restent disponibles pour les totaux, les repères et la fiche d’édition ; aucun total de commande n’est recalculé sur les seules lignes affichées.
+- Aucun surplus produit ou livré sur un article ne compense un autre article incomplet.
+
+## Petits repères sur les commandes
+
+- **● P x/y** : articles entièrement produits avec une quantité restant à livrer, en tenant compte des annulations selon le prédicat serveur.
+- **✓ L x/y** : articles ayant une quantité livrée positive. L’infobulle distingue livraison partielle et totale, même si chaque article n’est livré qu’en partie.
+
+Les repères portent sur la commande complète, même lorsqu’un filtre masque certains articles. Ils sont présents dans Commandes, Production, Expédition et les cartes mobiles. Les commandes annulées ne portent pas de repère de disponibilité.
+
+## Garanties et vérifications
+
+Les périmètres de droits restent cumulés avec les filtres. Les écritures de quantités, les cumuls, les retours arrière et la règle du besoin matière restent inchangés. Aucun changement de schéma n’est requis.
+
+Les vues opérationnelles lisent les données dans une transaction à instantané répétable, en lecture seule. Les réponses asynchrones obsolètes sont ignorées. Les recherches accent-insensibles, le bilan toutes dates et les compteurs distincts sont conservés ; la limite de 500 entrées d’historique de lots reste en place.
+
+Les anciens identifiants de filtres d’avancement ambigus ne sont plus acceptés (réponse 400), plutôt que de les traduire vers des résultats différents. Les préférences enregistrées avec un ancien filtre sont réinitialisées sur « Tous les états ». En cas d’erreur de lecture, les résultats du filtre précédent ne sont pas présentés comme ceux du nouveau filtre ; une erreur explicite est affichée. Les états commerciaux restent inchangés.
+
+Les tests incluent l’exécution des prédicats et des véritables lectures API sur PGlite, les commandes multi-articles, les affectations croisées incohérentes, les plannings futurs, les annulations et replanifications, les droits agence, les exports Excel et les marqueurs visuels. Ils ne constituent pas une validation de concurrence multi-connexion sur la base de production.

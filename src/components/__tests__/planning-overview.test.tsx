@@ -55,8 +55,8 @@ it("Production filtre les articles sans perdre les données de la commande compl
   ], matchingItemIds: url.includes("workflow=") ? [1] : null, batches: [] }));
   render(<ProductionView user={user} />);
   await screen.findByText("#BC-1");
-  fireEvent.change(screen.getByRole("combobox"), { target: { value: "workflow:production:TERMINE" } });
-  await waitFor(() => expect(vi.mocked(apiFetch).mock.calls.some(([url]) => url.includes("workflow=production%3ATERMINE"))).toBe(true));
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "workflow:prod-item:READY" } });
+  await waitFor(() => expect(vi.mocked(apiFetch).mock.calls.some(([url]) => url.includes("workflow=prod-item%3AREADY"))).toBe(true));
   await screen.findByText("#BC-1"); fireEvent.click(screen.getByText("#BC-1"));
   await screen.findByText("Produit terminé");
   expect(screen.queryByText("Produit en attente")).toBeNull();
@@ -71,4 +71,22 @@ it("ignore une ancienne réponse de bilan après fermeture et réouverture", asy
   await screen.findByText("Moteur Été");
   resolveOld({ entries: rows });
   await waitFor(() => expect(screen.queryByText("2000-01-01")).toBeNull());
+});
+
+it("le filtre opérationnel n’expose plus les anciens états ni les filtres de l’autre section", async () => {
+  vi.mocked(apiFetch).mockResolvedValue({ items: [], batches: [] });
+  render(<ProductionView user={user} />);
+  const options = within(screen.getByRole("combobox")).getAllByRole("option") as HTMLOptionElement[];
+  expect(options).toHaveLength(11);
+  expect(options.some(option => option.value === "workflow:prod-item:ACTIVE")).toBe(true);
+  expect(options.some(option => option.value === "workflow:prod-order:READY")).toBe(true);
+  expect(options.some(option => /production:|ship-|SUSPENDU|TERMINE/.test(option.value))).toBe(false);
+});
+it("une erreur de filtre ne réaffiche pas les résultats du filtre précédent", async () => {
+  vi.mocked(apiFetch).mockResolvedValueOnce({ items: [{ itemId: 1, orderId: 1, orderNumber: "ANCIEN", articleName: "Ancien", quantity: 10, producedQty: 0, deliveredQty: 0, priority: "NORMALE", productionStatus: "EN_INSTANCE" }], batches: [] }).mockRejectedValue(new Error("Lecture impossible"));
+  render(<ProductionView user={user} />);
+  await screen.findByText("#ANCIEN");
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "workflow:prod-item:ACTIVE" } });
+  await screen.findByRole("alert");
+  expect(screen.queryByText("#ANCIEN")).toBeNull();
 });

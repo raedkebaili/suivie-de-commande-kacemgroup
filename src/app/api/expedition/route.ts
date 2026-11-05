@@ -21,6 +21,7 @@ export async function GET(request: NextRequest) {
       itemId: orderItems.id, orderId: orderItems.orderId,
       articleName: orderItems.articleName, quantity: orderItems.quantity,
       producedQty: orderItems.producedQty, deliveredQty: orderItems.deliveredQty,
+      workflowReady: sql<boolean>`${workflowFilterSQL("prod-item:READY", true)}`,
       deliveryDate: orderItems.deliveryDate,
       orderNumber: orders.orderNumber, clientName: clients.name,
       agencyName: agencies.name, priority: orders.priority, status: orders.status,
@@ -30,9 +31,9 @@ export async function GET(request: NextRequest) {
       .leftJoin(agencies, eq(orders.agencyId, agencies.id))
       .orderBy(desc(orderItems.id));
 
-    const matchingItemIds = sp.get("workflow")
+    const matchingItemIds = sp.get("workflow") || sp.get("status")
       ? (await tx.select({ id: orderItems.id }).from(orderItems).leftJoin(orders, eq(orderItems.orderId, orders.id))
-        .where(workflowFilterSQL(sp.get("workflow"), true))).map(row => row.id)
+        .where(and(workflowFilterSQL(sp.get("workflow"), true), sp.get("status") ? eq(orders.status, sp.get("status")!) : undefined))).map(row => row.id)
       : null;
 
     // Get batches with article name

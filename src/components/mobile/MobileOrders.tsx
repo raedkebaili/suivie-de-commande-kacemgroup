@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import OrderArticleMarkers from "@/components/OrderArticleMarkers";
 import { WORKFLOW_FILTERS, appendOrderStateFilter } from "@/lib/workflow-filters";
 import { getOrderVisualState } from "@/lib/order-visual-state";
 import { apiFetch } from "@/lib/api";
@@ -20,7 +21,7 @@ type OrderCard = {
   affaire: string | null;
   clientName: string | null;
   agencyName: string | null;
-  items?: { expeditionPlanStatus?: string | null }[];
+  items?: { workflowReady?: boolean; expeditionPlanStatus?: string | null; quantity: number; producedQty?: number; deliveredQty?: number }[];
   totalProduced?: number;
   totalQty?: number;
   totalDelivered?: number;
@@ -50,6 +51,7 @@ export default function MobileOrders({ user, onCreate, onOpen, onSessionExpired 
       setOrders(d.orders);
       setError("");
     } catch (err) {
+      if (version !== requestVersion.current) return;
       const message = err instanceof Error ? err.message : "Erreur de chargement";
       if (message === "Non authentifié") { onSessionExpired(); return; }
       if (version === requestVersion.current) { setOrders([]); setError(message); }
@@ -65,7 +67,7 @@ export default function MobileOrders({ user, onCreate, onOpen, onSessionExpired 
     () => filterMobileOrders(orders, { query, productionStatus: "", priority }),
     [orders, query, priority],
   );
-  const shown = filtered.slice(0, visible);
+  const shown = loading ? [] : filtered.slice(0, visible);
 
   return (
     <div className="space-y-3">
@@ -114,7 +116,7 @@ export default function MobileOrders({ user, onCreate, onOpen, onSessionExpired 
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="font-mono text-sm font-bold">{o.orderNumber}</div>
+                    <div className="font-mono text-sm font-bold">{o.orderNumber}<OrderArticleMarkers items={o.items || []} cancelled={o.productionStatus === "ANNULEE" || o.status === "ANNULEE"} /></div>
                     <div className="text-sm text-slate-700 dark:text-slate-200 truncate">{o.clientName || "Client inconnu"}</div>
                   </div>
                   <StatePill style={getBadgeStyle(state)}>{stateLabel}</StatePill>
@@ -138,7 +140,7 @@ export default function MobileOrders({ user, onCreate, onOpen, onSessionExpired 
           Afficher plus ({filtered.length - visible} restante(s))
         </button>
       )}
-      {loading && orders.length === 0 && <div className="py-10 text-center text-sm text-slate-500">Chargement…</div>}
+      {loading && <div className="py-10 text-center text-sm text-slate-500">Chargement…</div>}
     </div>
   );
 }

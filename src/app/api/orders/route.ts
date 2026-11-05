@@ -1,4 +1,4 @@
-import { isWorkflowFilter } from "@/lib/workflow-filters";
+import { isWorkflowFilter, isArticleWorkflow } from "@/lib/workflow-filters";
 import { workflowFilterSQL } from "@/lib/workflow-filter-sql";
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
@@ -85,6 +85,16 @@ export async function GET(request: NextRequest) {
   const studyOrderIds = new Set(studyRows.map((row) => row.orderId).filter((id): id is number => id !== null));
   let allItems: (typeof orderItems.$inferSelect)[] = [];
   if (oids.length > 0) allItems = await db.select().from(orderItems).where(inArray(orderItems.orderId, oids));
+  const matchingRows = isArticleWorkflow(sp.get("workflow")) && oids.length > 0
+    ? await db.select({ id: orderItems.id }).from(orderItems).innerJoin(orders, eq(orderItems.orderId, orders.id))
+      .where(and(inArray(orders.id, oids), workflowFilterSQL(sp.get("workflow"), true)))
+    : null;
+  const matchingIds = matchingRows ? new Set(matchingRows.map(row => row.id)) : null;
+  const readyRows = oids.length > 0
+    ? await db.select({ id: orderItems.id }).from(orderItems).innerJoin(orders, eq(orderItems.orderId, orders.id))
+      .where(and(inArray(orders.id, oids), workflowFilterSQL("prod-item:READY", true)))
+    : [];
+  const readyIds = new Set(readyRows.map(row => row.id));
   const itemIds = allItems.map(item => item.id);
   const allTechnicalComponents = itemIds.length > 0
     ? await db.select().from(itemTechnicalComponents).where(inArray(itemTechnicalComponents.itemId, itemIds))
@@ -148,6 +158,7 @@ export async function GET(request: NextRequest) {
         const latestPlan = latestPlanByItem.get(item.id);
         return {
           ...item,
+          workflowReady: readyIds.has(item.id),
           technicalComponents: allTechnicalComponents.filter(component => component.itemId === item.id),
           expeditionPlanStatus: plan?.status || null,
           expeditionPlanDate: latestPlan?.planDate || null,
@@ -160,6 +171,7 @@ export async function GET(request: NextRequest) {
       return {
         ...o,
         items,
+        matchingItemIds: matchingIds ? items.filter(item => matchingIds.has(item.id)).map(item => item.id) : null,
         totalQty: items.reduce((s, i) => s + i.quantity, 0),
         totalDelivered: items.reduce((s, i) => s + (i.deliveredQty || 0), 0),
         totalProduced: items.reduce((s, i) => s + (i.producedQty || 0), 0),

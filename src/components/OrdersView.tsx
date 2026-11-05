@@ -1,5 +1,5 @@
 "use client";
-import { WORKFLOW_FILTERS, appendOrderStateFilter } from "@/lib/workflow-filters";
+import { WORKFLOW_FILTERS, appendOrderStateFilter, normalizeOrderStateFilter } from "@/lib/workflow-filters";
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { apiFetch } from "@/lib/api";
 import type { Order, OrderItem, Agency, Client, User, ExpeditionBatch, MaterialCategory, Material, ClientRecouvrementAssignment } from "@/lib/types";
@@ -21,10 +21,11 @@ import { type ShortcutRequest } from "@/lib/keyboard-shortcuts";
 import { orderModalSaveRights } from "@/lib/order-modal-permissions";
 import { planningStateRedirect, setPlanningNotice } from "@/lib/order-state-redirect";
 import { canManageOrderColumnVisibility, toggleListItem } from "@/lib/order-column-visibility";
+import OrderArticleMarkers from "@/components/OrderArticleMarkers";
 import PlanningCancelCause from "@/components/PlanningCancelCause";
 import DocumentsPanel, { PendingDocumentsZone, uploadPendingDocuments, documentDownloadUrl, type PendingDocument } from "@/components/DocumentsPanel";
 
-type FullOrder = Order & { planningCancelCauses?: string[]; totalQty?: number; totalDelivered?: number; totalProduced?: number; totalRemaining?: number; documentCount?: number; hasCahierDesCharges?: boolean; hasPhotometricStudy?: boolean };
+type FullOrder = Order & { matchingItemIds?: number[] | null; planningCancelCauses?: string[]; totalQty?: number; totalDelivered?: number; totalProduced?: number; totalRemaining?: number; documentCount?: number; hasCahierDesCharges?: boolean; hasPhotometricStudy?: boolean };
 type OrderImportPreview = {
   fields: { key: string; label: string; required: boolean }[];
   mapping: Record<string, string>;
@@ -215,6 +216,7 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
   const [agencies, setAgencies] = useState<Agency[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
+  const [ordersLoadError, setOrdersLoadError] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [editingOrder, setEditingOrder] = useState<FullOrder | null>(null);
   const [fs, setFs] = useState(""); const [fa, setFa] = useState(""); const [fp, setFp] = useState(""); const [fphoto, setFphoto] = useState(false);
@@ -364,7 +366,11 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
   };
 
   const orderRequestVersion = useRef(0);
+  const orderFilterScope = JSON.stringify([fs,fa,fp,ff,ftel,fphoto]);
+  const activeOrderScope = useRef(orderFilterScope);
+  useEffect(() => { activeOrderScope.current = orderFilterScope; }, [orderFilterScope]);
   const fetchOrders = useCallback(async()=>{
+    if (activeOrderScope.current !== orderFilterScope) return;
     const version = ++orderRequestVersion.current;
     void fetchColumnVisibility();
     const p=new URLSearchParams();
@@ -378,15 +384,23 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
     if(ff)p.set("factory",ff);
     if(ftel)p.set("telegestion","1");
     if(fphoto)p.set("photometric","1");
+    setOrdersLoadError("");
+    try {
     const payload = await apiFetch<{orders:FullOrder[]}>(`/api/orders?${p}`);
-    if (version !== orderRequestVersion.current) return;
+    if (version !== orderRequestVersion.current || activeOrderScope.current !== orderFilterScope) return;
     setOrders(payload.orders);
     void apiFetch<{itemIds:number[]}>("/api/production-planning/active").then(data => {
       if (version === orderRequestVersion.current) setPlanningActiveItems(new Set(data.itemIds || []));
     }).catch(()=>{});
     setDataVersion(v=>v+1)
-  },[fs,fa,fp,ff,ftel,fphoto,fetchColumnVisibility]);
-  useEffect(()=>{setLoading(true);Promise.all([
+    } catch (error) {
+      if (version === orderRequestVersion.current && activeOrderScope.current === orderFilterScope) {
+        setOrders([]);
+        setOrdersLoadError(error instanceof Error ? error.message : "Chargement impossible");
+      }
+    }
+  },[fs,fa,fp,ff,ftel,fphoto,fetchColumnVisibility,orderFilterScope]);
+  useEffect(()=>{let active = true;setLoading(true);Promise.all([
     fetchOrders(),
     apiFetch<{agencies:Agency[]}>("/api/agencies").then(d=>setAgencies(d.agencies)).catch(()=>{}),
     apiFetch<{clients:Client[]}>("/api/clients").then(d=>setClients(d.clients)).catch(()=>{}),
@@ -394,7 +408,7 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
     apiFetch<{matieres:Material[]}>("/api/matieres").then(d=>setMaterials(d.matieres)).catch(()=>{}),
     apiFetch<{assignments:ClientRecouvrementAssignment[]}>("/api/recouvrement/client-states").then(d=>setRecouvByClient(new Map(d.assignments.map(a=>[a.clientId,a])))).catch(()=>{}),
     apiFetch<{factories:{id:number;code:string;name:string;active:boolean}[]}>("/api/factories").then(d=>setFactoryList(d.factories)).catch(()=>{}),
-  ]).finally(()=>setLoading(false))},[fetchOrders]);
+  ]).finally(()=>{if(active)setLoading(false)});return ()=>{active=false;orderRequestVersion.current+=1}},[fetchOrders]);
 
   // Les réglages du tableau sont isolés par utilisateur et stockés côté serveur.
   useEffect(() => {
@@ -405,7 +419,7 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
       .then((personal) => {
         if (cancelled) return;
         const saved = personal.preferences;
-        setFs(saved?.fs ?? "");
+        setFs(normalizeOrderStateFilter(saved?.fs));
         setFa(saved?.fa ?? "");
         setFf(saved?.ff ?? "");
         setFp(saved?.fp ?? "");
@@ -1075,7 +1089,7 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
       const stateBadge=<>{isProdStateVisible(productionStateKey(visualState,o.productionStatus))?<><span className={`inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded border ${productionBadge(visualState,o.productionStatus)}`}>{operationalLabel}</span>{o.statusReason&&<span className="text-[8px] ml-1 cursor-help">💬</span>}{visualState==="cancelled"&&o.cancelReason&&<span className="text-[9px] ml-1">({o.cancelReason})</span>}</>:<span className="text-[10px] opacity-40">—</span>}</>;
       return (<React.Fragment key={o.id}><tr className={`cursor-pointer border-l-4 text-black [&_td]:text-black [&_span]:text-black [&_b]:text-black ${orderRowClass(visualState,o.status)}`} onClick={()=>toggleExpand(o.id)}>
         <td className="px-2 py-1.5 text-center font-bold">{expanded?"▾":"▸"}</td>
-        <td className="px-2 py-1.5 font-medium">{highlight(o.orderNumber)}{hasActiveExpedition&&<span className="expedition-blink ml-1 inline-block px-1 text-[8px] font-bold align-middle" style={{["--expedition-color"]:"#22c55e",["--expedition-text"]:"#000000"} as React.CSSProperties} title="Livraison en cours">🚚 LIVRAISON</span>}{o.hasPhotometricStudy&&<span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-amber-400 align-middle shadow-[0_0_5px_2px_rgba(251,191,36,0.8)] animate-pulse" title="Cette commande contient une étude photométrique" aria-label="Étude photométrique" />}{(o.items||[]).some(i=>!!i.id&&planningActiveItems.has(i.id))&&<span className="planning-blink ml-1 inline-block px-1 text-[8px] font-bold align-middle" style={{["--planning-color"]:getColor("PLANNING_EN_COURS"),["--planning-text"]:"#000000"} as React.CSSProperties} title="Production en cours (planning)">PROD</span>}{(o.documentCount||0)>0&&<span onClick={(e)=>{e.stopPropagation();setDocsTarget({entity:"order",id:o.id,label:o.orderNumber})}} className={`ml-1 inline-flex items-center gap-0.5 px-1 py-0.5 text-[8px] font-bold align-middle border cursor-pointer rounded ${o.hasCahierDesCharges?"doc-blink bg-blue-100 border-blue-500 text-blue-900":"bg-blue-50 border-blue-300 text-blue-800"}`} title={o.hasCahierDesCharges?"Cahier des charges disponible":"Documents disponibles"}>📄 {o.hasCahierDesCharges?"Cahier des charges":"Docs"}{o.documentCount!>1?` (${o.documentCount})`:""}</span>}</td>
+        <td className="px-2 py-1.5 font-medium">{highlight(o.orderNumber)}<OrderArticleMarkers items={o.items || []} cancelled={o.productionStatus === "ANNULEE" || o.status === "ANNULEE"} />{hasActiveExpedition&&<span className="expedition-blink ml-1 inline-block px-1 text-[8px] font-bold align-middle" style={{["--expedition-color"]:"#22c55e",["--expedition-text"]:"#000000"} as React.CSSProperties} title="Livraison en cours">🚚 LIVRAISON</span>}{o.hasPhotometricStudy&&<span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-amber-400 align-middle shadow-[0_0_5px_2px_rgba(251,191,36,0.8)] animate-pulse" title="Cette commande contient une étude photométrique" aria-label="Étude photométrique" />}{(o.items||[]).some(i=>!!i.id&&planningActiveItems.has(i.id))&&<span className="planning-blink ml-1 inline-block px-1 text-[8px] font-bold align-middle" style={{["--planning-color"]:getColor("PLANNING_EN_COURS"),["--planning-text"]:"#000000"} as React.CSSProperties} title="Production en cours (planning)">PROD</span>}{(o.documentCount||0)>0&&<span onClick={(e)=>{e.stopPropagation();setDocsTarget({entity:"order",id:o.id,label:o.orderNumber})}} className={`ml-1 inline-flex items-center gap-0.5 px-1 py-0.5 text-[8px] font-bold align-middle border cursor-pointer rounded ${o.hasCahierDesCharges?"doc-blink bg-blue-100 border-blue-500 text-blue-900":"bg-blue-50 border-blue-300 text-blue-800"}`} title={o.hasCahierDesCharges?"Cahier des charges disponible":"Documents disponibles"}>📄 {o.hasCahierDesCharges?"Cahier des charges":"Docs"}{o.documentCount!>1?` (${o.documentCount})`:""}</span>}</td>
         {isColVisible("date")&&<td className="px-2 py-1.5 text-[10px]">{o.orderDate}</td>}
         <td className="px-2 py-1.5"><RecouvrementAlertCell name={highlight(o.clientName||"")} assignment={recouvByClient.get(o.clientId)} /></td>
         {isColVisible("agence")&&<td className="px-2 py-1.5 text-[10px]">{o.agencyName}</td>}
@@ -1088,13 +1102,14 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
         <td className="px-2 py-1.5 text-right" onClick={e=>e.stopPropagation()}><button onClick={()=>oe(o)} className="px-2 py-1 text-[10px] bg-white/70 border border-black/30 text-black rounded">Détails</button>{canDeleteOrder&&<button onClick={()=>hd(o.id)} className="ml-1 px-2 py-1 text-[10px] bg-white/70 border border-black/30 text-black rounded">✕</button>}</td>
       </tr>
       {expanded&&o.items&&o.items.length>0&&<tr key={`${o.id}-exp`} className={`text-black [&_td]:text-black [&_span]:text-black [&_b]:text-black ${orderPanelClass(visualState,o.status)}`}><td colSpan={visibleColCount} className="px-2 py-2">
+        {o.matchingItemIds && <p className="mb-1 text-xs">Seuls les articles correspondant au filtre sont affichés. Les totaux et les repères concernent la commande complète.</p>}
         <DeferredOrderDetails estimatedHeight={Math.max(180, o.items.length * 42 + 80)}>
           {() => (
         <table className="w-full text-[11px] border-collapse"><thead><tr className="text-left text-black border-b border-black/30">
           <th className="px-1 py-1">Article</th><th className="px-1 py-1">Cmd</th><th className="px-1 py-1">Unité</th><th className="px-1 py-1">Prod</th><th className="px-1 py-1">Livré</th><th className="px-1 py-1">Stock</th><th className="px-1 py-1">Reste à livrer</th>
           <th className="px-1 py-1">Besoin</th><th className="px-1 py-1">Spécs Tech</th><th className="px-1 py-1">Note</th><th className="px-1 py-1">Expéd</th>
         </tr></thead><tbody>
-        {o.items!.map(it => (
+        {o.items!.filter(it => !o.matchingItemIds || (it.id !== undefined && o.matchingItemIds.includes(it.id))).map(it => (
           <OrderItemRow
             key={it.id}
             item={it}
@@ -1146,6 +1161,7 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
   );
 
   return (<div className="space-y-3 operational-content">
+    {ordersLoadError && <p role="alert" className="text-sm text-red-700">{ordersLoadError}</p>}
     {!isTableFullscreen && (
     <div className="flex flex-wrap gap-2 items-center">
       <select value={fs} onChange={e=>setFs(e.target.value)} title="Filtrer par état commercial, état de production ou suivi du planning"

@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
   const format = sp.get("format");
 
   const conds = [];
-  const workflow = workflowFilterSQL(sp.get("workflow"));
+  const workflow = workflowFilterSQL(sp.get("workflow"), true);
   if (workflow) conds.push(workflow);
   const agencyScope = agencyScopeForUser(user);
   if (agencyScope) conds.push(inArray(orders.agencyId, agencyScope));

@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
     if (sp.get("agencyId") && (!/^[1-9]\d*$/.test(sp.get("agencyId")!) || !Number.isSafeInteger(Number(sp.get("agencyId"))) || Number(sp.get("agencyId")) > 2147483647)) throw new Error("Agence invalide");
   } catch (error) { return NextResponse.json({ error: (error as Error).message }, { status: 400 }); }
   const conditions = [materialDemandScope()];
-  const workflow = workflowFilterSQL(sp.get("workflow"));
+  const workflow = workflowFilterSQL(sp.get("workflow"), true);
   if (workflow) conditions.push(workflow);
   const scope = agencyScopeForUser(user);
   if (scope) conditions.push(inArray(orders.agencyId, scope));
