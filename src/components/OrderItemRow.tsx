@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useId } from "react";
-import CommercialInstructions from "@/components/CommercialInstructions";
+import React from "react";
 import type { OrderItem, TechnicalComponent } from "@/lib/types";
 import { useColors } from "@/lib/color-context";
 import { getContrastTextColor } from "@/lib/color-utils";
@@ -40,9 +39,6 @@ function OrderItemRow({
   studyLens = false,
   expeditionInProgress = false,
 }: OrderItemRowProps) {
-  const instructionsId = useId();
-  const hasNeed = Boolean(item.clientSpec?.trim());
-  const hasNote = Boolean(item.note?.trim());
   const { getModifiedCellStyle, getColor } = useColors();
   // Alerte visuelle « en cours de production » (couleur administrable)
   const planningStyle = planningInProgress
@@ -74,7 +70,6 @@ function OrderItemRow({
   const modStyle = getModifiedCellStyle();
 
   return (
-    <>
     <tr className={`border-b border-black/20 text-black [&_td]:text-black [&_span]:text-black [&_b]:text-black ${ORDER_STATE_PANEL_CLASSES[itemState]} ${expeditionInProgress ? "expedition-blink" : ""}`}
       style={expeditionStyle || (telegestionBg ? { backgroundColor: telegestionBg, boxShadow: `inset 3px 0 0 0 ${telegestionBg}` } : undefined)}
       title={expeditionInProgress ? "En cours de livraison" : isTelegestionItem ? "Article de la famille Télégestion" : undefined}>
@@ -122,9 +117,20 @@ function OrderItemRow({
         </span>
       </td>
       
-      {/* Accès clavier/tactile au texte intégral situé juste sous cet article. */}
-      <td className="px-1 py-1 text-[11px]" style={isSpecModified ? modStyle : undefined}>
-        {hasNeed ? <a href={`#${instructionsId}-need`} onClick={event => event.stopPropagation()} className="font-semibold underline underline-offset-2" aria-label={`Lire le besoin client de ${item.articleName}`}>📋 Besoin ↓</a> : "—"}
+      {/* Besoin client */}
+      <td
+        className="px-1 py-1 align-top text-[11px]"
+        style={isSpecModified ? modStyle : undefined}
+        title={isSpecModified ? `Besoin modifié: ${item.clientSpec}` : item.clientSpec || ""}
+      >
+        {item.clientSpec?.trim() ? (
+          <div
+            className="w-[200px] rounded border border-black/20 px-2 py-1 whitespace-pre-wrap leading-relaxed"
+            style={{ ...(isSpecModified ? modStyle : { backgroundColor: "rgba(255, 255, 255, 0.7)" }), overflowWrap: "anywhere" }}
+          >
+            {item.clientSpec}
+          </div>
+        ) : "-"}
       </td>
 
       {/* Spécifications techniques */}
@@ -178,8 +184,20 @@ function OrderItemRow({
         )}
       </td>
       
-      <td className="px-1 py-1 text-[11px]" style={isNoteModified ? modStyle : undefined}>
-        {hasNote ? <a href={`#${instructionsId}-note`} onClick={event => event.stopPropagation()} className="font-semibold underline underline-offset-2" aria-label={`Lire la note commerciale de ${item.articleName}`}>📝 Note ↓</a> : "—"}
+      {/* Note */}
+      <td
+        className="px-1 py-1 align-top text-[11px]"
+        style={isNoteModified ? modStyle : undefined}
+        title={isNoteModified ? `Note modifiée: ${item.note}` : item.note || ""}
+      >
+        {item.note?.trim() ? (
+          <div
+            className="w-[200px] rounded border border-black/20 px-2 py-1 whitespace-pre-wrap leading-relaxed"
+            style={{ ...(isNoteModified ? modStyle : { backgroundColor: "rgba(255, 255, 255, 0.7)" }), overflowWrap: "anywhere" }}
+          >
+            {item.note}
+          </div>
+        ) : "-"}
       </td>
 
       {/* Expédition */}
@@ -202,13 +220,6 @@ function OrderItemRow({
         </button>
       </td>
     </tr>
-    {(hasNeed || hasNote) && <tr className="border-b-2 border-black/20 text-black">
-      <td colSpan={11} className="px-2 pb-3 pt-1 align-top" style={{ whiteSpace: "normal" }}>
-        <CommercialInstructions id={instructionsId} articleName={item.articleName} clientSpec={item.clientSpec} note={item.note}
-          specModified={isSpecModified} noteModified={isNoteModified} modifiedStyle={modStyle} highlight={highlight} />
-      </td>
-    </tr>}
-    </>
   );
 }
 

@@ -9,7 +9,6 @@ import MobileDocuments from "./MobileDocuments";
 import MobilePlanCreate from "./MobilePlanCreate";
 import MobileCommercial, { type CommercialOrder } from "./MobileCommercial";
 import { canManageMobilePlanning } from "@/lib/mobile-planning";
-import CommercialInstructions from "@/components/CommercialInstructions";
 import MobileTechnicalItem from "./MobileTechnicalItem";
 import type { OrderItem, User } from "@/lib/types";
 import { Notice, Row, Section, StatePill, btnGhost, btnPrimary, fieldClass, fmtDay } from "@/components/mobile/ui";
@@ -168,7 +167,6 @@ export default function MobileOrderDetail({ orderId, user, onBack, onSessionExpi
                     </div>
                   )}
                   {it.note && <div className="mt-1 text-xs italic text-slate-500">{it.note}</div>}
-                  <CommercialInstructions id={`mobile-order-${order.id}-item-${it.id}`} articleName={it.articleName} clientSpec={it.clientSpec} note={it.note} />
                   <MobileTechnicalItem item={it} orderId={order.id} user={user} onSaved={load} onSessionExpired={onSessionExpired} />
                   {canManageMobilePlanning(user.role) && currentState !== "ANNULEE" && <MobilePlanCreate item={it} onSessionExpired={onSessionExpired} />}
                 </li>
