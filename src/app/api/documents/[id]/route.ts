@@ -1,3 +1,4 @@
+import { isDpmProofFile } from "@/lib/dpm-proofs";
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
@@ -29,6 +30,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (user.role !== "superadmin" && !isOwner) {
     return NextResponse.json({ error: "Seul l'auteur du document ou un administrateur peut le retirer" }, { status: 403 });
   }
+
+  if (await isDpmProofFile(document.driveFileId)) return NextResponse.json({error:"Association protégée par un dossier DPM"},{status:409});
 
   await db.delete(driveDocuments).where(eq(driveDocuments.id, docId));
 

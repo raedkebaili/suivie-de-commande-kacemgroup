@@ -1,3 +1,4 @@
+import { canReadDpmProofFile } from "@/lib/dpm-proofs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 import { NextRequest, NextResponse } from "next/server";
@@ -104,7 +105,9 @@ export async function GET(request: NextRequest) {
       : eq(driveDocuments.studyId, params.entityId))
     .orderBy(desc(driveDocuments.createdAt));
 
-  return NextResponse.json({ documents, total: documents.length });
+  const visible = [];
+  for (const doc of documents) if (await canReadDpmProofFile(doc.driveFileId,user.id)) visible.push(doc);
+  return NextResponse.json({ documents:visible, total: visible.length });
 }
 
 /** Insère l'association après succès Drive ; rollback physique si échec DB */
@@ -200,6 +203,7 @@ export async function POST(request: NextRequest) {
   // ── Mode B : association d'un fichier Drive existant ──────────────────
   if (linkFileId) {
     try {
+      if (!await canReadDpmProofFile(linkFileId,user.id)) return NextResponse.json({error:"Accès DPM refusé"},{status:403});
       // Doublon logique : même fichier déjà associé à cette entité ?
       const [existing] = await db.select({ id: driveDocuments.id }).from(driveDocuments)
         .where(and(

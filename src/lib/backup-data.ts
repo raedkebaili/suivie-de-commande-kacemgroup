@@ -14,6 +14,7 @@
  * Ordre des clés = ordre FK-safe (parents d'abord) attendu par la restauration.
  */
 import { db } from "@/db";
+import { collectDpmBackup } from "@/lib/dpm-backup";
 import {
   users, agencies, userAgencyAccess, clients, orders, orderItems, productionBatches, expeditionBatches, expeditionPlanEntries,
   productionUnitLib, articleLibrary, techLibrary, materialCategories, matieres,
@@ -25,8 +26,9 @@ import {
   productionPlanEntries, factories, storageConfig, articleFamilyCatalog, articleFamilyAssignments,
 } from "@/db/schema";
 
-export async function collectBackupData(executor: Pick<typeof db, "select"> = db) {
+export async function collectBackupData(executor: Pick<typeof db, "select" | "execute"> = db) {
   const data = {
+    ...await collectDpmBackup(executor),
     // CORRECTIF SÉCURITÉ (R8) : les sauvegardes JSON ne contiennent JAMAIS
     // les condensats de mots de passe. À la restauration, les comptes
     // concernés reçoivent un mot de passe temporaire + mustChangePassword.

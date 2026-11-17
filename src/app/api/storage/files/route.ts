@@ -1,3 +1,4 @@
+import { canReadDpmProofFile } from "@/lib/dpm-proofs";
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromHeaders } from "@/lib/auth";
@@ -53,7 +54,9 @@ export async function GET(request: NextRequest) {
       pageSize, pageToken, orderBy, spaces: "drive",
     });
 
-    const files = (res.data.files || []).map(f => ({
+    const visibleFiles = [];
+    for (const file of res.data.files || []) if (file.id && await canReadDpmProofFile(file.id,user.id)) visibleFiles.push(file);
+    const files = visibleFiles.map(f => ({
       id: f.id, name: f.name, mimeType: f.mimeType,
       isFolder: f.mimeType === FOLDER_MIME,
       size: f.size ? Number(f.size) : null,

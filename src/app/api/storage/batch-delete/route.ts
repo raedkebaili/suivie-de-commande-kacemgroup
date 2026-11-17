@@ -1,3 +1,4 @@
+import { withDpmStorageMutation } from "@/lib/dpm-proofs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 import { NextRequest, NextResponse } from "next/server";
@@ -69,7 +70,7 @@ export async function POST(request: NextRequest) {
     let deleted = 0;
     const failed: { id: string; reason: string }[] = [];
     for (const t of targets) {
-      try { await drive.files.delete({ fileId: t.id }); deleted++; }
+      try { await withDpmStorageMutation(t.id, async fileId => (await drive.files.get({fileId,fields:"parents"})).data.parents ?? [], () => drive.files.delete({ fileId: t.id })); deleted++; }
       catch (e) { failed.push({ id: t.id, reason: friendlyDriveError(e).message }); }
     }
 

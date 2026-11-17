@@ -19,6 +19,7 @@ const TabLoader = () => (
   </div>
 );
 
+const DpmView = dynamic(() => import("@/components/DpmView"), { loading: TabLoader });
 const DashboardView = dynamic(() => import("@/components/DashboardView"), { loading: TabLoader });
 const OrdersView = dynamic(() => import("@/components/OrdersView"), { loading: TabLoader });
 const AgenciesView = dynamic(() => import("@/components/AgenciesView"), { loading: TabLoader });
@@ -51,13 +52,14 @@ const FULLSCREEN_TABS = ["orders", "archive"];
 
 function formatNotifDate(d: string) { if (!d) return ""; const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(d); if (m) return `${m[3]}/${m[2]} ${m[4]}:${m[5]}`; return d.substring(0,16); }
 
-type Tab = "familles" | "dashboard" | "orders" | "production" | "expedition" | "expeditionPlanning" | "matieres" | "agencies" | "clients" | "users" | "watchdog" | "backup" | "colors" | "recouvrement" | "archive" | "planning" | "factories" | "telegestion" | "storage";
+type Tab = "dpm" | "familles" | "dashboard" | "orders" | "production" | "expedition" | "expeditionPlanning" | "matieres" | "agencies" | "clients" | "users" | "watchdog" | "backup" | "colors" | "recouvrement" | "archive" | "planning" | "factories" | "telegestion" | "storage";
 const gerantAccess = (tab: Tab) => GERANT_ALLOWED_TABS.includes(tab as (typeof GERANT_ALLOWED_TABS)[number]) ? [GERANT_ROLE] : [];
 
 // Hoisted outside the component: this list is static and doesn't need to be
 // recreated on every render. Also reused by the Electron shortcut handler to
 // check whether the current user's role is allowed to jump to a given tab.
 const TABS: { key: Tab; label: string; roles: string[] }[] = [
+  { key: "dpm", label: "Delivery Performance", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement"] },
   { key: "dashboard", label: "Tableau de bord", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement"] },
   { key: "orders", label: "Commandes", roles: ["superadmin", "commercial", "technique", "planification", "consultant_prod", "recouvrement", "acces_agence", ...gerantAccess("orders")] },
   // Archive : consultation ouverte à tous les rôles authentifiés
@@ -101,7 +103,7 @@ export default function HomePage() {
   const shortcutIdRef = useRef(0);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
 
-  const availableTabs = useMemo(() => (user ? TABS.filter(t => t.roles.includes(user.role)) : []), [user]);
+  const availableTabs = useMemo(() => (user ? TABS.filter(t => t.roles.includes(user.role) && (t.key !== "dpm" || process.env.NEXT_PUBLIC_DPM_ENABLED === "true")) : []), [user]);
 
   useEffect(() => {
     if (!user || restoredTabUserId.current === user.id) return;
@@ -340,6 +342,7 @@ export default function HomePage() {
           </div>
         </header>
         <main className="desktop-app-main flex-1 min-h-0 min-w-0 overflow-auto overscroll-contain p-2 sm:p-3 lg:p-6 bg-gray-50 dark:bg-gray-950">
+          {activeTab === "dpm" && <DpmView />}
           {activeTab === "dashboard" && <DashboardView user={user} />}
           {activeTab === "orders" && <OrdersView user={user} pendingAction={pendingAction} onPendingActionHandled={consumeShortcut} onNavigateTab={(tab) => setActiveTab(tab as Tab)} />}
           {activeTab === "production" && <ProductionView user={user} />}

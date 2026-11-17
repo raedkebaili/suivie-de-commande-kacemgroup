@@ -1,3 +1,4 @@
+import { canReadDpmProofFile } from "@/lib/dpm-proofs";
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
@@ -28,6 +29,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const mode = new URL(request.url).searchParams.get("mode") === "inline" ? "inline" : "attachment";
 
   try {
+    if (!await canReadDpmProofFile(id, user.id)) return NextResponse.json({error:"Habilitation DPM explicite requise"},{status:403});
     const { drive } = await getDriveClient();
     if (!(await assertInsideRoot(id))) {
       return NextResponse.json({ error: "Fichier hors du stockage applicatif" }, { status: 404 });
