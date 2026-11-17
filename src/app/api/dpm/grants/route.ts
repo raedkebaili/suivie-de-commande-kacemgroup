@@ -1,3 +1,4 @@
+import { dpmOperationalReady } from "@/lib/dpm-readiness";
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
@@ -13,6 +14,7 @@ async function authorize(request:NextRequest) {
 }
 export async function GET(request:NextRequest) {
   const actor=await authorize(request); if (actor instanceof NextResponse) return actor;
+  if (!await dpmOperationalReady(db)) return NextResponse.json({error:"Protections SQL DPM incomplètes ; opération refusée"},{status:503});
   return NextResponse.json({users:await db.select({id:users.id,fullName:users.fullName,active:users.active}).from(users),sites:await db.select().from(dpmSiteSettings),grants:await db.select().from(dpmGrants),capabilities:DPM_CAPABILITIES});
 }
 export async function POST(request:NextRequest) {
@@ -21,6 +23,7 @@ export async function POST(request:NextRequest) {
   const {userId,factoryId,capability,active,reason}=body ?? {};
   if (!Number.isSafeInteger(userId)||userId<=0||!Number.isSafeInteger(factoryId)||factoryId<=0||!DPM_CAPABILITIES.includes(capability)||typeof active!=="boolean"||typeof reason!=="string"||!reason.trim()||reason.length>2000) return NextResponse.json({error:"Habilitation invalide"},{status:400});
   try {
+    if (!await dpmOperationalReady(db)) return NextResponse.json({error:"Protections SQL DPM incomplètes ; opération refusée"},{status:503});
     await db.transaction(async tx=>{
       await tx.execute(sql`SELECT pg_advisory_xact_lock(746201,1)`);
       const [account]=await tx.select().from(users).where(eq(users.id,userId)).for("update");

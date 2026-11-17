@@ -1,5 +1,9 @@
 {
   "crons": [
-    { "path": "/api/backup/cron", "schedule": "0 21 * * *" }
-  ]
+    {
+      "path": "/api/backup/cron",
+      "schedule": "0 21 * * *"
+    }
+  ],
+  "buildCommand": "npm run build"
 }

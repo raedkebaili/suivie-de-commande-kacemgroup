@@ -1,3 +1,4 @@
+import { dpmOperationalReady } from "@/lib/dpm-readiness";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { dpmSiteSettings, factories, dpmAuditRecords } from "@/db/schema";
@@ -17,6 +18,7 @@ async function authorize(request: NextRequest) {
 export async function GET(request: NextRequest) {
   const user = await authorize(request);
   if (user instanceof NextResponse) return user;
+  if (!await dpmOperationalReady(db)) return NextResponse.json({error:"Protections SQL DPM incomplètes ; opération refusée"},{status:503});
   return NextResponse.json({ factories: await db.select().from(factories), mappings: await db.select().from(dpmSiteSettings) });
 }
 export async function POST(request: NextRequest) {
@@ -29,6 +31,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({error:"Site, usine et justification obligatoires"},{status:400});
   }
   try {
+    if (!await dpmOperationalReady(db)) return NextResponse.json({error:"Protections SQL DPM incomplètes ; opération refusée"},{status:503});
     await db.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(746201, 1)`);
       const [factory] = await tx.select().from(factories).where(eq(factories.id,factoryId)).for("update");

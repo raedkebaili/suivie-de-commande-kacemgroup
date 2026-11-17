@@ -1,0 +1,172 @@
+[
+  {
+    "table": "dpm_audit_records",
+    "name": "dpm_audit_no_update_delete",
+    "function": "dpm_reject_audit_mutation"
+  },
+  {
+    "table": "dpm_audit_records",
+    "name": "dpm_audit_no_truncate",
+    "function": "dpm_reject_audit_mutation"
+  },
+  {
+    "table": "dpm_commitments",
+    "name": "dpm_commitments_immutable",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "dpm_event_reviews",
+    "name": "dpm_reviews_immutable",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "dpm_receipts",
+    "name": "dpm_receipts_immutable",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "dpm_event_impacts",
+    "name": "dpm_impacts_immutable",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "dpm_commitments",
+    "name": "dpm_commitment_consistency",
+    "function": "dpm_validate_commitment"
+  },
+  {
+    "table": "dpm_delivery_lines",
+    "name": "dpm_delivery_line_consistency",
+    "function": "dpm_validate_delivery_line"
+  },
+  {
+    "table": "dpm_delivery_lines",
+    "name": "dpm_delivery_lines_immutable",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "dpm_deliveries",
+    "name": "dpm_deliveries_immutable",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "dpm_delivery_movements",
+    "name": "dpm_movement_consistency",
+    "function": "dpm_validate_movement"
+  },
+  {
+    "table": "dpm_delivery_movements",
+    "name": "dpm_movements_immutable",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "dpm_event_reviews",
+    "name": "dpm_review_consistency",
+    "function": "dpm_validate_review"
+  },
+  {
+    "table": "dpm_receipts",
+    "name": "dpm_receipt_consistency",
+    "function": "dpm_validate_receipt"
+  },
+  {
+    "table": "dpm_events",
+    "name": "dpm_events_immutable",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "drive_documents",
+    "name": "dpm_document_protection",
+    "function": "dpm_protect_document"
+  },
+  {
+    "table": "dpm_event_impacts",
+    "name": "dpm_impact_consistency",
+    "function": "dpm_validate_impact"
+  },
+  {
+    "table": "dpm_commitment_decisions",
+    "name": "dpm_decisions_immutable",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "dpm_commitment_decisions",
+    "name": "dpm_decisions_no_truncate",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "dpm_commitment_decisions",
+    "name": "dpm_decision_validation",
+    "function": "dpm_validate_commitment_decision"
+  },
+  {
+    "table": "dpm_calendars",
+    "name": "dpm_calendar_freeze",
+    "function": "dpm_freeze_calendar"
+  },
+  {
+    "table": "dpm_calendar_days",
+    "name": "dpm_calendar_day_freeze",
+    "function": "dpm_freeze_calendar_day"
+  },
+  {
+    "table": "dpm_events",
+    "name": "dpm_event_correction_validation",
+    "function": "dpm_validate_event_correction"
+  },
+  {
+    "table": "dpm_event_reviews",
+    "name": "dpm_review_proof_validation",
+    "function": "dpm_validate_review_proofs"
+  },
+  {
+    "table": "dpm_calendars",
+    "name": "dpm_calendars_no_truncate",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "dpm_calendar_days",
+    "name": "dpm_calendar_days_no_truncate",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "dpm_commitments",
+    "name": "dpm_commitments_no_truncate",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "dpm_event_reviews",
+    "name": "dpm_event_reviews_no_truncate",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "dpm_receipts",
+    "name": "dpm_receipts_no_truncate",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "dpm_event_impacts",
+    "name": "dpm_event_impacts_no_truncate",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "dpm_deliveries",
+    "name": "dpm_deliveries_no_truncate",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "dpm_delivery_lines",
+    "name": "dpm_delivery_lines_no_truncate",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "dpm_delivery_movements",
+    "name": "dpm_delivery_movements_no_truncate",
+    "function": "dpm_immutable_fact"
+  },
+  {
+    "table": "dpm_events",
+    "name": "dpm_events_no_truncate",
+    "function": "dpm_immutable_fact"
+  }
+]

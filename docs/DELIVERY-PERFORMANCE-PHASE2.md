@@ -1,5 +1,7 @@
 # DPM — dernière itération de sécurisation de la phase 2
 
+> **Mise à jour après connexion Vercel :** un build automatique a exécuté `drizzle-kit push` et annoncé des changements. Les garanties antérieures d’absence de modification de base ne valent donc plus pour ce déploiement. Voir `DPM-VERCEL-INCIDENT-BUILD.md`. Aucune réparation ni nouvelle migration n’a été exécutée.
+
 ## Décision de livraison
 
 **PHASE 2 NON VALIDÉE. Phase 3 non commencée.**

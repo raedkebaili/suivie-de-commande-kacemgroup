@@ -1,5 +1,7 @@
 # DPM — lot fonctionnel analytique
 
+> **Mise à jour après connexion Vercel :** un build automatique a exécuté `drizzle-kit push` et annoncé des changements. Les garanties antérieures d’absence de modification de base ne valent donc plus pour ce déploiement. Voir `DPM-VERCEL-INCIDENT-BUILD.md`. Aucune réparation ni nouvelle migration n’a été exécutée.
+
 ## Portée réelle
 
 Ce lot ne livre PAS encore l'ensemble du module demandé. Il réutilise la fondation et ajoute du code fonctionnel : moteur ouvré, lecture PostgreSQL sécurisée, tableau de bord dans l'application et export Excel. Aucun écran opérationnel complet de saisie des engagements/livraisons/réceptions/événements/impacts/actions 5M n'est encore livré. Les services serveur de décisions de la fondation restent disponibles, mais ne constituent pas ces parcours de saisie.
