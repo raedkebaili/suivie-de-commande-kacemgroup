@@ -1,3 +1,4 @@
+import { parseOrderDateRange, orderDateFilterSQL } from "@/lib/order-date-filter";
 import { isWorkflowFilter, isArticleWorkflow } from "@/lib/workflow-filters";
 import { workflowFilterSQL } from "@/lib/workflow-filter-sql";
 export const dynamic = "force-dynamic";
@@ -13,11 +14,14 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
   const sp = new URL(request.url).searchParams;
+  let dateRange;
+  try { dateRange = parseOrderDateRange(sp); } catch { return NextResponse.json({ error: "Période de commande invalide" }, { status: 400 }); }
   if (!isWorkflowFilter(sp.get("workflow"))) return NextResponse.json({ error: "Filtre d’avancement invalide" }, { status: 400 });
   const status = sp.get("status");
   const agencyId = sp.get("agencyId");
   const photometricOnly = sp.get("photometric") === "1";
   const conds = [];
+  const period = orderDateFilterSQL(dateRange); if (period) conds.push(period);
   const workflow = workflowFilterSQL(sp.get("workflow"));
   if (workflow) conds.push(workflow);
   const agencyScope = agencyScopeForUser(user);

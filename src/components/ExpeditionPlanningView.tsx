@@ -3,6 +3,7 @@
 import { type ShortcutRequest } from "@/lib/keyboard-shortcuts";
 import { Fragment, useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { EXPEDITION_PLANNING_FILTERS, filterPlanningRows } from "@/lib/planning-list";
+import { formatCompletionDay } from "@/lib/order-date-filter-client";
 import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
 import { todayISO } from "@/lib/production-planning-constants";
@@ -12,6 +13,7 @@ import { getContrastTextColor } from "@/lib/color-utils";
 import { takePlanningNotice } from "@/lib/order-state-redirect";
 
 type Plan = {
+  productionCompletedOn?: string | null; expeditionCompletedOn?: string | null;
   id: number; planDate: string; itemId: number; orderId: number;
   articleName: string; orderNumber: string | null; clientName: string | null;
   plannedQty: number; loadedQty: number; driverName: string; status: string;
@@ -222,7 +224,7 @@ export default function ExpeditionPlanningView({ user, pendingAction, onPendingA
       {loading ? <div className="flex justify-center py-12">Chargement...</div> : visiblePlans.length === 0 ? <div className="bg-white rounded-2xl border border-gray-200 py-12 text-center text-sm text-gray-500">Aucun article planifié pour ces critères.</div> : (
         <div className="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
           <table className="w-full text-xs min-w-[1120px]"><thead><tr className="bg-gray-50 border-b text-left">
-            <th className="px-3 py-2">Article</th><th className="px-3 py-2">Commande / détail</th><th className="px-3 py-2">Priorité</th><th className="px-3 py-2">Date de chargement</th><th className="px-3 py-2">Chauffeur / porteur</th><th className="px-3 py-2 text-right">Qté à livrer</th><th className="px-3 py-2 text-right">Livré</th><th className="px-3 py-2">État</th><th className="px-3 py-2">Note</th><th className="px-3 py-2">Actions</th>
+            <th className="px-3 py-2">Article</th><th className="px-3 py-2">Commande / détail</th><th className="px-3 py-2">Priorité</th><th className="px-3 py-2">Date de chargement</th>{allDates && <th className="px-3 py-2">Livraison totale enregistrée le</th>}<th className="px-3 py-2">Chauffeur / porteur</th><th className="px-3 py-2 text-right">Qté à livrer</th><th className="px-3 py-2 text-right">Livré</th><th className="px-3 py-2">État</th><th className="px-3 py-2">Note</th><th className="px-3 py-2">Actions</th>
           </tr></thead><tbody className="divide-y">
             {visiblePlans.map((plan) => {
               const isLocked = plan.loadedQty > 0 || plan.status === "LIVRE";
@@ -231,7 +233,7 @@ export default function ExpeditionPlanningView({ user, pendingAction, onPendingA
                 <td className="px-3 py-2 font-semibold">{plan.articleName}</td>
                 <td className="px-3 py-2"><span className="font-mono">#{plan.orderNumber || plan.orderId}</span><span className="block text-[10px] text-gray-500">{plan.clientName || "—"}{plan.affaire ? ` · ${plan.affaire}` : ""}</span></td>
                 <td className="px-3 py-2">{plan.priority && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold" style={{ backgroundColor: getColor(priorityColorKey(plan.priority)), color: getContrastTextColor(getColor(priorityColorKey(plan.priority))) }}>{priorityLabel(plan.priority)}</span>}</td>
-                <td className="px-3 py-2">{canManage && !isLocked ? <input disabled={undoing !== null} type="date" defaultValue={plan.planDate} onBlur={(event) => { if (event.target.value !== plan.planDate) void updatePlan(plan, { planDate: event.target.value }); }} className="px-2 py-1 border rounded" /> : plan.planDate}</td>
+                <td className="px-3 py-2">{canManage && !isLocked ? <input disabled={undoing !== null} type="date" defaultValue={plan.planDate} onBlur={(event) => { if (event.target.value !== plan.planDate) void updatePlan(plan, { planDate: event.target.value }); }} className="px-2 py-1 border rounded" /> : plan.planDate}</td>{allDates && <td className="px-3 py-2 whitespace-nowrap">{formatCompletionDay(plan.expeditionCompletedOn)}</td>}
                 <td className="px-3 py-2">{canManage && !isLocked ? <input disabled={undoing !== null} defaultValue={plan.driverName} onBlur={(event) => { const value = event.target.value.trim(); if (value && value !== plan.driverName) void updatePlan(plan, { driverName: value }); }} className="w-36 px-2 py-1 border rounded" /> : plan.driverName}</td>
                 <td className="px-3 py-2 text-right font-bold">{canManage && !isLocked ? <input disabled={undoing !== null} type="number" min={1} max={available} defaultValue={plan.plannedQty} onBlur={(event) => { const value = Number(event.target.value); if (value > 0 && value !== plan.plannedQty) void updatePlan(plan, { plannedQty: value }); }} className="w-20 px-2 py-1 border rounded text-right" /> : plan.plannedQty}</td>
                 <td className="px-3 py-2 text-right">{plan.loadedQty}</td>

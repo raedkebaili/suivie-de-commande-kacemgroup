@@ -1,4 +1,5 @@
 export type PlanningListRow = {
+  productionCompletedOn?: string | null; expeditionCompletedOn?: string | null;
   id: number; itemId: number; orderId: number; planDate: string; articleName: string;
   orderNumber?: string | null; clientName?: string | null; factoryName?: string | null;
   driverName?: string | null; affaire?: string | null; reason?: string | null; note?: string | null;

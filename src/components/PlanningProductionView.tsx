@@ -3,6 +3,7 @@
 import { type ShortcutRequest } from "@/lib/keyboard-shortcuts";
 import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { filterPlanningRows, summarizePlanning } from "@/lib/planning-list";
+import { formatCompletionDay } from "@/lib/order-date-filter-client";
 import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
 import { useColors } from "@/lib/color-context";
@@ -20,6 +21,7 @@ import { takePlanningNotice } from "@/lib/order-state-redirect";
 type Factory = { id: number; code: string; name: string; responsableName: string | null; active: boolean };
 
 type Entry = {
+  productionCompletedOn?: string | null; expeditionCompletedOn?: string | null;
   id: number; planDate: string; itemId: number; orderId: number;
   articleName: string; orderNumber: string | null; clientName: string | null;
   plannedQty: number; status: string; reason: string | null;
@@ -345,7 +347,7 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-left">
-                  <th className="px-3 py-2">Date du planning</th><th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Article</th>
+                  <th className="px-3 py-2">Date du planning</th>{allDates && <th className="px-3 py-2">Production complète enregistrée le</th>}<th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Article</th>
                   <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Commande</th>
                   <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Client</th>
                   <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Usine</th>
@@ -365,7 +367,7 @@ export default function PlanningProductionView({ user, pendingAction, onPendingA
                   const requiresReason = def?.requiresReason;
                   return (
                     <tr key={e.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 align-middle">
-                      <td className="px-3 py-2 whitespace-nowrap">{e.planDate}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{e.planDate}</td>{allDates && <td className="px-3 py-2 whitespace-nowrap">{formatCompletionDay(e.productionCompletedOn)}</td>}
                       <td className="px-3 py-2">
                         <span className={blinking ? "planning-blink inline-block px-1.5 py-0.5 font-semibold" : "font-semibold text-gray-800 dark:text-gray-100"}
                           style={blinking ? statusStyle(e.status, e.planDate) : undefined}>

@@ -1,5 +1,7 @@
 "use client";
 import { WORKFLOW_FILTERS, appendOrderStateFilter, normalizeOrderStateFilter } from "@/lib/workflow-filters";
+import OrderDateFilter from "@/components/OrderDateFilter";
+import { formatCompletionDay } from "@/lib/order-date-filter-client";
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { apiFetch } from "@/lib/api";
 import type { Order, OrderItem, Agency, Client, User, ExpeditionBatch, MaterialCategory, Material, ClientRecouvrementAssignment } from "@/lib/types";
@@ -25,7 +27,7 @@ import OrderArticleMarkers from "@/components/OrderArticleMarkers";
 import PlanningCancelCause from "@/components/PlanningCancelCause";
 import DocumentsPanel, { PendingDocumentsZone, uploadPendingDocuments, documentDownloadUrl, type PendingDocument } from "@/components/DocumentsPanel";
 
-type FullOrder = Order & { matchingItemIds?: number[] | null; planningCancelCauses?: string[]; totalQty?: number; totalDelivered?: number; totalProduced?: number; totalRemaining?: number; documentCount?: number; hasCahierDesCharges?: boolean; hasPhotometricStudy?: boolean };
+type FullOrder = Order & { productionCompletedOn?: string | null; matchingItemIds?: number[] | null; planningCancelCauses?: string[]; totalQty?: number; totalDelivered?: number; totalProduced?: number; totalRemaining?: number; documentCount?: number; hasCahierDesCharges?: boolean; hasPhotometricStudy?: boolean };
 type OrderImportPreview = {
   fields: { key: string; label: string; required: boolean }[];
   mapping: Record<string, string>;
@@ -219,6 +221,7 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
   const [ordersLoadError, setOrdersLoadError] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [editingOrder, setEditingOrder] = useState<FullOrder | null>(null);
+  const [dateRange, setDateRange] = useState({ from: "", to: "" });
   const [fs, setFs] = useState(""); const [fa, setFa] = useState(""); const [fp, setFp] = useState(""); const [fphoto, setFphoto] = useState(false);
   const [error, setError] = useState(""); const [saving, setSaving] = useState(false);
   const [expandedOrders, setExpandedOrders] = useState<Set<number>>(new Set());
@@ -366,7 +369,7 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
   };
 
   const orderRequestVersion = useRef(0);
-  const orderFilterScope = JSON.stringify([fs,fa,fp,ff,ftel,fphoto]);
+  const orderFilterScope = JSON.stringify([fs,fa,fp,ff,ftel,fphoto,dateRange]);
   const activeOrderScope = useRef(orderFilterScope);
   useEffect(() => { activeOrderScope.current = orderFilterScope; }, [orderFilterScope]);
   const fetchOrders = useCallback(async()=>{
@@ -379,6 +382,7 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
     //   prod:*     → état de production (orders.productionStatus)
     //   planning:* → filtre côté client sur le planning de production
     appendOrderStateFilter(p, fs);
+    if(dateRange.from)p.set("orderFrom",dateRange.from); if(dateRange.to)p.set("orderTo",dateRange.to);
     if(fa)p.set("agencyId",fa);
     if(fp)p.set("priority",fp);
     if(ff)p.set("factory",ff);
@@ -399,7 +403,7 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
         setOrdersLoadError(error instanceof Error ? error.message : "Chargement impossible");
       }
     }
-  },[fs,fa,fp,ff,ftel,fphoto,fetchColumnVisibility,orderFilterScope]);
+  },[fs,fa,fp,ff,ftel,fphoto,fetchColumnVisibility,orderFilterScope,dateRange]);
   useEffect(()=>{let active = true;setLoading(true);Promise.all([
     fetchOrders(),
     apiFetch<{agencies:Agency[]}>("/api/agencies").then(d=>setAgencies(d.agencies)).catch(()=>{}),
@@ -647,7 +651,7 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
     setShowExpHistory(true);
   }, []);
   const showModifications=async(orderId:number)=>{setModOrderId(orderId);const d=await apiFetch<{logs:typeof modLogs}>(`/api/order-modifications/${orderId}`);setModLogs(d.logs);setShowModHistory(true)};
-  const ee=async()=>{const p=new URLSearchParams();appendOrderStateFilter(p,fs);if(ff)p.set("factory",ff);if(ftel)p.set("telegestion","1");if(fp)p.set("priority",fp);if(fa)p.set("agencyId",fa);if(fphoto)p.set("photometric","1");const res=await fetch(`/api/orders/export?${p}`,{credentials:"same-origin"});if(!res.ok){alert("Erreur export");return}const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`commandes_${new Date().toISOString().split("T")[0]}.xlsx`;a.click();URL.revokeObjectURL(url)};
+  const ee=async()=>{const p=new URLSearchParams();appendOrderStateFilter(p,fs);if(dateRange.from)p.set("orderFrom",dateRange.from);if(dateRange.to)p.set("orderTo",dateRange.to);if(ff)p.set("factory",ff);if(ftel)p.set("telegestion","1");if(fp)p.set("priority",fp);if(fa)p.set("agencyId",fa);if(fphoto)p.set("photometric","1");const res=await fetch(`/api/orders/export?${p}`,{credentials:"same-origin"});if(!res.ok){alert("Erreur export");return}const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`commandes_${new Date().toISOString().split("T")[0]}.xlsx`;a.click();URL.revokeObjectURL(url)};
   const ai=()=>setFormItems([...formItems,{articleName:"",quantity:1,unitPrice:"",description:""}]);
   const ri=(i:number)=>{if(formItems.length<=1)return;setFormItems(formItems.filter((_,x)=>x!==i))};
   const ui=(i:number,f:keyof OrderItem,v:string|number)=>{const u=[...formItems];(u[i]as Record<string,unknown>)[f]=v;setFormItems(u)};
@@ -1086,7 +1090,7 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
       const visualState=getOrderVisualState({productionStatus:o.productionStatus,ordered,produced,delivered});
       const operationalLabel=visualState==="neutral"?(o.productionStatus==="EN_PRODUCTION"?"En production":"En instance"):ORDER_STATE_LABELS[visualState];
       const hasActiveExpedition = (o.items || []).some((item) => item.expeditionPlanStatus === "EN_COURS");
-      const stateBadge=<>{isProdStateVisible(productionStateKey(visualState,o.productionStatus))?<><span className={`inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded border ${productionBadge(visualState,o.productionStatus)}`}>{operationalLabel}</span>{o.statusReason&&<span className="text-[8px] ml-1 cursor-help">💬</span>}{visualState==="cancelled"&&o.cancelReason&&<span className="text-[9px] ml-1">({o.cancelReason})</span>}</>:<span className="text-[10px] opacity-40">—</span>}</>;
+      const stateBadge=<>{isProdStateVisible(productionStateKey(visualState,o.productionStatus))?<><span className={`inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded border ${productionBadge(visualState,o.productionStatus)}`}>{operationalLabel}</span>{visualState === "awaiting-delivery" && <span className="ml-1 text-[10px] font-normal">{o.productionCompletedOn ? `— fin de production : ${formatCompletionDay(o.productionCompletedOn)}` : "— date de fin non disponible"}</span>}{o.statusReason&&<span className="text-[8px] ml-1 cursor-help">💬</span>}{visualState==="cancelled"&&o.cancelReason&&<span className="text-[9px] ml-1">({o.cancelReason})</span>}</>:<span className="text-[10px] opacity-40">—</span>}</>;
       return (<React.Fragment key={o.id}><tr className={`cursor-pointer border-l-4 text-black [&_td]:text-black [&_span]:text-black [&_b]:text-black ${orderRowClass(visualState,o.status)}`} onClick={()=>toggleExpand(o.id)}>
         <td className="px-2 py-1.5 text-center font-bold">{expanded?"▾":"▸"}</td>
         <td className="px-2 py-1.5 font-medium">{highlight(o.orderNumber)}<OrderArticleMarkers items={o.items || []} cancelled={o.productionStatus === "ANNULEE" || o.status === "ANNULEE"} />{hasActiveExpedition&&<span className="expedition-blink ml-1 inline-block px-1 text-[8px] font-bold align-middle" style={{["--expedition-color"]:"#22c55e",["--expedition-text"]:"#000000"} as React.CSSProperties} title="Livraison en cours">🚚 LIVRAISON</span>}{o.hasPhotometricStudy&&<span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-amber-400 align-middle shadow-[0_0_5px_2px_rgba(251,191,36,0.8)] animate-pulse" title="Cette commande contient une étude photométrique" aria-label="Étude photométrique" />}{(o.items||[]).some(i=>!!i.id&&planningActiveItems.has(i.id))&&<span className="planning-blink ml-1 inline-block px-1 text-[8px] font-bold align-middle" style={{["--planning-color"]:getColor("PLANNING_EN_COURS"),["--planning-text"]:"#000000"} as React.CSSProperties} title="Production en cours (planning)">PROD</span>}{(o.documentCount||0)>0&&<span onClick={(e)=>{e.stopPropagation();setDocsTarget({entity:"order",id:o.id,label:o.orderNumber})}} className={`ml-1 inline-flex items-center gap-0.5 px-1 py-0.5 text-[8px] font-bold align-middle border cursor-pointer rounded ${o.hasCahierDesCharges?"doc-blink bg-blue-100 border-blue-500 text-blue-900":"bg-blue-50 border-blue-300 text-blue-800"}`} title={o.hasCahierDesCharges?"Cahier des charges disponible":"Documents disponibles"}>📄 {o.hasCahierDesCharges?"Cahier des charges":"Docs"}{o.documentCount!>1?` (${o.documentCount})`:""}</span>}</td>
@@ -1162,6 +1166,8 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
 
   return (<div className="space-y-3 operational-content">
     {ordersLoadError && <p role="alert" className="text-sm text-red-700">{ordersLoadError}</p>}
+    <OrderDateFilter onChange={setDateRange} />
+    {dateRange.from && <p className="text-xs">Période appliquée : {formatCompletionDay(dateRange.from)} au {formatCompletionDay(dateRange.to)} (date de commande).</p>}
     {!isTableFullscreen && (
     <div className="flex flex-wrap gap-2 items-center">
       <select value={fs} onChange={e=>setFs(e.target.value)} title="Filtrer par état commercial, état de production ou suivi du planning"
@@ -1719,7 +1725,7 @@ export default function OrdersView({ user, pendingAction, onPendingActionHandled
     {/* Placé sous les études photométriques, toujours à jour via          */}
     {/* dataVersion (incrémenté à chaque rafraîchissement des commandes).  */}
     {/* ═══════════════════════════════════════════════════════════════════ */}
-    <ArticleGroupingView filters={{ status: fs, agency: fa, priority: fp }} refreshKey={dataVersion} />
+    <ArticleGroupingView filters={{ status: fs, agency: fa, priority: fp, orderFrom: dateRange.from, orderTo: dateRange.to }} refreshKey={dataVersion} />
     {/* MODAL DOCUMENTS CONTEXTUELS — consultation/ajout depuis l'indicateur 📄/📎.
         Réutilise DocumentsPanel (et donc le Stockage Google Drive existant). */}
     {docsTarget&&(

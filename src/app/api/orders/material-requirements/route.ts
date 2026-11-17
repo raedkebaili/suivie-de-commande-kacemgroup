@@ -1,3 +1,4 @@
+import { parseOrderDateRange, orderDateFilterSQL } from "@/lib/order-date-filter";
 import { isWorkflowFilter } from "@/lib/workflow-filters";
 import { workflowFilterSQL } from "@/lib/workflow-filter-sql";
 export const dynamic = "force-dynamic";
@@ -44,6 +45,8 @@ export async function GET(request: NextRequest) {
   const user = await getUserFromHeaders(request);
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   const sp = new URL(request.url).searchParams;
+  let dateRange;
+  try { dateRange = parseOrderDateRange(sp); } catch { return NextResponse.json({ error: "Période de commande invalide" }, { status: 400 }); }
   if (!isWorkflowFilter(sp.get("workflow"))) return NextResponse.json({ error: "Filtre d’avancement invalide" }, { status: 400 });
   let filters, materialFilters;
   try {
@@ -54,6 +57,7 @@ export async function GET(request: NextRequest) {
     if (sp.get("agencyId") && (!/^[1-9]\d*$/.test(sp.get("agencyId")!) || !Number.isSafeInteger(Number(sp.get("agencyId"))) || Number(sp.get("agencyId")) > 2147483647)) throw new Error("Agence invalide");
   } catch (error) { return NextResponse.json({ error: (error as Error).message }, { status: 400 }); }
   const conditions = [materialDemandScope()];
+  const period = orderDateFilterSQL(dateRange); if (period) conditions.push(period);
   const workflow = workflowFilterSQL(sp.get("workflow"), true);
   if (workflow) conditions.push(workflow);
   const scope = agencyScopeForUser(user);

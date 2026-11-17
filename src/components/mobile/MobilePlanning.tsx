@@ -1,13 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
 import { filterPlanningRows, summarizePlanning } from "@/lib/planning-list";
+import { formatCompletionDay } from "@/lib/order-date-filter-client";
 import { apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
 import { PLANNING_STATUSES, planningStatusLabel, todayISO } from "@/lib/production-planning-constants";
 import { canManageMobilePlanning, mobilePlanningQuantity, planningTransitionWarning } from "@/lib/mobile-planning";
 import { Notice, Row, btnGhost, btnPrimary, fieldClass } from "./ui";
 
-type Plan = { updatedAt: string; planDate: string; id: number; itemId: number; orderId: number; orderNumber: string | null; articleName: string; clientName: string | null; plannedQty: number; status: string; reason?: string | null; note?: string | null; driverName?: string; factoryName?: string | null; appliedAt?: string | null; appliedQty?: number; loadedQty?: number; itemQuantity?: number; itemProducedQty?: number; itemDeliveredQty?: number };
+type Plan = { productionCompletedOn?: string | null; expeditionCompletedOn?: string | null; updatedAt: string; planDate: string; id: number; itemId: number; orderId: number; orderNumber: string | null; articleName: string; clientName: string | null; plannedQty: number; status: string; reason?: string | null; note?: string | null; driverName?: string; factoryName?: string | null; appliedAt?: string | null; appliedQty?: number; loadedQty?: number; itemQuantity?: number; itemProducedQty?: number; itemDeliveredQty?: number };
 const EXPEDITION_STATUSES = [{ key: "NON_TRAITE", label: "Non traité" }, { key: "EN_COURS", label: "En cours" }, { key: "LIVRE", label: "Livré" }, { key: "ANNULE", label: "Annulé" }];
 
 function PlanCard({ plan, kind, canManage, onOpen, onReload, onSessionExpired }: { plan: Plan; kind: "production" | "expedition"; canManage: boolean; onOpen: (id: number) => void; onReload: (message?: string) => void; onSessionExpired: () => void }) {
@@ -53,6 +54,7 @@ function PlanCard({ plan, kind, canManage, onOpen, onReload, onSessionExpired }:
     <h2 className="text-sm font-bold break-words">{plan.articleName}</h2>
     <p className="text-sm">{plan.orderNumber} · {plan.clientName}</p>
     <Row label="Date du planning" value={plan.planDate} />
+    <Row label={kind === "production" ? "Production complète enregistrée le" : "Livraison totale enregistrée le"} value={formatCompletionDay(kind === "production" ? plan.productionCompletedOn : plan.expeditionCompletedOn)} />
     <Row label="État" value={kind === "production" ? planningStatusLabel(plan.status) : EXPEDITION_STATUSES.find((s) => s.key === plan.status)?.label || plan.status} />
     <Row label="Quantité planifiée" value={plan.plannedQty} />
     <Row label={kind === "production" ? "Usine" : "Chauffeur"} value={plan.factoryName || plan.driverName} />

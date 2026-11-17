@@ -1,3 +1,5 @@
+import { parseOrderDateRange, orderDateFilterSQL } from "@/lib/order-date-filter";
+import { orderCompletionDateSQL } from "@/lib/completion-dates";
 import { isWorkflowFilter, isArticleWorkflow } from "@/lib/workflow-filters";
 import { workflowFilterSQL } from "@/lib/workflow-filter-sql";
 export const dynamic = "force-dynamic";
@@ -21,6 +23,8 @@ async function auth(r: Request, roles?: string[]) {
 export async function GET(request: NextRequest) {
   const a = await auth(request); if (!a.ok) return NextResponse.json({ error: a.error }, { status: a.status });
   const sp = new URL(request.url).searchParams;
+  let dateRange;
+  try { dateRange = parseOrderDateRange(sp); } catch { return NextResponse.json({ error: "Période de commande invalide" }, { status: 400 }); }
   if (!isWorkflowFilter(sp.get("workflow"))) return NextResponse.json({ error: "Filtre d’avancement invalide" }, { status: 400 });
   const status = sp.get("status"); const agencyId = sp.get("agencyId"); const priority = sp.get("priority");
   const photometricOnly = sp.get("photometric") === "1";
@@ -31,6 +35,7 @@ export async function GET(request: NextRequest) {
   // l'unité de production correspond au nom de l'usine (alimenté par le planning).
   const factory = sp.get("factory");
   const conds = [];
+  const period = orderDateFilterSQL(dateRange); if (period) conds.push(period);
   const workflow = workflowFilterSQL(sp.get("workflow"));
   if (workflow) conds.push(workflow);
   const agencyScope = agencyScopeForUser(a.user);
@@ -64,6 +69,7 @@ export async function GET(request: NextRequest) {
   const where = conds.length > 0 ? and(...conds) : undefined;
 
   const data = await db.select({
+    productionCompletedOn: orderCompletionDateSQL("production"),
     id: orders.id, orderNumber: orders.orderNumber, orderDate: orders.orderDate,
     priority: orders.priority, clientId: orders.clientId, agencyId: orders.agencyId,
     status: orders.status, productionStatus: orders.productionStatus, statusReason: orders.statusReason, affaire: orders.affaire,

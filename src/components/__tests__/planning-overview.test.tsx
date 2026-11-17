@@ -90,3 +90,14 @@ it("une erreur de filtre ne réaffiche pas les résultats du filtre précédent"
   await screen.findByRole("alert");
   expect(screen.queryByText("#ANCIEN")).toBeNull();
 });
+
+it("le bilan distingue la date prévue des dates de fin complètes réellement enregistrées", async () => {
+  vi.mocked(apiFetch).mockResolvedValue({ entries: [{ ...rows[0], productionCompletedOn: "2026-01-12", expeditionCompletedOn: "2026-01-15" }] });
+  render(<PlanningOverview kind="production" />);
+  fireEvent.click(screen.getByRole("button", { name: /Bilan global/ }));
+  await screen.findByText("12/01/2026");
+  expect(screen.getByText("15/01/2026")).toBeTruthy();
+  expect(screen.getByText("2000-01-01")).toBeTruthy();
+  expect(screen.getByRole("columnheader", { name: "Production entièrement finie le" })).toBeTruthy();
+  expect(screen.getByRole("columnheader", { name: "Livraison totale le" })).toBeTruthy();
+});

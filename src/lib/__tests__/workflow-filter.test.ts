@@ -1,3 +1,7 @@
+import { GET as readDelays } from "@/app/api/dashboard/delays/route";
+import { GET as readProductionPlanning } from "@/app/api/production-planning/route";
+import { GET as readExpeditionPlanning } from "@/app/api/expedition-planning/route";
+import { getUserFromHeaders } from "@/lib/auth";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
@@ -7,11 +11,12 @@ import { GET as readExport } from "@/app/api/orders/export/route";
 import { GET as readProduction } from "@/app/api/production/route";
 import { GET as readExpedition } from "@/app/api/expedition/route";
 import { NextRequest } from "next/server";
-import { orders, orderItems, productionPlanEntries, expeditionPlanEntries, clients, agencies, itemTechnicalComponents, driveDocuments, photometricStudies, photometricStudyItems, articleFamilyCatalog, articleFamilyAssignments, materialCategories, matieres } from "@/db/schema";
+import { orders, orderItems, productionPlanEntries, expeditionPlanEntries, productionBatches, expeditionBatches, clients, agencies, itemTechnicalComponents, driveDocuments, photometricStudies, photometricStudyItems, articleFamilyCatalog, articleFamilyAssignments, materialCategories, matieres } from "@/db/schema";
 import { createPlanningDatabase } from "./helpers/planning-db";
 import { workflowFilterSQL } from "../workflow-filter-sql";
 import { WORKFLOW_FILTERS, appendOrderStateFilter, isWorkflowFilter, normalizeOrderStateFilter } from "../workflow-filters";
 const state = vi.hoisted(() => ({ db: undefined as unknown as typeof import("@/db").db }));
+vi.mock("@/lib/production-planning", () => ({ ensurePlanningColors: vi.fn() }));
 vi.mock("@/db", () => ({ get db() { return state.db; } }));
 vi.mock("@/lib/auth", () => ({ getUserFromHeaders: vi.fn(async () => ({ id: 1, role: "planification", username: "manager", fullName: "Responsable" })), logActivity: vi.fn() }));
 let fixture: Awaited<ReturnType<typeof createPlanningDatabase>>;
@@ -20,7 +25,7 @@ beforeAll(async () => {
 }, 30_000);
 afterAll(async () => { await fixture?.client.close(); });
 beforeEach(async () => {
-  await fixture.client.exec("TRUNCATE orders, order_items, production_plan_entries, expedition_plan_entries RESTART IDENTITY");
+  await fixture.client.exec("TRUNCATE orders, order_items, production_plan_entries, expedition_plan_entries, production_batches, expedition_batches RESTART IDENTITY");
   for (let id = 1; id <= 12; id++) {
     await fixture.database.insert(orders).values({ id, orderNumber: `BC-${id}`, clientId: 1, agencyId: id === 1 ? 7 : 8, status: "BON_COMMANDE", productionStatus: id === 6 ? "ANNULEE" : "EN_INSTANCE" });
     await fixture.database.insert(orderItems).values({ id, orderId: id, articleName: `Article ${id}`, quantity: 100,
@@ -215,4 +220,55 @@ it("les anciennes préférences enregistrées ne réactivent pas les filtres obs
   for (const old of ["workflow:production:EN_COURS", "workflow:DELIVERY", "prod:LIVREE", "planning:NONE", null, "workflow:"]) expect(normalizeOrderStateFilter(old)).toBe("");
   expect(normalizeOrderStateFilter("workflow:prod-item:ACTIVE")).toBe("workflow:prod-item:ACTIVE");
   expect(normalizeOrderStateFilter("comm:PREVISION")).toBe("comm:PREVISION");
+});
+
+it("la période est inclusive et identique dans Commandes, regroupements et export", async () => {
+  await fixture.database.update(orders).set({ orderDate: "2025-01-01" });
+  await fixture.database.update(orders).set({ orderDate: "2024-02-01" }).where(eq(orders.id, 2));
+  await fixture.database.update(orders).set({ orderDate: "2024-02-29" }).where(eq(orders.id, 3));
+  const query = "orderFrom=2024-02-01&orderTo=2024-02-29";
+  const payload = await (await readOrders(new NextRequest(`http://test/api/orders?${query}`))).json();
+  expect(payload.orders.map((row: { id: number }) => row.id).sort()).toEqual([2, 3]);
+  const grouped = await (await readGrouped(new NextRequest(`http://test/api/orders/grouped-articles?${query}`))).json();
+  const names = grouped.groups.flatMap((group: { lines: { articleName: string }[] }) => group.lines.map(row => row.articleName));
+  expect(names.sort()).toEqual(["Article 2", "Article 3"]);
+  const response = await readExport(new NextRequest(`http://test/api/orders/export?${query}`));
+  const XLSX = await import("xlsx");
+  const book = XLSX.read(await response.arrayBuffer(), { type: "array" });
+  const articles = XLSX.utils.sheet_to_json<Record<string, unknown>>(book.Sheets[book.SheetNames[0]]).map(row => row.Article).filter(Boolean);
+  expect(articles.sort()).toEqual(["Article 2", "Article 3"]);
+});
+it("refuse les périodes impossibles dans les différentes lectures", async () => {
+  for (const read of [readOrders, readGrouped, readExport]) {
+    expect((await read(new NextRequest("http://test/api/view?orderFrom=2026-02-31"))).status).toBe(400);
+    expect((await read(new NextRequest("http://test/api/view?orderFrom=2026-03-01&orderTo=2026-02-01"))).status).toBe(400);
+  }
+});
+it("les dates de fin réelles sont exposées dans les deux bilans et la commande entière", async () => {
+  await fixture.database.update(orderItems).set({ deliveredQty: 100 }).where(eq(orderItems.id, 1));
+  await fixture.database.insert(productionBatches).values({ itemId: 1, orderId: 1, quantity: 100, cumulativeTotal: 100, producedBy: "Test", productionDate: "2026-01-12", createdAt: "2026-01-12 10:00:00" });
+  await fixture.database.insert(expeditionBatches).values({ itemId: 1, orderId: 1, quantity: 100, cumulativeTotal: 100, deliveredBy: "Test", deliveryDate: "2026-01-15", createdAt: "2026-01-15 10:00:00" });
+  await fixture.database.insert(productionPlanEntries).values({ id: 100, itemId: 1, orderId: 1, articleName: "Article 1", plannedQty: 100, status: "TERMINE", planDate: "2026-01-10" });
+  await fixture.database.insert(expeditionPlanEntries).values({ id: 100, itemId: 1, orderId: 1, articleName: "Article 1", plannedQty: 100, status: "LIVRE", planDate: "2026-01-11", driverName: "Test" });
+  const production = await (await readProductionPlanning(new NextRequest("http://test/api/production-planning?date=all"))).json();
+  const expedition = await (await readExpeditionPlanning(new NextRequest("http://test/api/expedition-planning?date=all"))).json();
+  for (const row of [production.entries.find((row: { itemId: number }) => row.itemId === 1), expedition.plans.find((row: { itemId: number }) => row.itemId === 1)]) {
+    expect(row.productionCompletedOn).toBe("2026-01-12"); expect(row.expeditionCompletedOn).toBe("2026-01-15");
+  }
+  const payload = await (await readOrders(new NextRequest("http://test/api/orders"))).json();
+  expect(payload.orders.find((row: { id: number }) => row.id === 1).productionCompletedOn).toBe("2026-01-12");
+});
+it("le calculateur respecte l’authentification, les droits agence et valide ses seuils", async () => {
+  vi.mocked(getUserFromHeaders).mockResolvedValueOnce(null);
+  expect((await readDelays(new NextRequest("http://test/api/dashboard/delays"))).status).toBe(401);
+  expect((await readDelays(new NextRequest("http://test/api/dashboard/delays?productionDays=-1"))).status).toBe(400);
+  vi.mocked(getUserFromHeaders).mockResolvedValueOnce({ id: 2, username: "agency", fullName: "Agence", role: "acces_agence", darkMode: false, agencyIds: [7] });
+  const response = await readDelays(new NextRequest("http://test/api/dashboard/delays?productionDays=10&expeditionDays=20"));
+  expect(response.status).toBe(200);
+  const report = await response.json();
+  expect(report.total.orders).toBe(1);
+  expect(report.productionTarget).toBe(10);
+  vi.mocked(getUserFromHeaders).mockResolvedValueOnce({ id: 2, username: "agency", fullName: "Agence", role: "acces_agence", darkMode: false, agencyIds: [] });
+  const empty = await (await readDelays(new NextRequest("http://test/api/dashboard/delays"))).json();
+  expect(empty.total.orders).toBe(0);
 });

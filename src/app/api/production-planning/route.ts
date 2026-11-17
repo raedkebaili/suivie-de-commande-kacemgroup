@@ -1,3 +1,4 @@
+import { itemCompletionDateSQL } from "@/lib/completion-dates";
 import { agencyScopeForUser } from "@/lib/agency-scope";
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
@@ -53,6 +54,8 @@ export async function GET(request: NextRequest) {
         factoryId: productionPlanEntries.factoryId,
         factoryName: productionPlanEntries.factoryName,
         // Avancement réel de l'article (source : order_items)
+        productionCompletedOn: itemCompletionDateSQL("production"),
+        expeditionCompletedOn: itemCompletionDateSQL("expedition"),
         itemQuantity: orderItems.quantity,
         itemProducedQty: orderItems.producedQty,
         itemDeliveredQty: orderItems.deliveredQty,

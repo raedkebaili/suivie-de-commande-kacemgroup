@@ -15,7 +15,7 @@ type Result = {
 const control = "w-full min-h-[38px] rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-100";
 const button = "min-h-[38px] px-3 py-1.5 rounded-lg text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50";
 const defaultFilters: Filters = {};
-function MaterialRequirementsSummary({ filters, refreshKey }: { filters: { status: string; agency: string; priority: string }; refreshKey: number }) {
+function MaterialRequirementsSummary({ filters, refreshKey }: { filters: { status: string; agency: string; priority: string; orderFrom?: string; orderTo?: string }; refreshKey: number }) {
   const [data, setData] = useState<Result | null>(null);
   const [local, setLocal] = useState<Filters>(defaultFilters);
   const [open, setOpen] = useState(true), [showFilters, setShowFilters] = useState(false);
@@ -24,6 +24,7 @@ function MaterialRequirementsSummary({ filters, refreshKey }: { filters: { statu
   const query = useMemo(() => {
     const sp = new URLSearchParams();
     appendOrderStateFilter(sp, filters.status);
+    if(filters.orderFrom)sp.set("orderFrom",filters.orderFrom); if(filters.orderTo)sp.set("orderTo",filters.orderTo);
     if (filters.agency) sp.set("agencyId", filters.agency);
     if (filters.priority) sp.set("priority", filters.priority);
     for (const [key, value] of Object.entries(local)) {
@@ -32,7 +33,7 @@ function MaterialRequirementsSummary({ filters, refreshKey }: { filters: { statu
       else if (value) sp.set(key, value);
     }
     return sp.toString();
-  }, [filters.status, filters.agency, filters.priority, local]);
+  }, [filters.orderFrom, filters.orderTo, filters.status, filters.agency, filters.priority, local]);
   const [requestQuery, setRequestQuery] = useState(query);
   useEffect(() => { const timeout = window.setTimeout(() => setRequestQuery(query), 250); return () => window.clearTimeout(timeout); }, [query]);
   useEffect(() => {

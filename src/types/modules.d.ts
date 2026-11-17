@@ -114,6 +114,8 @@ declare module 'recharts' {
   }
 
   interface AxisProps extends CommonProps {
+    domain?: [number, number];
+    unit?: string;
     dataKey?: string;
     type?: 'number' | 'category';
     tick?: object | boolean | ReactNode | FC;

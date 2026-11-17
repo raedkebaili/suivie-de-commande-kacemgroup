@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import DelayStatistics from "@/components/DelayStatistics";
 import { apiFetch } from "@/lib/api";
 import { useColors } from "@/lib/color-context";
 import type { DashboardStats, User } from "@/lib/types";
@@ -55,6 +56,8 @@ export default function DashboardView({ user: _ }: { user: User }) {
       <Kpi label="En Production" value={stats.productionStatusDistribution?.EN_PRODUCTION || 0} icon="⚙️" color="from-yellow-500 to-yellow-600" />
       <Kpi label="Livrées" value={stats.productionStatusDistribution?.LIVREE || 0} icon="✅" color="from-green-500 to-green-600" />
     </div>
+
+    <DelayStatistics />
 
     {/* Quantities summary */}
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

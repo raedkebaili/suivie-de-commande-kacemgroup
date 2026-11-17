@@ -68,7 +68,7 @@ function ArticleGroupingView({
   filters,
   refreshKey,
 }: {
-  filters: { status: string; agency: string; priority: string };
+  filters: { status: string; agency: string; priority: string; orderFrom?: string; orderTo?: string };
   refreshKey: number;
 }) {
   const [groups, setGroups] = useState<ArticleGroup[]>([]);
@@ -135,10 +135,11 @@ function ArticleGroupingView({
   const query = useMemo(() => {
     const p = new URLSearchParams();
     appendOrderStateFilter(p, filters.status);
+    if(filters.orderFrom)p.set("orderFrom",filters.orderFrom); if(filters.orderTo)p.set("orderTo",filters.orderTo);
     if (filters.agency) p.set("agencyId", filters.agency);
     if (filters.priority) p.set("priority", filters.priority);
     return p.toString();
-  }, [filters.status, filters.agency, filters.priority]);
+  }, [filters.orderFrom, filters.orderTo, filters.status, filters.agency, filters.priority]);
 
   const load = useCallback(async () => {
     try {
@@ -319,5 +320,6 @@ export default memo(ArticleGroupingView, (previous, next) =>
   previous.refreshKey === next.refreshKey &&
   previous.filters.status === next.filters.status &&
   previous.filters.agency === next.filters.agency &&
-  previous.filters.priority === next.filters.priority,
+  previous.filters.priority === next.filters.priority &&
+  previous.filters.orderFrom === next.filters.orderFrom && previous.filters.orderTo === next.filters.orderTo,
 );

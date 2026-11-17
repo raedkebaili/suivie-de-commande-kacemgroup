@@ -1,3 +1,4 @@
+import { itemCompletionDateSQL } from "@/lib/completion-dates";
 import { filterPlanningRows } from "@/lib/planning-list";
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
@@ -58,6 +59,8 @@ export async function GET(request: NextRequest) {
     createdByName: expeditionPlanEntries.createdByName,
     updatedByName: expeditionPlanEntries.updatedByName,
     updatedAt: expeditionPlanEntries.updatedAt,
+    productionCompletedOn: itemCompletionDateSQL("production"),
+    expeditionCompletedOn: itemCompletionDateSQL("expedition"),
     itemQuantity: orderItems.quantity,
     itemDeliveredQty: orderItems.deliveredQty,
     itemProducedQty: orderItems.producedQty,
