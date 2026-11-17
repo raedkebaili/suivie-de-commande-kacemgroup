@@ -52,7 +52,7 @@ export default function Sidebar({ user, activeTab, tabs, collapsed, onTabChange,
           <button key={tab.key} onClick={() => onTabChange(tab.key)}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-200 ${activeTab === tab.key ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25" : "text-gray-300 hover:bg-gray-800 hover:text-white"} ${collapsed ? "justify-center px-2" : ""}`}
             title={collapsed ? tab.label : undefined}>
-            <span className="shrink-0">{tabIcons[tab.key] ?? tabIcons.dashboard}</span>
+            <span className="shrink-0">{tabIcons[tab.key]}</span>
             {!collapsed && <span className="truncate">{tab.label}</span>}
           </button>
         ))}

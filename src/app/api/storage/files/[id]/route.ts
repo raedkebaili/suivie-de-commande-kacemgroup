@@ -1,4 +1,3 @@
-import { withDpmStorageMutation, DpmProtectedFile } from "@/lib/dpm-proofs";
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromHeaders, logActivity } from "@/lib/auth";
@@ -51,14 +50,13 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: "Aucune modification demandée" }, { status: 400 });
     }
 
-    const updated = await withDpmStorageMutation(id, async fileId => (await drive.files.get({fileId,fields:"parents"})).data.parents ?? [], () => drive.files.update({
+    const updated = await drive.files.update({
       fileId: id, requestBody, addParents, removeParents, fields: "id,name,parents",
-    }));
+    });
 
     await logActivity(user.id, user.username, body.parentId ? "STORAGE_MOVE" : "STORAGE_RENAME", action);
     return NextResponse.json({ ok: true, file: { id: updated.data.id, name: updated.data.name } });
   } catch (error) {
-    if (error instanceof DpmProtectedFile) return NextResponse.json({error:error.message},{status:409});
     const { message, status } = friendlyDriveError(error);
     console.error("Modification Google Drive:", error);
     return NextResponse.json({ error: message }, { status });
@@ -84,11 +82,10 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       return NextResponse.json({ error: "Élément hors du stockage applicatif" }, { status: 404 });
     }
     const meta = await drive.files.get({ fileId: id, fields: "id,name" });
-    await withDpmStorageMutation(id, async fileId => (await drive.files.get({fileId,fields:"parents"})).data.parents ?? [], () => drive.files.delete({ fileId: id }));
+    await drive.files.delete({ fileId: id });
     await logActivity(user.id, user.username, "STORAGE_DELETE", `Supprimé: ${meta.data.name}`);
     return NextResponse.json({ ok: true });
   } catch (error) {
-    if (error instanceof DpmProtectedFile) return NextResponse.json({error:error.message},{status:409});
     const { message, status } = friendlyDriveError(error);
     console.error("Suppression Google Drive:", error);
     return NextResponse.json({ error: message }, { status });

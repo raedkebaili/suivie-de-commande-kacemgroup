@@ -1,4 +1,3 @@
-import { canReadDpmProofFile, hasDpmProofs } from "@/lib/dpm-proofs";
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromHeaders } from "@/lib/auth";
@@ -31,7 +30,7 @@ let scanCache: { rootId: string; at: number; result: ScanResult } | null = null;
 
 type DriveFileRow = { id?: string | null; name?: string | null; mimeType?: string | null; size?: string | null; modifiedTime?: string | null };
 
-async function scanTree(drive: Awaited<ReturnType<typeof getDriveClient>>["drive"], rootId: string, userId: number): Promise<ScanResult> {
+async function scanTree(drive: Awaited<ReturnType<typeof getDriveClient>>["drive"], rootId: string): Promise<ScanResult> {
   let fileCount = 0, folderCount = 0, managedSize = 0, requests = 0, partial = false;
   let lastFile: { name: string; modifiedTime: string } | null = null;
   let frontier: string[] = [rootId];
@@ -64,7 +63,6 @@ async function scanTree(drive: Awaited<ReturnType<typeof getDriveClient>>["drive
         for (const f of children) {
           if (!f.id) continue;
           if (f.mimeType === FOLDER_MIME) { folderCount++; next.push(f.id); continue; }
-          if (!await canReadDpmProofFile(f.id,userId)) continue;
           fileCount++;
           if (f.size) managedSize += Number(f.size);
           if (f.modifiedTime && (!lastFile || f.modifiedTime > lastFile.modifiedTime)) {
@@ -93,10 +91,9 @@ export async function GET(request: NextRequest) {
     const aboutPromise = drive.about.get({ fields: "user(emailAddress),storageQuota" });
     aboutPromise.catch(() => { /* erreur relancée plus bas, au moment de l'attente */ });
     const now = Date.now();
-    const proofScoped = await hasDpmProofs();
-    const cacheValid = !proofScoped && !refresh && scanCache && scanCache.rootId === rootId && now - scanCache.at < SCAN_CACHE_MS;
-    const scan = cacheValid ? scanCache!.result : await scanTree(drive, rootId, user.id);
-    if (!cacheValid && !proofScoped) scanCache = { rootId, at: now, result: scan };
+    const cacheValid = !refresh && scanCache && scanCache.rootId === rootId && now - scanCache.at < SCAN_CACHE_MS;
+    const scan = cacheValid ? scanCache!.result : await scanTree(drive, rootId);
+    if (!cacheValid) scanCache = { rootId, at: now, result: scan };
 
     const about = await aboutPromise;
     const q = about.data.storageQuota;

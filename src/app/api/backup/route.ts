@@ -13,7 +13,6 @@ import {
 import { getUserFromHeaders, logActivity, hashPassword } from "@/lib/auth";
 import { collectBackupData } from "@/lib/backup-data";
 import crypto from "crypto";
-import { assertDpmRestoreSafe, restoreDpmBackup, DpmRestoreConflict } from "@/lib/dpm-backup";
 
 export const dynamic = "force-dynamic";
 
@@ -183,12 +182,10 @@ export async function POST(request: NextRequest) {
     }
   };
 
-  let dpmRestored = 0;
   try {
     await db.transaction(async (tx) => {
       // Même verrou que les sauvegardes automatiques : pas de collecte pendant la restauration.
       await tx.execute(sql`SELECT pg_advisory_xact_lock(746201, 1)`);
-      await assertDpmRestoreSafe(tx, data);
       // Delete in reverse FK-dependency order
       if (restoreDocuments) await tx.delete(driveDocuments);
       if (restorePlanning) await tx.delete(productionPlanEntries);
@@ -275,8 +272,6 @@ export async function POST(request: NextRequest) {
         await insertChunked(tx, archiveCellModifications, archiveCellModificationsRows);
       }
 
-      dpmRestored = await restoreDpmBackup(tx, data);
-
       // Resync auto-increment sequences with the restored max ids
       const tableNames = [
         "users", "agencies", ...(restoreAgencyAccess ? ["user_agency_access"] : []), "clients", "orders", "order_items", "production_batches",
@@ -296,17 +291,16 @@ export async function POST(request: NextRequest) {
       ];
       for (const t of tableNames) {
         await tx.execute(
-          sql.raw(`SELECT setval(pg_get_serial_sequence('${t}', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM ${t}), 1), COALESCE((SELECT last_value FROM pg_sequences WHERE schemaname='public' AND sequencename='${t}_id_seq'),1)), true)`)
+          sql.raw(`SELECT setval(pg_get_serial_sequence('${t}', 'id'), COALESCE((SELECT MAX(id) FROM ${t}), 1), true)`)
         );
       }
     });
   } catch (err) {
-    if (err instanceof DpmRestoreConflict) return NextResponse.json({ error: err.message }, { status: 409 });
     console.error("Backup restore error:", err);
     return NextResponse.json({ error: "Erreur lors de la restauration: " + String(err) }, { status: 500 });
   }
 
-  const totalRestored = dpmRestored + usersRows.length + agenciesRows.length + userAgencyAccessRows.length + clientsRows.length + ordersRows.length +
+  const totalRestored = usersRows.length + agenciesRows.length + userAgencyAccessRows.length + clientsRows.length + ordersRows.length +
     orderItemsRows.length + productionBatchesRows.length + expeditionBatchesRows.length + expeditionPlanEntriesRows.length +
     productionUnitLibRows.length + articleLibraryRows.length + techLibraryRows.length +
     materialCategoriesRows.length + matieresRows.length + itemTechnicalComponentsRows.length +
